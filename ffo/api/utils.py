@@ -288,6 +288,8 @@ def _child_eval_expr(
     from backtest.qlib.dataloader import compute_factor_data
 
     # Per-process init (safer across OS / forks)
+    import logging
+    logging.getLogger("qlib.Initialization").setLevel(logging.WARNING)
     qlib.init(provider_uri=DEFAULT_PROVIDER_URI, region=DEFAULT_REGION)
 
     factor_list = [{"name": "api_factor", "expression": expr}]
@@ -353,6 +355,8 @@ def _child_check_expr(
     import qlib
     from qlib.data.dataset.loader import QlibDataLoader
 
+    import logging
+    logging.getLogger("qlib.Initialization").setLevel(logging.WARNING)
     qlib.init(provider_uri=DEFAULT_PROVIDER_URI, region=DEFAULT_REGION)
 
     cfg = {"feature": ([expr], ["test_expr"])}
@@ -406,6 +410,7 @@ def _child_batch_eval(
     start: str,
     end: str,
     label_spec: str,
+    n_jobs: int = 1,
 ) -> Dict[str, Any]:
     """
     Efficient batch IC/RankIC:
@@ -414,7 +419,16 @@ def _child_batch_eval(
     """
     import qlib
     from qlib.data.dataset.loader import QlibDataLoader
+    import os
 
+    # Configure parallel loading
+    if n_jobs > 1:
+        os.environ['QLIB_ENABLE_PARALLEL'] = str(n_jobs)
+    else:
+        os.environ['QLIB_ENABLE_PARALLEL'] = '0'
+
+    import logging
+    logging.getLogger("qlib.Initialization").setLevel(logging.WARNING)
     qlib.init(provider_uri=DEFAULT_PROVIDER_URI, region=DEFAULT_REGION)
 
     names = [f["name"] for f in factors]
@@ -527,7 +541,8 @@ def run_batch_with_timeout(
     end: str,
     label_spec: str,
     timeout: int,
+    n_jobs: int = 1,
 ) -> SubprocessResult:
     return _spawn_and_run(
-        _child_batch_eval, (factors, instruments, start, end, label_spec), timeout
+        _child_batch_eval, (factors, instruments, start, end, label_spec, n_jobs), timeout
     )

@@ -324,6 +324,7 @@ def batch_eval():
     ).upper()  # instruments name for loader
     label = data.get("label", DEFAULTS["label"])
     timeout = int(data.get("timeout", DEFAULTS["timeout_batch"]))
+    n_jobs = int(data.get("n_jobs", 1))
 
     # QlibDataLoader expects a label expression. For common 'close_return', we use next day's return.
     # Adjust here if your setup defines labels differently.
@@ -331,7 +332,7 @@ def batch_eval():
         label, "Ref($close, -1) / $close - 1"
     )
 
-    res = run_batch_with_timeout(factors, market, start, end, label_spec, timeout)
+    res = run_batch_with_timeout(factors, market, start, end, label_spec, timeout, n_jobs)
     status = 200 if res.ok else 500
     if res.ok:
         return jsonify(res.payload), status
@@ -376,6 +377,7 @@ def train_factor_combination():
         end_date = data.get("end_date", "2020-12-31")
         market = data.get("market", "csi300")
         method_config = data.get("method_config", {})
+        n_jobs = int(data.get("n_jobs", 1))
 
         if not factor_expressions:
             return jsonify({"success": False, "error": "Missing factor_expressions"}), 400
@@ -391,6 +393,7 @@ def train_factor_combination():
                 start_date=start_date,
                 end_date=end_date,
                 instruments=market,
+                n_jobs=n_jobs,
                 **method_config
             )
         else:  # ic_optimization
@@ -400,6 +403,7 @@ def train_factor_combination():
                 start_date=start_date,
                 end_date=end_date,
                 instruments=market,
+                n_jobs=n_jobs,
                 **method_config
             )
 

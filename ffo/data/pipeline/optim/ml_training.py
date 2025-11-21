@@ -22,6 +22,7 @@ def train_lasso_factor_combination(
     alpha: float = 0.01,
     rolling_window: int = 60,
     max_iter: int = 1000,
+    n_jobs: int = 1,
     **kwargs
 ) -> Dict:
     """
@@ -36,6 +37,7 @@ def train_lasso_factor_combination(
         alpha: LASSO regularization parameter
         rolling_window: Rolling window size for training
         max_iter: Maximum iterations
+        n_jobs: Number of parallel jobs for data loading (default: 1)
         
     Returns:
         Dict with weights and metrics
@@ -47,6 +49,7 @@ def train_lasso_factor_combination(
     try:
         from datetime import datetime, timedelta
         import time
+        import os
         
         # Use market parameter if instruments not provided
         if market is not None:
@@ -76,8 +79,13 @@ def train_lasso_factor_combination(
         
         # Load data
         load_start = time.time()
-        import os
-        os.environ['QLIB_ENABLE_PARALLEL'] = '0'  # Disable parallelization
+        
+        # Configure parallel loading
+        if n_jobs > 1:
+            os.environ['QLIB_ENABLE_PARALLEL'] = str(n_jobs)
+            print(f"[LASSO Fixed] Parallel loading enabled with {n_jobs} jobs")
+        else:
+            os.environ['QLIB_ENABLE_PARALLEL'] = '0'
         
         df = data_loader.load(
             instruments=instruments,
@@ -197,6 +205,7 @@ def train_lasso_on_period(
     instruments: str = "csi300",
     alpha: float = 0.01,
     max_iter: int = 1000,
+    n_jobs: int = 1,
     **kwargs
 ) -> Dict:
     """
@@ -210,6 +219,7 @@ def train_lasso_on_period(
         instruments: Market universe
         alpha: LASSO regularization
         max_iter: Max iterations
+        n_jobs: Number of parallel jobs for data loading (default: 1)
         
     Returns:
         Dict with weights and training metrics
@@ -218,6 +228,7 @@ def train_lasso_on_period(
     
     try:
         import time
+        import os
         from sklearn.preprocessing import StandardScaler
         from sklearn.linear_model import Lasso, Ridge
         from sklearn.metrics import mean_squared_error, r2_score
@@ -238,8 +249,11 @@ def train_lasso_on_period(
         data_loader = QlibDataLoader(config=data_loader_config)
         
         # Load data
-        import os
-        os.environ['QLIB_ENABLE_PARALLEL'] = '0'
+        # Configure parallel loading
+        if n_jobs > 1:
+            os.environ['QLIB_ENABLE_PARALLEL'] = str(n_jobs)
+        else:
+            os.environ['QLIB_ENABLE_PARALLEL'] = '0'
         
         df = data_loader.load(
             instruments=instruments,

@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path BEFORE local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -223,8 +224,22 @@ def evaluate_factor():
                 rank_icir=metrics.get("rank_icir"),
             )
             return jsonify({"success": True, "data": result})
+        else:
+            # Return the specific error from the API
+            error_msg = result.get("error", "Unknown API error")
+            if "message" in result:
+                error_msg += f" ({result['message']})"
+            return jsonify({"success": False, "message": f"Evaluation failed: {error_msg}"})
+            
     except Exception as e:
-        pass
+        import traceback
+        traceback.print_exc()
+        return jsonify(
+            {
+                "success": False,
+                "message": f"Evaluation failed (Internal Error): {str(e)}. Please check the API server is running.",
+            }
+        )
 
     return jsonify(
         {
@@ -232,6 +247,48 @@ def evaluate_factor():
             "message": "Evaluation failed. Please check the API server is running.",
         }
     )
+
+
+@app.route("/api/batch_evaluate_factor", methods=["POST"])
+def batch_evaluate_factor():
+    """
+    Batch Factor Backtest with Multi-threading support.
+    """
+    data = request.json
+    expressions = data.get("expressions", [])
+    market = data.get("market", "csi300")
+    start_date = data.get("start_date", "2023-01-01")
+    end_date = data.get("end_date", "2024-01-01")
+    max_workers = data.get("max_workers", 4)  # Default to 4 threads
+    use_cache = data.get("use_cache", True)
+
+    if not expressions:
+        return jsonify({"success": False, "message": "No expressions provided"})
+
+    results = {}
+
+    def _eval_single(expr):
+        try:
+            res = api_client.evaluate_factor(
+                expr=expr, market=market, start_date=start_date, end_date=end_date, use_cache=use_cache
+            )
+            return expr, res
+        except Exception as e:
+            return expr, {"success": False, "message": str(e)}
+
+    # Execute in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_expr = {executor.submit(_eval_single, expr): expr for expr in expressions}
+
+        for future in as_completed(future_to_expr):
+            expr = future_to_expr[future]
+            try:
+                expr_key, res = future.result()
+                results[expr_key] = res
+            except Exception as e:
+                results[expr] = {"success": False, "message": str(e)}
+
+    return jsonify({"success": True, "results": results, "total": len(expressions)})
 
 
 @app.route("/api/get_cached_expressions", methods=["GET"])
@@ -388,34 +445,36 @@ def compare_factors():
 
     # Use API client to compare factors
     try:
-        response = api_client.api_request(
-            "/compare_factors",
-            {
-                "factors": expressions,
-                "market": market,
-                "start": start_date,
-                "end": end_date,
-            },
+        # Construct factors list for batch eval
+        factors_list = [{"name": f"factor_{i}", "expression": expr} for i, expr in enumerate(expressions)]
+        
+        # Use batch eval
+        results = api_client.batch_evaluate_factors(
+            factors=factors_list,
+            market=market,
+            start_date=start_date,
+            end_date=end_date
         )
-
-        # Check if response is None (API request failed)
-        if response is None:
-            return jsonify(
-                {
-                    "success": False,
-                    "message": "API request failed. Please check if the API server is running.",
-                }
-            )
-
-        if response.get("success"):
-            return jsonify(
-                {"success": True, "comparison": response.get("comparison", [])}
-            )
+        
+        # Process results into comparison format
+        comparison = []
+        if results.get("success"):
+            for i, res in enumerate(results.get("results", [])):
+                metrics = res.get("metrics", {})
+                comparison.append({
+                    "expression": expressions[i],
+                    "ic": metrics.get("ic", 0),
+                    "rank_ic": metrics.get("rank_ic", 0),
+                    "icir": metrics.get("icir", 0),
+                    "rank_icir": metrics.get("rank_icir", 0),
+                    "turnover": metrics.get("turnover", 0)
+                })
+            return jsonify({"success": True, "comparison": comparison})
         else:
             return jsonify(
                 {
                     "success": False,
-                    "message": response.get("message", "Comparison failed"),
+                    "message": results.get("error", "Batch evaluation failed"),
                 }
             )
     except Exception as e:
@@ -448,32 +507,41 @@ def export_data():
     export_format = data.get("format", "csv")
 
     try:
-        response = api_client.api_request(
-            "/export_data",
-            {
-                "expr": expr,
-                "market": market,
-                "start": start_date,
-                "end": end_date,
-                "format": export_format,
-            },
+        # Get data via evaluate_factor
+        result = api_client.evaluate_factor(
+            expr=expr,
+            market=market,
+            start_date=start_date,
+            end_date=end_date
         )
 
-        # Check if response is None (API request failed)
-        if response is None:
+        if not result.get("success"):
             return jsonify(
-                {
-                    "success": False,
-                    "message": "API request failed. Please check if the API server is running.",
-                }
+                {"success": False, "message": result.get("error", "Export failed")}
             )
-
-        if response.get("success"):
-            return jsonify(response)
+            
+        # Format data
+        daily_metrics = result.get("daily_metrics", [])
+        if not daily_metrics:
+             return jsonify({"success": False, "message": "No data to export"})
+             
+        df = pd.DataFrame(daily_metrics)
+        
+        if export_format == "csv":
+            return jsonify({
+                "success": True, 
+                "data": df.to_csv(index=False),
+                "format": "csv",
+                "filename": "factor_export.csv"
+            })
         else:
-            return jsonify(
-                {"success": False, "message": response.get("message", "Export failed")}
-            )
+            return jsonify({
+                "success": True, 
+                "data": df.to_dict(orient="records"),
+                "format": "json",
+                "filename": "factor_export.json"
+            })
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
@@ -1731,4 +1799,3 @@ if __name__ == "__main__":
         app.factor_cache = {}
     
     app.run(debug=True, port=5002)
-

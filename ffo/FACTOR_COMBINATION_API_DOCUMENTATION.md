@@ -522,3 +522,99 @@ Run all three methods and compare results:
   "methods": ["baseline", "lasso", "ic_optimization"]
 }
 ```
+
+# Factor Evaluation & Backtesting API
+
+This API provides endpoints for evaluating single factors and batch factors, calculating IC/RankIC, and running portfolio backtests.
+
+## Endpoints
+
+### 1. Single Factor Evaluation & Backtest (`/eval`)
+
+**Purpose**: Evaluate a single factor expression, calculating IC, RankIC, and performing a portfolio backtest.
+
+**Method**: `GET` or `POST`
+
+**Parameters (GET)**:
+- `expression`: The factor expression (e.g., `Mean($close, 20)`).
+- `market`: Market dataset (e.g., `csi300`, `csi500`). Default: `csi300`.
+- `start`: Start date (YYYY-MM-DD). Default: `2023-01-01`.
+- `end`: End date (YYYY-MM-DD). Default: `2024-01-01`.
+- `label`: Label for evaluation (e.g., `close_return`). Default: `close_return`.
+- `use_cache`: `true` or `false`. Default: `true`.
+- `topk`: Number of stocks in top quantile for backtest. Default: `50`.
+- `n_drop`: Number of stocks to drop from top. Default: `5`.
+
+**Usage Example**:
+```
+GET /eval?expression=Mean($close,20)&market=csi300&start=2023-01-01&end=2023-12-31
+```
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "expression": "Mean($close, 20)",
+  "market": "csi300",
+  "metrics": {
+    "ic": 0.05,
+    "rank_ic": 0.06,
+    "icir": 0.5,
+    "rank_icir": 0.6
+  },
+  "daily_metrics": [
+    {"date": "2023-01-04", "ic": 0.1, "rank_ic": 0.12},
+    ...
+  ],
+  "portfolio_metrics": {
+    "excess_return_without_cost": {
+      "annualized_return": 15.5,
+      "information_ratio": 1.2,
+      "max_drawdown": -10.5
+    }
+  }
+}
+```
+
+### 2. Batch Factor Evaluation (`/batch_eval`)
+
+**Purpose**: Evaluate multiple factors efficiently in a single request.
+
+**Method**: `POST`
+
+**Request Format**:
+```json
+{
+  "factors": [
+    {"name": "factor1", "expression": "Mean($close, 20)"},
+    {"name": "factor2", "expression": "Std($close, 20)"}
+  ],
+  "market": "csi300",
+  "start": "2023-01-01",
+  "end": "2023-12-31",
+  "timeout": 300
+}
+```
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "results": [
+    {
+      "name": "factor1",
+      "metrics": {"ic": 0.05, "rank_ic": 0.06, ...}
+    },
+    {
+      "name": "factor2",
+      "metrics": {"ic": 0.03, "rank_ic": 0.04, ...}
+    }
+  ]
+}
+```
+
+**Note on Multi-threading**:
+The server supports multi-threading for data loading and calculation. You can control the number of parallel jobs using the `n_jobs` parameter in the request body for both `/batch_eval` and `/factor_combination/train`.
+- `n_jobs=1`: Single-threaded (default).
+- `n_jobs>1`: Use N parallel processes/threads for data loading and calculation.
+- `n_jobs=-1`: Use all available CPU cores.

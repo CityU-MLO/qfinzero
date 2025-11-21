@@ -11,7 +11,8 @@ def compute_factor_ic(
     end_date: str,
     instruments: str = "csi300",
     data_path: str = "~/.qlib/qlib_data/cn_data",
-    region: str = "cn"
+    region: str = "cn",
+    n_jobs: int = 1
 ) -> pd.DataFrame:
     """
     Compute Information Coefficient (IC) for each factor over the period.
@@ -25,10 +26,18 @@ def compute_factor_ic(
         instruments: Instrument universe
         data_path: Qlib data path
         region: Market region
+        n_jobs: Number of parallel jobs for data loading (default: 1)
 
     Returns:
         DataFrame with daily IC for each factor
     """
+    import os
+    
+    # Configure parallel loading
+    if n_jobs > 1:
+        os.environ['QLIB_ENABLE_PARALLEL'] = str(n_jobs)
+    else:
+        os.environ['QLIB_ENABLE_PARALLEL'] = '0'
 
     # Initialize Qlib
     qlib.init(provider_uri=data_path, region=region)
@@ -277,7 +286,9 @@ def optimize_factor_weights_ic(
     top_k: int = 5,
     instruments: str = "csi300",
     data_path: str = "~/.qlib/qlib_data/cn_data",
-    region: str = "cn"
+    region: str = "cn",
+    n_jobs: int = 1,
+    **kwargs
 ) -> Dict:
     """
     Simple IC-based factor combination optimization.
@@ -291,6 +302,7 @@ def optimize_factor_weights_ic(
         instruments: Instrument universe
         data_path: Qlib data path
         region: Market region
+        n_jobs: Number of parallel jobs for data loading (default: 1)
 
     Returns:
         Dict containing weights, IC data, and performance metrics
@@ -303,7 +315,8 @@ def optimize_factor_weights_ic(
             end_date=end_date,
             instruments=instruments,
             data_path=data_path,
-            region=region
+            region=region,
+            n_jobs=n_jobs
         )
 
         if ic_df.empty:
