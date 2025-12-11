@@ -5,12 +5,14 @@ OQL parser:
 - Operators: >, <, =, >=, <=, !=, ~ (approx)
 - Keeps column name case as-is for better downstream matching
 """
+
 import re
 from typing import List
 from parsing.ast import QueryAST, Condition, OrderSpec
 
 _WHITESPACE = re.compile(r"\s+")
 _AND_SPLIT = re.compile(r"\s+AND\s+", re.IGNORECASE)
+
 
 def _strip_comments(q: str) -> str:
     """Remove inline and full-line `--` comments and normalize spaces."""
@@ -20,6 +22,7 @@ def _strip_comments(q: str) -> str:
             line = line.split("--", 1)[0]
         lines.append(line)
     return " ".join(lines)
+
 
 class OQLParser:
     def parse(self, query: str) -> QueryAST:
@@ -41,7 +44,9 @@ class OQLParser:
         )
         m = pattern.match(q)
         if not m:
-            raise ValueError("Invalid OQL Syntax. Expected: SELECT ... FROM ... [WHERE ...] [HAVING ...] [ORDER BY ...] [LIMIT n]")
+            raise ValueError(
+                "Invalid OQL Syntax. Expected: SELECT ... FROM ... [WHERE ...] [HAVING ...] [ORDER BY ...] [LIMIT n]"
+            )
 
         strategy = m.group("strategy").upper()
         ticker = m.group("ticker").upper()
@@ -51,28 +56,44 @@ class OQLParser:
         limit_str = (m.group("limit") or "").strip()
 
         where = self._parse_conditions(where_str, allow_role=True) if where_str else []
-        having = self._parse_conditions(having_str, allow_role=False) if having_str else []
+        having = (
+            self._parse_conditions(having_str, allow_role=False) if having_str else []
+        )
         order = self._parse_order(order_str) if order_str else []
         limit = int(limit_str) if limit_str else 10
 
-        return QueryAST(strategy=strategy, ticker=ticker, where=where, having=having, order=order, limit=limit)
+        return QueryAST(
+            strategy=strategy,
+            ticker=ticker,
+            where=where,
+            having=having,
+            order=order,
+            limit=limit,
+        )
 
     def _parse_conditions(self, text: str, allow_role: bool) -> List[Condition]:
-        """Parse conditions joined by AND. Role.Field or Field forms are supported."""
+        """Parse conditions joined by AND.
+
+        - WHERE: supports Role.Field OP Value (allow_role=True)
+        - HAVING: supports Field OP Value and Field BETWEEN v1 AND v2 (allow_role=False)
+        """
         if not text:
             return []
+
         parts = _AND_SPLIT.split(text)
         conds: List[Condition] = []
 
         # Role.Field OP Value
+        # role can be multi-letter: L, S, C, P, F, B, SC, LC, SP, LP, L1, L2, ...
         role_pat = re.compile(
-            r"""^(?P<role>[A-Za-z])\.(?P<field>[A-Za-z_][A-Za-z0-9_]*)
+            r"""^(?P<role>[A-Za-z][A-Za-z0-9_]*)
+                \.(?P<field>[A-Za-z_][A-Za-z0-9_]*)
                 \s*(?P<op>>=|<=|!=|=|>|<|~)\s*
                 (?P<val>[-+]?\d*\.?\d+|[A-Za-z]+)$""",
             re.VERBOSE,
         )
 
-        # Field OP Value (no role)
+        # Field OP Value (no role), numeric value
         no_role_pat = re.compile(
             r"""^(?P<field>[A-Za-z_][A-Za-z0-9_]*)
                 \s*(?P<op>>=|<=|!=|=|>|<|~)\s*
@@ -80,10 +101,22 @@ class OQLParser:
             re.VERBOSE,
         )
 
+        # HAVING: Field BETWEEN v1 AND v2 (numeric)
+        between_pat = re.compile(
+            r"""^(?P<field>[A-Za-z_][A-Za-z0-9_]*)
+                \s+BETWEEN\s+
+                (?P<val1>[-+]?\d*\.?\d+)
+                \s+AND\s+
+                (?P<val2>[-+]?\d*\.?\d+)$""",
+            re.VERBOSE | re.IGNORECASE,
+        )
+
         for p in parts:
             s = p.strip()
             if not s:
                 continue
+
+            # WHERE with role: Role.Field OP Value
             if allow_role:
                 m = role_pat.match(s)
                 if m:
@@ -96,16 +129,40 @@ class OQLParser:
                         )
                     )
                     continue
+
+            # HAVING: Field BETWEEN v1 AND v2
+            if not allow_role:
+                bm = between_pat.match(s)
+                if bm:
+                    conds.append(
+                        Condition(
+                            role=None,
+                            field=bm.group("field"),
+                            op="BETWEEN",
+                            val=bm.group("val1"),
+                            val2=bm.group("val2"),
+                        )
+                    )
+                    continue
+
+            # Field OP Value (no role, numeric value only)
             m = no_role_pat.match(s)
             if m:
                 conds.append(
                     Condition(
                         role=None,
-                        field=m.group("field"),
-                        op=m.group("op"),
-                        val=m.group("val"),
+                            field=m.group("field"),
+                            op=m.group("op"),
+                            val=m.group("val"),
                     )
                 )
+                continue
+
+            # If we reach here, the condition didn't match any pattern.
+            # For now we silently ignore invalid fragments.
+            # You could raise here if you want strict parsing.
+            # raise ValueError(f"Invalid condition syntax: {s}")
+
         return conds
 
     def _parse_order(self, text: str) -> List[OrderSpec]:

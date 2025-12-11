@@ -4,20 +4,25 @@ AST (Abstract Syntax Tree) structures for OQL.
 - Condition : field comparison with optional role (L/S/F/B/C/P)
 - QueryAST  : overall parsed structure
 """
+
 from dataclasses import dataclass, field
 from typing import List, Optional
+
 
 @dataclass
 class OrderSpec:
     col: str
     direction: str = "DESC"  # ASC|DESC
 
+
 @dataclass
 class Condition:
     field: str
     op: str
     val: str
-    role: Optional[str] = None  # L/S/F/B/C/P or None
+    role: Optional[str] = None  # L/S/F/B/C/P or multi-letter roles (SC/LC/SP/LP/L1/L2)
+    val2: Optional[str] = None  # Used for BETWEEN high bound, else None
+
 
 @dataclass
 class QueryAST:

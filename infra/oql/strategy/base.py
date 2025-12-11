@@ -3,10 +3,12 @@ Base classes and helpers for strategies.
 - Strategy: abstract base with build()
 - calc_net_greeks: utility to compute net_{greek} columns over legs
 """
+
 from abc import ABC, abstractmethod
 import pandas as pd
 
 GREEKS = ["delta", "gamma", "theta", "vega", "iv", "rho"]  # include rho if present
+
 
 class Strategy(ABC):
     @abstractmethod

@@ -3,9 +3,11 @@ Sorting helpers for ORDER BY with multiple keys.
 - Column names are matched case-insensitively.
 - Unknown columns are ignored.
 """
+
 from typing import List
 import pandas as pd
 from parsing.ast import OrderSpec
+
 
 def sort_df(df: pd.DataFrame, order: List[OrderSpec]) -> pd.DataFrame:
     if df.empty or not order:
