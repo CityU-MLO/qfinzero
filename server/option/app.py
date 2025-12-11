@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from concurrent.futures import ThreadPoolExecutor
 import os
 
 import pandas as pd
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from concurrent.futures import ThreadPoolExecutor
+
 from config import OPTIONS_H5_PATH, PRICES_H5_PATH, RATES_CSV_PATH
 from utils import respond_error, parse_date_like, to_datestr, _strip_prefix
 from greeks_utils import (
@@ -377,11 +378,11 @@ def query_stock_history():
 
     return jsonify(out)
 
-
 @app.route("/query/option_history", methods=["GET"])
 def query_option_history():
     """
-    Query OHLC history for a single option contract over a date range using Multi-Threading.
+    Query OHLC history for a single option contract.
+    OPTIMIZED: Opens HDF5 store ONCE and loops through keys.
     """
     ticker = request.args.get("ticker")
     start_date_raw = request.args.get("start_date")
@@ -398,67 +399,72 @@ def query_option_history():
         meta = parse_option_ticker(ticker)
         s_dt = parse_date_like(start_date_raw)
         e_dt = parse_date_like(end_date_raw)
-    except ValueError as e:
+        
+        # Optimize: Filter against valid trading days if possible
+        # valid_days = set(get_trading_days()) # Uncomment if you want to skip checking invalid keys
+        all_dates = pd.date_range(start=s_dt, end=e_dt, freq='D')
+    except Exception as e:
         return respond_error(f"Input error: {str(e)}")
 
-    try:
-        all_dates = pd.date_range(start=s_dt, end=e_dt, freq='D')
-    except Exception:
-        return respond_error("Invalid date range")
-
-    # Pre-calculate candidates to avoid doing it inside every thread
+    # Prepare candidates
     cand = {ticker, _strip_prefix(ticker, "O:"), f"O:{_strip_prefix(ticker, 'O:')}"}
     underlying = meta["underlying"]
 
-    # ---------------------------------------------------------
-    # WORKER FUNCTION
-    # ---------------------------------------------------------
-    def fetch_single_day(dt):
-        """
-        Helper function to be run in a separate thread.
-        Returns a dict if data exists, or None.
-        """
-        d_str = to_datestr(dt)
-        try:
-            # Assuming load_option_day is thread-safe (read-only file I/O usually is)
-            df = load_option_day(underlying, d_str)
-            
-            if df is None or df.empty:
-                return None
-            
-            # Filter for specific option
-            sub = df[df["ticker"].isin(cand)]
-            if sub.empty:
-                return None
-            
-            r = sub.iloc[0]
-            
-            # Return valid record
-            return {
-                "date": d_str,
-                "open": float(r["open"]) if pd.notna(r["open"]) else None,
-                "high": float(r["high"]) if pd.notna(r["high"]) else None,
-                "low": float(r["low"]) if pd.notna(r["low"]) else None,
-                "close": float(r["close"]) if pd.notna(r["close"]) else None,
-                "volume": int(r["volume"]) if pd.notna(r["volume"]) else None,
-            }
-        except Exception:
-            # If a file is corrupt or read fails, just skip this day
-            return None
+    history = []
 
     # ---------------------------------------------------------
-    # MULTI-THREADED EXECUTION
+    # OPTIMIZED LOOP: OPEN ONCE, READ MANY
     # ---------------------------------------------------------
-    # Cap workers at 20 (or similar) to avoid opening too many file handles at once
-    max_workers = min(20, len(all_dates))
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # executor.map executes calls asynchronously but yields results 
-        # in the SAME order as the input 'all_dates'
-        results_iter = executor.map(fetch_single_day, all_dates)
+    try:
+        # We open the file handle exactly one time
+        with pd.HDFStore(OPTIONS_H5_PATH, mode="r") as store:
+            
+            for dt in all_dates:
+                d_str = to_datestr(dt)
+                
+                # Construct the key exactly as load_option_day did
+                key = f"/data/{d_str}/{underlying}"
+                
+                # 1. Check if key exists in the HDF5 directory (Very fast)
+                if key not in store:
+                    continue
 
-    # Filter out None results (days with no data)
-    history = [r for r in results_iter if r is not None]
+                # 2. Load the DataFrame for that day
+                # Note: We are accessing store[key] directly
+                try:
+                    df = store[key]
+                except KeyError:
+                    continue
+
+                if df is None or df.empty:
+                    continue
+
+                # 3. Filter for our specific option ticker
+                # We do this immediately to drop the heavy dataframe from memory
+                sub = df[df["ticker"].isin(cand)]
+                
+                if sub.empty:
+                    continue
+
+                # 4. Extract Data
+                r = sub.iloc[0]
+                
+                # Handle dates if they aren't normalized in the file
+                # (Your original function did this, so we do it here lightly)
+                # We don't need to normalize the whole column if we just need the string date we already have (d_str)
+
+                history.append({
+                    "date": d_str,
+                    "open": float(r["open"]) if pd.notna(r["open"]) else None,
+                    "high": float(r["high"]) if pd.notna(r["high"]) else None,
+                    "low": float(r["low"]) if pd.notna(r["low"]) else None,
+                    "close": float(r["close"]) if pd.notna(r["close"]) else None,
+                    "volume": int(r["volume"]) if pd.notna(r["volume"]) else None,
+                })
+
+    except Exception as e:
+        # Catch file access errors (e.g. file locked)
+        return respond_error(f"Data access error: {str(e)}", 500)
 
     # ---------------------------------------------------------
     # RESPONSE
@@ -474,12 +480,9 @@ def query_option_history():
         "strike": float(meta["strike"]),
         "request_start": to_datestr(s_dt),
         "request_end": to_datestr(e_dt),
-        "actual_start": history[0]["date"],
-        "actual_end": history[-1]["date"],
         "count": len(history),
         "history": history
     })
-
 # ---------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------
