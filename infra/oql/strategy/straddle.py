@@ -38,7 +38,9 @@ class Straddle(Strategy):
         # Theoretical max profit is unbounded -> keep as NaN
         combo["max_profit"] = pd.NA
         combo["rr_ratio"] = pd.NA
-
+        # Breakevens (two-point payoff)
+        combo["breakeven_low"] = combo["strike"] - combo["net_debit"]
+        combo["breakeven_high"] = combo["strike"] + combo["net_debit"]
         # Net greeks (both legs long)
         self.calc_net_greeks(combo, [("_C", +1.0), ("_P", +1.0)])
         return combo

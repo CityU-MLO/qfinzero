@@ -15,6 +15,7 @@ class SingleOption(Strategy):
     - net_cost   : price * sign (long > 0, short < 0)
     - net_debit  : max(net_cost, 0)
     - net_credit : max(-net_cost, 0)
+    - breakeven  : single BE point at expiry
     - max_loss   : for long positions, approx = net_debit; for short, left as NaN (theoretically unbounded)
     - net_* greeks via calc_net_greeks with suffix '_O'
     """
@@ -35,6 +36,21 @@ class SingleOption(Strategy):
         combo["net_cost"] = combo["price"] * self.sign
         combo["net_debit"] = combo["net_cost"].clip(lower=0.0)
         combo["net_credit"] = (-combo["net_cost"]).clip(lower=0.0)
+
+        # -------------------------
+        # Breakeven (expiry payoff)
+        # -------------------------
+        strike_col = "strike" if "strike" in combo.columns else ("Strike" if "Strike" in combo.columns else None)
+        if strike_col is None:
+            combo["breakeven"] = pd.NA
+        else:
+            K = combo[strike_col]
+
+            # long uses debit, short uses credit
+            prem = combo["net_debit"] if self.sign > 0 else combo["net_credit"]
+
+            # Call: BE = K + prem ; Put: BE = K - prem
+            combo["breakeven"] = (K + prem) if self.opt_type == "C" else (K - prem)
 
         # Approximate max loss:
         # - For long options: max loss ~= net_debit

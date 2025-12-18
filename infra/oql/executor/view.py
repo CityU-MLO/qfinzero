@@ -171,24 +171,43 @@ def first_raw_row_dict(df: pd.DataFrame) -> Dict[str, Any]:
     return {k: _to_python_scalar(v) for k, v in row.items()}
 
 
+
+
 def first_raw_row_json(df: pd.DataFrame, **json_kwargs: Any) -> str:
     """
-    Return the first raw row as a JSON string.
+    Return the first raw row as a JSON string, safely converting
+    pd.NA, NaN, and NaT into JSON-compatible values (None).
 
     Parameters
     ----------
     df : pd.DataFrame
         Raw combo DataFrame.
     json_kwargs : dict
-        Extra keyword arguments passed to json.dumps, e.g. indent=2.
+        Extra keyword arguments passed to json.dumps.
 
     Returns
     -------
     str
         JSON string representing the first row (or "{}" if empty).
     """
-    d = first_raw_row_dict(df)
-    return json.dumps(d, **json_kwargs)
+    if df is None or len(df) == 0:
+        return "{}"
+
+    # Extract first row as dict
+    row = df.iloc[0].to_dict()
+
+    # Convert NA / NaN / NaT to None (JSON null)
+    def clean_value(v):
+        # pandas.NA, numpy.nan, None → convert to None
+        if v is None:
+            return None
+        if pd.isna(v):  # covers NaN, NA, NaT
+            return None
+        return v
+
+    cleaned = {k: clean_value(v) for k, v in row.items()}
+
+    return json.dumps(cleaned, **json_kwargs)
 
 
 def summarize_strategy_with_preview(

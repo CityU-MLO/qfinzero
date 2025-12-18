@@ -82,7 +82,10 @@ class ButterflyCall(Strategy):
 
         # Reward-to-risk ratio: max_profit / max_loss
         combo["rr_ratio"] = combo["max_profit"] / combo["max_loss"].replace(0, pd.NA)
-
+        # Breakevens (two-point payoff "tent")
+        combo["breakeven_low"] = combo["strike_L1"] + combo["net_debit"]
+        combo["breakeven_high"] = combo["strike_L2"] - combo["net_debit"]
+        
         # Greeks:
         #   +1 * L1,  -2 * S,  +1 * L2
         self.calc_net_greeks(

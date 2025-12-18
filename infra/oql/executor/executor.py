@@ -13,20 +13,22 @@ from executor.data_client import OptionDataClient
 from executor.filters import apply_having
 from executor.sorter import sort_df
 
-from strategy.vertical import BullCallSpread, BearPutSpread
+from strategy.vertical import (
+    BullCallSpread,
+    BearCallSpread,
+    BullPutSpread,
+    BearPutSpread,
+)
 from strategy.calendar import CalendarCall, CalendarPut
 from strategy.straddle import Straddle
 from strategy.butterfly import ButterflyCall
 from strategy.iron_condor import IronCondor
 from strategy.strangle import Strangle
 
-
-class OQLEngine:
-    def __init__(self, data_client: OptionDataClient):
-        self.client = data_client or OptionDataClient()
-        # Strategy registry: name -> instance
-        self.registry = {
+STRATEGY_REGISTRY = {
             "BULL_CALL_SPREAD": BullCallSpread(),
+            "BEAR_CALL_SPREAD": BearCallSpread(),
+            "BULL_PUT_SPREAD": BullPutSpread(),
             "BEAR_PUT_SPREAD": BearPutSpread(),
             "CALENDAR_CALL": CalendarCall(),
             "CALENDAR_PUT": CalendarPut(),
@@ -35,6 +37,12 @@ class OQLEngine:
             "IRON_CONDOR": IronCondor(),
             "BUTTERFLY_CALL": ButterflyCall(),
         }
+
+class OQLEngine:
+    def __init__(self, data_client: OptionDataClient):
+        self.client = data_client or OptionDataClient()
+        # Strategy registry: name -> instance
+        self.registry = STRATEGY_REGISTRY
 
     def register_strategy(self, name: str, strategy_obj) -> None:
         self.registry[name.upper()] = strategy_obj

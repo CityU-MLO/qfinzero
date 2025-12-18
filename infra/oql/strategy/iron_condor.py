@@ -82,8 +82,8 @@ class IronCondor(Strategy):
     # ------------ helper: estimate spot & pruning window -------------------
     @staticmethod
     def _estimate_spot_and_window(df: pd.DataFrame,
-                                  put_w_high: float | None,
-                                  call_w_high: float | None):
+                                  put_w_high,
+                                  call_w_high):
         """
         Estimate underlying spot from strike * moneyness_ratio median,
         and decide a reasonable strike window around spot to keep legs.
@@ -224,7 +224,12 @@ class IronCondor(Strategy):
         combo["max_profit"] = combo["net_credit"]
         combo["max_loss"] = combo["spread_width"] - combo["net_credit"]
         combo["rr_ratio"] = combo["max_profit"] / combo["max_loss"].replace(0, pd.NA)
-
+        
+        # Breakevens (two-point payoff shape)
+        # Lower BE: SP strike - credit received
+        # Upper BE: SC strike + credit received
+        combo["breakeven_low"] = combo["strike_SP"] - combo["net_credit"]
+        combo["breakeven_high"] = combo["strike_SC"] + combo["net_credit"]
         # Greeks:
         #   Short SP, Short SC, Long LP, Long LC
         self.calc_net_greeks(

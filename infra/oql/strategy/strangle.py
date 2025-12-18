@@ -47,6 +47,9 @@ class Strangle(Strategy):
         # For a long strangle, max loss (ignoring early exercise) is the net debit
         combo["max_loss"] = combo["net_debit"]
         # Max profit is theoretically unbounded, so we do not set max_profit / rr_ratio here
+        # Breakevens (two-point payoff)
+        combo["breakeven_low"] = combo["strike_P"] - combo["net_debit"]
+        combo["breakeven_high"] = combo["strike_C"] + combo["net_debit"]
 
         # Greeks: both legs are long
         self.calc_net_greeks(combo, [("_C", 1.0), ("_P", 1.0)])

@@ -126,6 +126,23 @@ demos = [
 
 # (Title, Query)
 GREEK_DEMO_QUERIES: List[Tuple[str, str]] = [
+    (
+        "Test",
+        """
+        SELECT BULL_PUT_SPREAD
+        FROM   SPY
+        WHERE  S.Strike ~ 500         -- "Panic fading... around 500": Sell the support/panic strike
+        AND S.Dte ~ 30             -- "30-day horizon"
+        AND L.Dte ~ 30             -- Matched expiry for vertical spread
+        AND L.Moneyness = OTM      -- "Keep a hedge just in case": Buy further OTM put
+        AND L.Strike < S.Strike    -- Ensure correct vertical spread structure (Long < Short)
+        HAVING net_credit > 0         -- "Act like an insurance company": Ensure net income
+        AND net_vega < 0           -- "VIX is huge": Position to profit from Volatility Crush
+        AND rr_ratio >= 0.2        -- Optional: Minimum Reward-to-Risk floor
+        ORDER BY rr_ratio DESC
+        LIMIT 5
+        """,
+    ),
     # 1. Bull Call Spread – long leg high delta, positive net vega
     (
         "Bull Call Spread – high-delta long, positive net vega",
@@ -272,7 +289,7 @@ GREEK_DEMO_QUERIES: List[Tuple[str, str]] = [
 
 
 def run_greek_demos(
-    as_of: str | None = None,
+    as_of: str ,
     host: str = "127.0.0.1",
     port: int = 19019,
 ) -> None:

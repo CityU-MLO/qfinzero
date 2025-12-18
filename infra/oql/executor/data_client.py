@@ -71,7 +71,7 @@ class OptionDataClient:
         try:
             print(f"📡 Fetching data from {self.base_url}/query/chain for {ticker} with params={params}...")
             resp = requests.get(
-                f"{self.base_url}/query/chain", params=params, timeout=10
+                f"{self.base_url}/query/chain", params=params, timeout=100
             )
             payload = resp.json()
             if isinstance(payload, dict) and "error" in payload:

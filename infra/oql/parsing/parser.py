@@ -179,3 +179,10 @@ class OQLParser:
                 direction = "DESC"
             specs.append(OrderSpec(col=col, direction=direction))
         return specs
+
+def parse_query(query_str):
+    try:
+        ast: QueryAST = OQLParser().parse(query_str)
+        return ast
+    except Exception as e:
+        return f"Parser Error: {e}"
