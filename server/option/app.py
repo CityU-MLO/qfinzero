@@ -487,6 +487,6 @@ def query_option_history():
 # Main
 # ---------------------------------------------------------------------
 if __name__ == "__main__":
-    # By default the server listens on all interfaces on port 19019.
+    # By default the server listens on all interfaces on port 19787.
     # Set PORT in the environment to override.
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "19019")), debug=False)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "19787")), debug=False)
