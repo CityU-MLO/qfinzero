@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
 
-def mSSRM_PGA_single_step(factor_window: np.ndarray, m: int, eps=1e-3,
-                          iternum=int(1e4), tol=1e-5):
+
+def mSSRM_PGA_single_step(
+    factor_window: np.ndarray, m: int, eps=1e-3, iternum=int(1e4), tol=1e-5
+):
     """
     Single-step sparse optimizer (mSSRM-PGA) for one window of factor data.
 
@@ -64,6 +66,7 @@ def mSSRM_PGA_single_step(factor_window: np.ndarray, m: int, eps=1e-3,
         w /= w_sum
 
     return w, k, rel_error
+
 
 if __name__ == "__main__":
     # Suppose you have an IC table (dates × factors)

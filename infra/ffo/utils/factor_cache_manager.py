@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class FactorCacheManager:
     """
     Manages persistent caching of factor evaluation results.
-    
+
     Features:
     - Expression hashing for consistent cache keys
     - Daily IC/RankIC storage for subset queries
@@ -32,7 +32,7 @@ class FactorCacheManager:
     def __init__(self, cache_dir: str = "./cache_data"):
         """
         Initialize cache manager.
-        
+
         Args:
             cache_dir: Directory to store cache files
         """
@@ -163,7 +163,7 @@ class FactorCacheManager:
     ) -> Tuple[bool, Optional[str], Optional[str], List[Tuple[str, str]]]:
         """
         Check cache coverage and return missing date ranges.
-        
+
         Returns:
             - is_fully_cached: True if entire range is cached
             - cached_start: Start date of cached data (if any)
@@ -286,12 +286,16 @@ class FactorCacheManager:
         metrics = {
             "ic": float(ic_values.mean()) if len(ic_values) > 0 else 0.0,
             "rank_ic": float(rank_ic_values.mean()) if len(rank_ic_values) > 0 else 0.0,
-            "icir": float(ic_values.mean() / ic_values.std())
-            if len(ic_values) > 1 and ic_values.std() > 0
-            else 0.0,
-            "rank_icir": float(rank_ic_values.mean() / rank_ic_values.std())
-            if len(rank_ic_values) > 1 and rank_ic_values.std() > 0
-            else 0.0,
+            "icir": (
+                float(ic_values.mean() / ic_values.std())
+                if len(ic_values) > 1 and ic_values.std() > 0
+                else 0.0
+            ),
+            "rank_icir": (
+                float(rank_ic_values.mean() / rank_ic_values.std())
+                if len(rank_ic_values) > 1 and rank_ic_values.std() > 0
+                else 0.0
+            ),
             "turnover": float(df["turnover"].mean()) if "turnover" in df else 0.0,
             "n_dates": len(results),
         }
@@ -332,12 +336,12 @@ class FactorCacheManager:
     ):
         """
         Store evaluation results in cache.
-        
+
         Args:
             expr: Factor expression
             market: Market identifier
             start_date: Start date
-            end_date: End date  
+            end_date: End date
             result: Evaluation result dictionary
             daily_ic: Optional daily IC values
             daily_rankic: Optional daily RankIC values
@@ -422,11 +426,11 @@ class FactorCacheManager:
     ) -> List[Dict]:
         """
         Get list of cached expressions with metadata.
-        
+
         Args:
             limit: Maximum number of results
             order_by: Sort field (last_accessed, access_count, created_at)
-            
+
         Returns:
             List of expression metadata dictionaries
         """
@@ -530,7 +534,7 @@ class FactorCacheManager:
     def clear_cache(self, older_than_days: Optional[int] = None):
         """
         Clear cache entries.
-        
+
         Args:
             older_than_days: Only clear entries older than this many days
         """
@@ -585,13 +589,13 @@ class FactorCacheManager:
     ) -> Dict:
         """
         Merge cached results with newly computed results.
-        
+
         Args:
             cached_result: Result from cache
             new_result: Newly computed result
             full_start_date: Full requested start date
             full_end_date: Full requested end date
-            
+
         Returns:
             Merged result dictionary
         """
@@ -617,18 +621,24 @@ class FactorCacheManager:
 
             metrics = {
                 "ic": float(ic_values.mean()) if len(ic_values) > 0 else 0.0,
-                "rank_ic": float(rank_ic_values.mean())
-                if len(rank_ic_values) > 0
-                else 0.0,
-                "icir": float(ic_values.mean() / ic_values.std())
-                if len(ic_values) > 1 and ic_values.std() > 0
-                else 0.0,
-                "rank_icir": float(rank_ic_values.mean() / rank_ic_values.std())
-                if len(rank_ic_values) > 1 and rank_ic_values.std() > 0
-                else 0.0,
-                "turnover": float(all_daily["turnover"].mean())
-                if "turnover" in all_daily
-                else 0.0,
+                "rank_ic": (
+                    float(rank_ic_values.mean()) if len(rank_ic_values) > 0 else 0.0
+                ),
+                "icir": (
+                    float(ic_values.mean() / ic_values.std())
+                    if len(ic_values) > 1 and ic_values.std() > 0
+                    else 0.0
+                ),
+                "rank_icir": (
+                    float(rank_ic_values.mean() / rank_ic_values.std())
+                    if len(rank_ic_values) > 1 and rank_ic_values.std() > 0
+                    else 0.0
+                ),
+                "turnover": (
+                    float(all_daily["turnover"].mean())
+                    if "turnover" in all_daily
+                    else 0.0
+                ),
                 "n_dates": len(all_daily),
             }
 
@@ -656,11 +666,11 @@ class FactorCacheManager:
     def get_factor_history(self, expr: str, market: Optional[str] = None) -> List[Dict]:
         """
         Get complete evaluation history for a factor expression.
-        
+
         Args:
             expr: Factor expression
             market: Optional market filter
-            
+
         Returns:
             List of evaluation records with dates and metrics
         """
@@ -718,11 +728,11 @@ class FactorCacheManager:
     ) -> Optional[Dict]:
         """
         Get the most recent evaluation for an expression.
-        
+
         Args:
             expr: Factor expression
             market: Market (default: csi300)
-            
+
         Returns:
             Most recent evaluation data or None
         """
@@ -793,7 +803,7 @@ class FactorCacheManager:
     ):
         """
         Add a factor evaluation to query history.
-        
+
         Args:
             expression: Factor expression
             market: Market identifier
@@ -813,7 +823,16 @@ class FactorCacheManager:
             (expression, market, start_date, end_date, ic, rank_ic, icir, rank_icir)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-            (expression, market.lower(), start_date, end_date, ic, rank_ic, icir, rank_icir),
+            (
+                expression,
+                market.lower(),
+                start_date,
+                end_date,
+                ic,
+                rank_ic,
+                icir,
+                rank_icir,
+            ),
         )
 
         conn.commit()
@@ -824,11 +843,11 @@ class FactorCacheManager:
     ) -> List[Dict]:
         """
         Get recent query history with optional search filter.
-        
+
         Args:
             limit: Maximum number of records to return
             search_query: Optional search string to filter expressions
-            
+
         Returns:
             List of query history records
         """
@@ -878,25 +897,27 @@ class FactorCacheManager:
             for row in results
         ]
 
-    def get_top_factors_from_history(self, limit: int = 5, metric: str = "rank_ic") -> dict:
+    def get_top_factors_from_history(
+        self, limit: int = 5, metric: str = "rank_ic"
+    ) -> dict:
         """
         Get top performing factors from query history.
-        
+
         Args:
             limit: Maximum number of top factors to return
             metric: Metric to sort by ('ic', 'rank_ic', 'icir', 'rank_icir')
-            
+
         Returns:
             Dictionary with top_factors list, total_factors count, and showing_count
         """
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.cursor()
-        
+
         # Validate metric
-        valid_metrics = ['ic', 'rank_ic', 'icir', 'rank_icir']
+        valid_metrics = ["ic", "rank_ic", "icir", "rank_icir"]
         if metric not in valid_metrics:
-            metric = 'rank_ic'
-        
+            metric = "rank_ic"
+
         # Get unique factors with their best performance for the selected metric
         # Group by expression and take the record with the best metric value
         query = f"""
@@ -930,35 +951,37 @@ class FactorCacheManager:
             ORDER BY {metric} DESC
             LIMIT ?
         """
-        
+
         cursor.execute(query, (limit * 2,))  # Get more than needed to filter
         results = cursor.fetchall()
-        
+
         # Get total unique factors
         cursor.execute("SELECT COUNT(DISTINCT expression) FROM query_history")
         total_factors = cursor.fetchone()[0]
-        
+
         conn.close()
-        
+
         # Format results
         top_factors = []
         for row in results[:limit]:
-            top_factors.append({
-                "expression": row[0],
-                "market": row[1],
-                "metrics": {
-                    "ic": float(row[2]) if row[2] is not None else 0.0,
-                    "rank_ic": float(row[3]) if row[3] is not None else 0.0,
-                    "icir": float(row[4]) if row[4] is not None else None,
-                    "rank_icir": float(row[5]) if row[5] is not None else None,
-                },
-                "last_evaluated": row[6],
-                "evaluation_count": row[7],
-            })
-        
+            top_factors.append(
+                {
+                    "expression": row[0],
+                    "market": row[1],
+                    "metrics": {
+                        "ic": float(row[2]) if row[2] is not None else 0.0,
+                        "rank_ic": float(row[3]) if row[3] is not None else 0.0,
+                        "icir": float(row[4]) if row[4] is not None else None,
+                        "rank_icir": float(row[5]) if row[5] is not None else None,
+                    },
+                    "last_evaluated": row[6],
+                    "evaluation_count": row[7],
+                }
+            )
+
         return {
             "success": True,
             "top_factors": top_factors,
             "total_factors": total_factors,
-            "showing_count": len(top_factors)
+            "showing_count": len(top_factors),
         }

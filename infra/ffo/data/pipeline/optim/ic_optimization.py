@@ -12,7 +12,7 @@ def compute_factor_ic(
     instruments: str = "csi300",
     data_path: str = "~/.qlib/qlib_data/cn_data",
     region: str = "cn",
-    n_jobs: int = 1
+    n_jobs: int = 1,
 ) -> pd.DataFrame:
     """
     Compute Information Coefficient (IC) for each factor over the period.
@@ -32,12 +32,12 @@ def compute_factor_ic(
         DataFrame with daily IC for each factor
     """
     import os
-    
+
     # Configure parallel loading
     if n_jobs > 1:
-        os.environ['QLIB_ENABLE_PARALLEL'] = str(n_jobs)
+        os.environ["QLIB_ENABLE_PARALLEL"] = str(n_jobs)
     else:
-        os.environ['QLIB_ENABLE_PARALLEL'] = '0'
+        os.environ["QLIB_ENABLE_PARALLEL"] = "0"
 
     # Initialize Qlib
     qlib.init(provider_uri=data_path, region=region)
@@ -45,6 +45,7 @@ def compute_factor_ic(
     # Handle Alpha158 vs custom expressions
     if not factor_expressions:  # Use Alpha158
         from qlib.contrib.data.loader import Alpha158DL
+
         data_loader = Alpha158DL(instuments=instruments)
         df = data_loader.load(
             instruments=instruments,
@@ -79,7 +80,7 @@ def compute_factor_ic(
 
             data_loader_config = {
                 "feature": (fields, names),
-                "label": (labels, label_names)
+                "label": (labels, label_names),
             }
 
             data_loader = QlibDataLoader(config=data_loader_config)
@@ -108,16 +109,22 @@ def compute_factor_ic(
                     label_values = label_df.loc[date]
 
                     # Align data
-                    common_instruments = factor_values.index.intersection(label_values.index)
+                    common_instruments = factor_values.index.intersection(
+                        label_values.index
+                    )
                     if len(common_instruments) > 10:  # Minimum sample size
                         factor_series = factor_values.loc[common_instruments].iloc[:, 0]
                         label_series = label_values.loc[common_instruments].iloc[:, 0]
 
                         ic = factor_series.corr(label_series)
                         if not np.isnan(ic):
-                            daily_ic.append({'date': date, 'ic': ic})
+                            daily_ic.append({"date": date, "ic": ic})
 
-                ic_series = pd.DataFrame(daily_ic).set_index('date')['ic'] if daily_ic else pd.Series(dtype=float)
+                ic_series = (
+                    pd.DataFrame(daily_ic).set_index("date")["ic"]
+                    if daily_ic
+                    else pd.Series(dtype=float)
+                )
                 ic_data.append(ic_series.rename(expr))
 
         except Exception as e:
@@ -133,7 +140,7 @@ def compute_factor_ic(
 
                 data_loader_config = {
                     "feature": (fields, names),
-                    "label": (labels, label_names)
+                    "label": (labels, label_names),
                 }
 
                 data_loader = QlibDataLoader(config=data_loader_config)
@@ -156,18 +163,28 @@ def compute_factor_ic(
                     label_values = label_df.loc[date]
 
                     # Align data
-                    common_instruments = factor_values.index.intersection(label_values.index)
+                    common_instruments = factor_values.index.intersection(
+                        label_values.index
+                    )
                     if len(common_instruments) > 10:  # Minimum sample size
                         # Extract values as Series for correlation
-                        factor_series = factor_values.loc[common_instruments].iloc[:, 0]  # Take first column
-                        label_series = label_values.loc[common_instruments].iloc[:, 0]    # Take first column
+                        factor_series = factor_values.loc[common_instruments].iloc[
+                            :, 0
+                        ]  # Take first column
+                        label_series = label_values.loc[common_instruments].iloc[
+                            :, 0
+                        ]  # Take first column
 
                         # Use Spearman correlation (Rank IC) for better robustness
-                        ic = factor_series.corr(label_series, method='spearman')
+                        ic = factor_series.corr(label_series, method="spearman")
                         if not np.isnan(ic):
-                            daily_ic.append({'date': date, 'ic': ic})
+                            daily_ic.append({"date": date, "ic": ic})
 
-                ic_series = pd.DataFrame(daily_ic).set_index('date')['ic'] if daily_ic else pd.Series(dtype=float)
+                ic_series = (
+                    pd.DataFrame(daily_ic).set_index("date")["ic"]
+                    if daily_ic
+                    else pd.Series(dtype=float)
+                )
                 ic_data.append(ic_series.rename(expr))
 
         # Combine IC data
@@ -192,16 +209,22 @@ def compute_factor_ic(
 
             # Align data
             common_instruments = factor_values.index.intersection(label_values.index)
-            if len(common_instruments) > 30:  # Minimum sample size (increased for stability)
+            if (
+                len(common_instruments) > 30
+            ):  # Minimum sample size (increased for stability)
                 factor_series = factor_values.loc[common_instruments]
                 label_series = label_values.loc[common_instruments].iloc[:, 0]
 
                 # Use Spearman correlation (Rank IC)
-                ic = factor_series.corr(label_series, method='spearman')
+                ic = factor_series.corr(label_series, method="spearman")
                 if not np.isnan(ic):
-                    daily_ic.append({'date': date, 'ic': ic})
+                    daily_ic.append({"date": date, "ic": ic})
 
-        ic_series = pd.DataFrame(daily_ic).set_index('date')['ic'] if daily_ic else pd.Series(dtype=float)
+        ic_series = (
+            pd.DataFrame(daily_ic).set_index("date")["ic"]
+            if daily_ic
+            else pd.Series(dtype=float)
+        )
         ic_data.append(ic_series.rename(factor_name))
 
     # Combine IC data
@@ -211,9 +234,7 @@ def compute_factor_ic(
 
 
 def simple_ic_weighting(
-    ic_df: pd.DataFrame,
-    method: str = "equal_top",
-    top_k: int = 5
+    ic_df: pd.DataFrame, method: str = "equal_top", top_k: int = 5
 ) -> pd.Series:
     """
     Simple weighting schemes based on historical IC performance.
@@ -233,7 +254,7 @@ def simple_ic_weighting(
     # Compute average IC for each factor
     mean_ic = ic_df.mean()
     abs_mean_ic = mean_ic.abs()
-    
+
     # Capture the sign of the IC to ensure we flip inversely correlated factors
     ic_sign = np.sign(mean_ic)
     # Replace 0 sign with 1 to avoid zeroing out weights
@@ -242,7 +263,7 @@ def simple_ic_weighting(
     if method == "equal_top":
         # Select top K factors by absolute IC
         top_factors = abs_mean_ic.nlargest(top_k).index
-        
+
         # Weight is 1/K * sign(IC)
         # This ensures that if a factor has negative IC, we short it (negative weight)
         weights = pd.Series(0.0, index=ic_df.columns)
@@ -261,20 +282,20 @@ def simple_ic_weighting(
     elif method == "rank_weighted":
         # Weight by rank of ABSOLUTE IC, but apply SIGN
         # Higher absolute IC -> Higher magnitude weight
-        ranks = abs_mean_ic.rank(ascending=True) # Rank 1 is lowest, Rank N is highest
+        ranks = abs_mean_ic.rank(ascending=True)  # Rank 1 is lowest, Rank N is highest
         rank_sum = ranks.sum()
-        
+
         if rank_sum > 0:
             weights = (ranks / rank_sum) * ic_sign
         else:
-             weights = pd.Series(1.0 / len(mean_ic), index=abs_mean_ic.index)
+            weights = pd.Series(1.0 / len(mean_ic), index=abs_mean_ic.index)
 
     else:
         raise ValueError(f"Unknown method: {method}")
 
     # Fill missing factors with zero weight
     weights = weights.reindex(ic_df.columns, fill_value=0.0)
-    
+
     return weights
 
 
@@ -288,7 +309,7 @@ def optimize_factor_weights_ic(
     data_path: str = "~/.qlib/qlib_data/cn_data",
     region: str = "cn",
     n_jobs: int = 1,
-    **kwargs
+    **kwargs,
 ) -> Dict:
     """
     Simple IC-based factor combination optimization.
@@ -316,7 +337,7 @@ def optimize_factor_weights_ic(
             instruments=instruments,
             data_path=data_path,
             region=region,
-            n_jobs=n_jobs
+            n_jobs=n_jobs,
         )
 
         if ic_df.empty:
@@ -331,28 +352,30 @@ def optimize_factor_weights_ic(
 
         # Performance metrics
         performance = {
-            'combined_ic_mean': combined_ic.mean(),
-            'combined_ic_std': combined_ic.std(),
-            'combined_ic_ir': combined_ic.mean() / combined_ic.std() if combined_ic.std() > 0 else 0,
-            'individual_ic_mean': individual_ic_stats.mean(),
-            'individual_ic_std': individual_ic_stats.std(),
-            'num_factors_used': (weights > 0).sum(),
-            'method': method,
-            'top_k': top_k if method == "equal_top" else None
+            "combined_ic_mean": combined_ic.mean(),
+            "combined_ic_std": combined_ic.std(),
+            "combined_ic_ir": (
+                combined_ic.mean() / combined_ic.std() if combined_ic.std() > 0 else 0
+            ),
+            "individual_ic_mean": individual_ic_stats.mean(),
+            "individual_ic_std": individual_ic_stats.std(),
+            "num_factors_used": (weights > 0).sum(),
+            "method": method,
+            "top_k": top_k if method == "equal_top" else None,
         }
 
         # Handle factor expressions for Alpha158
         if not factor_expressions:
             # For Alpha158, create representative expressions for the factors used
             alpha158_expressions = [
-                "Div($close, Mean($close, 5))",   # momentum-like
-                "Sub($close, Ref($close, 1))",    # return
-                "Mean($volume, 10)",              # volume
-                "Corr($close, $volume, 5)",       # correlation
-                "RSI($close, 14)",                # RSI
-                "Std($close, 10)",                # volatility
-                "Beta($close, $benchmark, 20)",   # beta
-                "Rank(Corr($close, $volume, 10))" # rank correlation
+                "Div($close, Mean($close, 5))",  # momentum-like
+                "Sub($close, Ref($close, 1))",  # return
+                "Mean($volume, 10)",  # volume
+                "Corr($close, $volume, 5)",  # correlation
+                "RSI($close, 14)",  # RSI
+                "Std($close, 10)",  # volatility
+                "Beta($close, $benchmark, 20)",  # beta
+                "Rank(Corr($close, $volume, 10))",  # rank correlation
             ]
 
             # Map used factors to expressions
@@ -360,7 +383,7 @@ def optimize_factor_weights_ic(
             factor_expressions = []
             for factor_name in used_factors:
                 if factor_name.startswith("alpha158_"):
-                    idx = int(factor_name.split('_')[1])
+                    idx = int(factor_name.split("_")[1])
                     expr_idx = min(idx, len(alpha158_expressions) - 1)
                     factor_expressions.append(alpha158_expressions[expr_idx])
                 else:
@@ -371,32 +394,32 @@ def optimize_factor_weights_ic(
 
         # Convert performance metrics to native types
         perf_serializable = {
-            'combined_ic_mean': float(performance['combined_ic_mean']),
-            'combined_ic_std': float(performance['combined_ic_std']),
-            'combined_ic_ir': float(performance['combined_ic_ir']),
-            'individual_ic_mean': float(performance['individual_ic_mean']),
-            'individual_ic_std': float(performance['individual_ic_std']),
-            'num_factors_used': int(performance['num_factors_used']),
-            'method': performance['method'],
-            'top_k': performance['top_k']
+            "combined_ic_mean": float(performance["combined_ic_mean"]),
+            "combined_ic_std": float(performance["combined_ic_std"]),
+            "combined_ic_ir": float(performance["combined_ic_ir"]),
+            "individual_ic_mean": float(performance["individual_ic_mean"]),
+            "individual_ic_std": float(performance["individual_ic_std"]),
+            "num_factors_used": int(performance["num_factors_used"]),
+            "method": performance["method"],
+            "top_k": performance["top_k"],
         }
-        
+
         return {
-            'status': 'success',
-            'weights': weights.values.tolist(),
-            'factor_names': list(weights.index),
-            'expected_return': float(performance['combined_ic_mean']),
-            'portfolio_risk': float(performance['combined_ic_std']),
-            'sharpe_ratio': float(performance['combined_ic_ir']),
-            'method': method,
-            'performance': perf_serializable
+            "status": "success",
+            "weights": weights.values.tolist(),
+            "factor_names": list(weights.index),
+            "expected_return": float(performance["combined_ic_mean"]),
+            "portfolio_risk": float(performance["combined_ic_std"]),
+            "sharpe_ratio": float(performance["combined_ic_ir"]),
+            "method": method,
+            "performance": perf_serializable,
         }
 
     except Exception as e:
         return {
-            'status': 'failed',
-            'message': str(e),
-            'factor_names': factor_expressions
+            "status": "failed",
+            "message": str(e),
+            "factor_names": factor_expressions,
         }
 
 
@@ -407,7 +430,7 @@ def backtest_ic_combination(
     topk: int = 50,
     instruments: str = "csi300",
     benchmark: str = "SH000300",
-    account: int = 10000
+    account: int = 10000,
 ) -> pd.DataFrame:
     """
     Simple backtest of IC-optimized factor combination.
@@ -425,19 +448,21 @@ def backtest_ic_combination(
         Backtest analysis DataFrame
     """
 
-    from data.pipeline.backtest.combination_factor_analysis import backtest_linear_alpha_combination
+    from data.pipeline.backtest.combination_factor_analysis import (
+        backtest_linear_alpha_combination,
+    )
 
-    weights = optimized_result['weights']
-    factor_expressions = optimized_result['factor_expressions']
+    weights = optimized_result["weights"]
+    factor_expressions = optimized_result["factor_expressions"]
 
     # Create backtest configuration
     alpha_factor_list = []
 
     # Use same weights for all days (simplified approach)
-    date_range = pd.date_range(test_start, test_end, freq='B')
+    date_range = pd.date_range(test_start, test_end, freq="B")
 
     for date in date_range:
-        date_str = date.strftime('%Y-%m-%d')
+        date_str = date.strftime("%Y-%m-%d")
         factors_config = [
             {"expr": expr, "weight": weight}
             for expr, weight in zip(factor_expressions, weights.values)
@@ -445,10 +470,7 @@ def backtest_ic_combination(
         ]
 
         if factors_config:
-            alpha_factor_list.append({
-                "date": date_str,
-                "factors": factors_config
-            })
+            alpha_factor_list.append({"date": date_str, "factors": factors_config})
 
     # Run backtest
     analysis_df, _, _ = backtest_linear_alpha_combination(
@@ -457,8 +479,7 @@ def backtest_ic_combination(
         n_drop=5,
         instruments=instruments,
         benchmark=benchmark,
-        account=account
+        account=account,
     )
 
     return analysis_df
-

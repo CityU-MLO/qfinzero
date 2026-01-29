@@ -2,7 +2,8 @@ from pprint import pprint
 
 import qlib
 import pandas as pd
-import agent.qlib_contrib.qlib_extend_ops
+
+# import agent.qlib_contrib.qlib_extend_ops
 from qlib.utils.time import Freq
 from qlib.utils import flatten_dict
 from qlib.contrib.evaluate import backtest_daily

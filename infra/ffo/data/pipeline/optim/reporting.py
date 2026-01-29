@@ -30,7 +30,7 @@ class SimpleFactorReporter:
         self,
         model_results: Dict,
         backtest_performance: Optional[Dict] = None,
-        report_title: str = "Factor Combination Backtest Report"
+        report_title: str = "Factor Combination Backtest Report",
     ) -> Dict:
         """
         Generate simple backtest report.
@@ -45,23 +45,23 @@ class SimpleFactorReporter:
         """
 
         report = {
-            'title': report_title,
-            'generated_at': datetime.now().isoformat(),
-            'models': {},
-            'summary': {}
+            "title": report_title,
+            "generated_at": datetime.now().isoformat(),
+            "models": {},
+            "summary": {},
         }
 
         # Process each model
         for model_name, results in model_results.items():
             model_report = self._generate_model_section(results)
-            report['models'][model_name] = model_report
+            report["models"][model_name] = model_report
 
         # Add backtest performance if available
         if backtest_performance:
-            report['backtest_performance'] = backtest_performance
+            report["backtest_performance"] = backtest_performance
 
         # Generate summary
-        report['summary'] = self._generate_summary_section(report['models'])
+        report["summary"] = self._generate_summary_section(report["models"])
 
         # Save to file
         self._save_report(report, report_title)
@@ -74,25 +74,25 @@ class SimpleFactorReporter:
         section = {}
 
         # Factor weights
-        if 'weights' in results:
-            weights = results['weights']
+        if "weights" in results:
+            weights = results["weights"]
             if isinstance(weights, pd.Series):
-                section['factor_weights'] = weights.to_dict()
+                section["factor_weights"] = weights.to_dict()
             else:
-                section['factor_weights'] = weights
+                section["factor_weights"] = weights
 
         # Performance metrics
-        if 'performance' in results:
-            perf = results['performance']
-            section['performance_metrics'] = {
-                'combined_ic_mean': perf.get('combined_ic_mean'),
-                'combined_ic_ir': perf.get('combined_ic_ir'),
-                'num_factors_used': perf.get('num_factors_used'),
-                'method': perf.get('method')
+        if "performance" in results:
+            perf = results["performance"]
+            section["performance_metrics"] = {
+                "combined_ic_mean": perf.get("combined_ic_mean"),
+                "combined_ic_ir": perf.get("combined_ic_ir"),
+                "num_factors_used": perf.get("num_factors_used"),
+                "method": perf.get("method"),
             }
 
         # Factor contributions (simplified)
-        section['factor_contributions'] = self._analyze_factor_contributions(results)
+        section["factor_contributions"] = self._analyze_factor_contributions(results)
 
         return section
 
@@ -101,9 +101,9 @@ class SimpleFactorReporter:
 
         contributions = {}
 
-        if 'weights' in results and 'ic_df' in results:
-            weights = results['weights']
-            ic_df = results['ic_df']
+        if "weights" in results and "ic_df" in results:
+            weights = results["weights"]
+            ic_df = results["ic_df"]
 
             # Calculate weighted IC for each factor
             if isinstance(weights, pd.Series):
@@ -117,10 +117,10 @@ class SimpleFactorReporter:
                     weighted_ic = factor_ic * weight
 
                     contributions[factor_name] = {
-                        'weight': weight,
-                        'avg_ic': factor_ic.mean(),
-                        'weighted_contribution': weighted_ic.mean(),
-                        'ic_volatility': factor_ic.std()
+                        "weight": weight,
+                        "avg_ic": factor_ic.mean(),
+                        "weighted_contribution": weighted_ic.mean(),
+                        "ic_volatility": factor_ic.std(),
                     }
 
         return contributions
@@ -128,17 +128,14 @@ class SimpleFactorReporter:
     def _generate_summary_section(self, models: Dict) -> Dict:
         """Generate summary across all models."""
 
-        summary = {
-            'total_models': len(models),
-            'model_comparison': {}
-        }
+        summary = {"total_models": len(models), "model_comparison": {}}
 
         for model_name, model_data in models.items():
-            perf = model_data.get('performance_metrics', {})
-            summary['model_comparison'][model_name] = {
-                'ic_mean': perf.get('combined_ic_mean'),
-                'ic_ir': perf.get('combined_ic_ir'),
-                'factors_used': perf.get('num_factors_used')
+            perf = model_data.get("performance_metrics", {})
+            summary["model_comparison"][model_name] = {
+                "ic_mean": perf.get("combined_ic_mean"),
+                "ic_ir": perf.get("combined_ic_ir"),
+                "factors_used": perf.get("num_factors_used"),
             }
 
         return summary
@@ -155,7 +152,7 @@ class SimpleFactorReporter:
         # Make serializable
         serializable_report = self._make_serializable(report)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(serializable_report, f, indent=2, ensure_ascii=False)
 
         print(f"Report saved to: {filepath}")
@@ -192,17 +189,17 @@ def print_report_summary(report: Dict):
     print()
 
     # Model details
-    for model_name, model_data in report['models'].items():
+    for model_name, model_data in report["models"].items():
         print(f"🔹 {model_name.upper()}")
         print("-" * 30)
 
         # Performance
-        perf = model_data.get('performance_metrics', {})
+        perf = model_data.get("performance_metrics", {})
         if perf:
-            ic_mean = perf.get('combined_ic_mean')
-            ic_ir = perf.get('combined_ic_ir')
-            factors_used = perf.get('num_factors_used')
-            method = perf.get('method')
+            ic_mean = perf.get("combined_ic_mean")
+            ic_ir = perf.get("combined_ic_ir")
+            factors_used = perf.get("num_factors_used")
+            method = perf.get("method")
 
             if ic_mean is not None:
                 print(f"  IC Mean: {ic_mean:.4f}")
@@ -214,15 +211,15 @@ def print_report_summary(report: Dict):
                 print(f"  Method: {method}")
 
             # LASSO-specific metrics
-            r2 = perf.get('final_r2')
-            sparsity = perf.get('sparsity_ratio')
+            r2 = perf.get("final_r2")
+            sparsity = perf.get("sparsity_ratio")
             if r2 is not None:
                 print(f"  R² Score: {r2:.4f}")
             if sparsity is not None:
                 print(f"  Sparsity: {sparsity:.2%}")
 
         # Weights
-        weights = model_data.get('factor_weights', {})
+        weights = model_data.get("factor_weights", {})
         if weights:
             print("  Factor Weights:")
             for factor, weight in weights.items():
@@ -230,22 +227,26 @@ def print_report_summary(report: Dict):
                     print(f"    {factor}: {weight:.4f}")
 
         # Top contributions
-        contributions = model_data.get('factor_contributions', {})
+        contributions = model_data.get("factor_contributions", {})
         if contributions:
             print("  Top Factor Contributions:")
-            sorted_contribs = sorted(contributions.items(),
-                                   key=lambda x: x[1]['weighted_contribution'],
-                                   reverse=True)
+            sorted_contribs = sorted(
+                contributions.items(),
+                key=lambda x: x[1]["weighted_contribution"],
+                reverse=True,
+            )
             for factor, data in sorted_contribs[:3]:
-                print(f"    {factor}: {data['weighted_contribution']:.4f} (weight: {data['weight']:.4f})")
+                print(
+                    f"    {factor}: {data['weighted_contribution']:.4f} (weight: {data['weight']:.4f})"
+                )
 
         print()
 
     # Backtest performance
-    if 'backtest_performance' in report:
+    if "backtest_performance" in report:
         print("📈 Backtest Performance")
         print("-" * 30)
-        backtest = report['backtest_performance']
+        backtest = report["backtest_performance"]
         # Add backtest metrics here if available
         print("(Backtest metrics would be displayed here)")
         print()
@@ -256,49 +257,41 @@ def generate_sample_report():
 
     # Mock IC optimization results
     mock_ic_results = {
-        'weights': {
-            'Div($close, Mean($close, 5))': 0.4,
-            'Sub($close, Ref($close, 1))': 0.3,
-            'Mean($volume, 10)': 0.3
+        "weights": {
+            "Div($close, Mean($close, 5))": 0.4,
+            "Sub($close, Ref($close, 1))": 0.3,
+            "Mean($volume, 10)": 0.3,
         },
-        'performance': {
-            'combined_ic_mean': 0.025,
-            'combined_ic_ir': 0.35,
-            'num_factors_used': 3,
-            'method': 'equal_top'
+        "performance": {
+            "combined_ic_mean": 0.025,
+            "combined_ic_ir": 0.35,
+            "num_factors_used": 3,
+            "method": "equal_top",
         },
-        'ic_df': pd.DataFrame({
-            'Div($close, Mean($close, 5))': np.random.normal(0.02, 0.05, 100),
-            'Sub($close, Ref($close, 1))': np.random.normal(0.015, 0.04, 100),
-            'Mean($volume, 10)': np.random.normal(0.01, 0.03, 100)
-        })
+        "ic_df": pd.DataFrame(
+            {
+                "Div($close, Mean($close, 5))": np.random.normal(0.02, 0.05, 100),
+                "Sub($close, Ref($close, 1))": np.random.normal(0.015, 0.04, 100),
+                "Mean($volume, 10)": np.random.normal(0.01, 0.03, 100),
+            }
+        ),
     }
 
     # Mock LASSO results
     mock_lasso_results = {
-        'weights': {
-            'factor_1': 0.6,
-            'factor_2': 0.0,
-            'factor_3': 0.4,
-            'factor_4': 0.0
-        },
-        'performance': {
-            'final_r2': 0.12,
-            'sparsity_ratio': 0.5,
-            'num_factors_used': 2
-        }
+        "weights": {"factor_1": 0.6, "factor_2": 0.0, "factor_3": 0.4, "factor_4": 0.0},
+        "performance": {"final_r2": 0.12, "sparsity_ratio": 0.5, "num_factors_used": 2},
     }
 
     model_results = {
-        'ic_optimization': mock_ic_results,
-        'lasso_regression': mock_lasso_results
+        "ic_optimization": mock_ic_results,
+        "lasso_regression": mock_lasso_results,
     }
 
     # Generate report
     reporter = SimpleFactorReporter()
     report = reporter.generate_backtest_report(
-        model_results=model_results,
-        report_title="Sample Factor Combination Report"
+        model_results=model_results, report_title="Sample Factor Combination Report"
     )
 
     # Print summary
@@ -313,4 +306,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Report generation failed: {e}")
         import traceback
+
         traceback.print_exc()

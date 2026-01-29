@@ -8,7 +8,7 @@ def generate_custom_alpha_handler_code(
 ):
     """
     Generate and save a CustomAlphaHandler.py file to the qlib contrib/data directory.
-    
+
     Args:
         fields_list (list): List of feature fields
         names_list (list): List of feature names

@@ -2,7 +2,8 @@ from pprint import pprint
 
 import qlib
 import pandas as pd
-import agent.qlib_contrib.qlib_extend_ops
+
+# import agent.qlib_contrib.qlib_extend_ops
 from qlib.utils.time import Freq
 from qlib.utils import flatten_dict
 from qlib.contrib.evaluate import backtest_daily
@@ -12,9 +13,11 @@ from qlib.contrib.strategy import TopkDropoutStrategy
 from qlib.contrib.data.loader import Alpha158DL
 from qlib.data.dataset.loader import QlibDataLoader
 
-from data.worker.factors_portfolio_test import backtest_by_single_alpha, backtest_daily, get_portfolio_analysis
-
-
+from data.worker.factors_portfolio_test import (
+    backtest_by_single_alpha,
+    backtest_daily,
+    get_portfolio_analysis,
+)
 
 
 def backtest_linear_alpha_combination(
@@ -91,7 +94,9 @@ def backtest_linear_alpha_combination(
                 if weights is None:
                     weights = [1.0 / len(factor_expr)] * len(factor_expr)
                 elif len(weights) != len(factor_expr):
-                    raise ValueError(f"Weights length ({len(weights)}) must match factor_expr length ({len(factor_expr)})")
+                    raise ValueError(
+                        f"Weights length ({len(weights)}) must match factor_expr length ({len(factor_expr)})"
+                    )
 
             # Normalize weights
             total_weight = sum(weights)
@@ -109,10 +114,7 @@ def backtest_linear_alpha_combination(
 
             while current_date <= end_dt:
                 date_str = current_date.strftime("%Y-%m-%d")
-                expanded_configs.append({
-                    "date": date_str,
-                    "factors": factors_config
-                })
+                expanded_configs.append({"date": date_str, "factors": factors_config})
                 current_date += pd.Timedelta(days=1)
 
         else:
@@ -143,8 +145,9 @@ def backtest_linear_alpha_combination(
                     normalized_factors.append({"expr": f["expr"], "weight": weight})
                 factor_expr[date] = normalized_factors
             else:
-                raise ValueError(f"Invalid format for date {date}: must have 'factor_expr' or 'factors'")
-            
+                raise ValueError(
+                    f"Invalid format for date {date}: must have 'factor_expr' or 'factors'"
+                )
 
     # --- Step 2: compute score for each day individually ---
     daily_scores = []
@@ -152,7 +155,7 @@ def backtest_linear_alpha_combination(
     for date, factors in factor_expr.items():
         if not factors:
             continue
-            
+
         # Build fields and names for multiple factors
         fields = [f["expr"] for f in factors]
         names = [f"factor_{i}" for i in range(len(factors))]
@@ -161,7 +164,10 @@ def backtest_linear_alpha_combination(
         labels = ["Ref($close, -2)/Ref($close, -1) - 1"]
         label_names = ["LABEL"]
 
-        data_loader_config = {"feature": (fields, names), "label": (labels, label_names)}
+        data_loader_config = {
+            "feature": (fields, names),
+            "label": (labels, label_names),
+        }
         data_loader = QlibDataLoader(config=data_loader_config)
 
         # Load one day window
@@ -178,16 +184,14 @@ def backtest_linear_alpha_combination(
 
         # Combine multiple factor scores using weighted sum
         combined_score = sum(
-            feature_df.iloc[:, i] * weights[i] 
-            for i in range(len(factors))
+            feature_df.iloc[:, i] * weights[i] for i in range(len(factors))
         )
-        
+
         # Create result dataframe
-        result_df = pd.DataFrame({
-            "combined_score": combined_score,
-            "date": date
-        }, index=feature_df.index)
-        
+        result_df = pd.DataFrame(
+            {"combined_score": combined_score, "date": date}, index=feature_df.index
+        )
+
         daily_scores.append(result_df)
 
     if not daily_scores:
@@ -266,7 +270,9 @@ def backtest_single_alpha_pipeline(
         start_time = alpha_info["start_time"]
         end_time = alpha_info["end_time"]
 
-        print(f"🚀 [{i+1}/{len(alpha_factor_list)}] Loading factor: {factor_expr} ({start_time} → {end_time})")
+        print(
+            f"🚀 [{i+1}/{len(alpha_factor_list)}] Loading factor: {factor_expr} ({start_time} → {end_time})"
+        )
 
         fields = [factor_expr]
         names = [f"alpha_{i}"]
@@ -274,7 +280,10 @@ def backtest_single_alpha_pipeline(
         labels = ["Ref($close, -2)/Ref($close, -1) - 1"]
         label_names = ["LABEL"]
 
-        data_loader_config = {"feature": (fields, names), "label": (labels, label_names)}
+        data_loader_config = {
+            "feature": (fields, names),
+            "label": (labels, label_names),
+        }
         data_loader = QlibDataLoader(config=data_loader_config)
 
         df = data_loader.load(
@@ -286,11 +295,10 @@ def backtest_single_alpha_pipeline(
         feature_df = df["feature"].copy()
         feature_df.columns = ["score"]
         feature_df["period"] = f"{start_time}_{end_time}"
-        
+
         feature_df = feature_df.copy()
         feature_df["__order__"] = i
         all_scores.append(feature_df)
-
 
     # --- combine all scores ---
     all_scores = pd.concat(all_scores)
@@ -308,7 +316,6 @@ def backtest_single_alpha_pipeline(
     # Rename and clean up
     all_scores = all_scores.rename(columns={"score": "combined_score"})
     all_scores = all_scores[["combined_score", "period"]]  # keep useful cols only
-
 
     # --- one unified backtest ---
     STRATEGY_CONFIG = {
@@ -340,7 +347,10 @@ if __name__ == "__main__":
         {"date": "2017-03-01", "factor_expr": "Div($close, Mean($close, 5))"},
         {"date": "2017-03-02", "factor_expr": "Sub($close, Ref($close, 1))"},
         {"date": "2017-03-03", "ref": "2017-03-02"},  # copy previous day's strategy
-        {"date": "2017-03-06", "factor_expr": "Mean(Div(Sub($close, Ref($close, 1)), Ref($close, 1)), 7)"},
+        {
+            "date": "2017-03-06",
+            "factor_expr": "Mean(Div(Sub($close, Ref($close, 1)), Ref($close, 1)), 7)",
+        },
     ]
 
     try:
@@ -365,26 +375,29 @@ if __name__ == "__main__":
             "date": "2017-03-01",
             "factors": [
                 {"expr": "Div($close, Mean($close, 5))", "weight": 0.6},
-                {"expr": "Sub($close, Ref($close, 1))", "weight": 0.4}
-            ]
+                {"expr": "Sub($close, Ref($close, 1))", "weight": 0.4},
+            ],
         },
         {
             "date": "2017-03-02",
             "factors": [
                 {"expr": "Div($close, Mean($close, 5))", "weight": 0.3},
                 {"expr": "Sub($close, Ref($close, 1))", "weight": 0.4},
-                {"expr": "Mean($volume, 10)", "weight": 0.3}
-            ]
+                {"expr": "Mean($volume, 10)", "weight": 0.3},
+            ],
         },
         {
             "date": "2017-03-03",
-            "ref": "2017-03-02"  # copy previous day's factor configuration
+            "ref": "2017-03-02",  # copy previous day's factor configuration
         },
         {
             "date": "2017-03-06",
             "factors": [
-                {"expr": "Mean(Div(Sub($close, Ref($close, 1)), Ref($close, 1)), 7)", "weight": 1.0}
-            ]
+                {
+                    "expr": "Mean(Div(Sub($close, Ref($close, 1)), Ref($close, 1)), 7)",
+                    "weight": 1.0,
+                }
+            ],
         },
     ]
 
@@ -407,16 +420,19 @@ if __name__ == "__main__":
     print("\n=== Example 3: Period-Based Format ===")
     alpha_factors_period = [
         {
-            "factor_expr": ["Div($close, Mean($close, 5))", "Sub($close, Ref($close, 1))"],
+            "factor_expr": [
+                "Div($close, Mean($close, 5))",
+                "Sub($close, Ref($close, 1))",
+            ],
             "weights": [0.7, 0.3],
             "start_date": "2017-03-01",
-            "end_date": "2017-03-10"
+            "end_date": "2017-03-10",
         },
         {
             "factor_expr": "Mean(Div(Sub($close, Ref($close, 1)), Ref($close, 1)), 7)",  # Single factor
             "start_date": "2017-03-13",
-            "end_date": "2017-03-15"
-        }
+            "end_date": "2017-03-15",
+        },
     ]
 
     try:

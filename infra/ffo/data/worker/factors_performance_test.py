@@ -1,7 +1,8 @@
 from typing import Any, Dict, Tuple
 import qlib
 from multiprocessing import Pool, cpu_count
-import agent.qlib_contrib.qlib_extend_ops
+
+# import agent.qlib_contrib.qlib_extend_ops
 from qlib.constant import REG_CN
 from qlib.data.dataset.loader import QlibDataLoader
 import pandas as pd

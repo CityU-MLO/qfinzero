@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def simplex_projection_selfnorm2(v, b=1):
     """Project vector v onto simplex sum(v)=b, v>=0."""
     v = np.array(v, dtype=np.float64)
@@ -82,7 +83,8 @@ def SSPO_single_step(data_close, data, b_t_hat, opts):
 
     return b_tplus1_hat, prim_res, iter_
 
-if __name__ == "__main__":  
+
+if __name__ == "__main__":
     win_size = 63
     N = 32
 

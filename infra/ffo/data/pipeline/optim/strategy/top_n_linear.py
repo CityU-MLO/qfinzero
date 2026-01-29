@@ -1,6 +1,7 @@
 import pandas as pd
-    
+
 import pandas as pd
+
 
 def top_n_linear_combination(
     df: pd.DataFrame,
@@ -54,8 +55,12 @@ def top_n_linear_combination(
     # --- rolling computation ---
     for t in trading_days:
         current_date = pd.Timestamp(t)
-        past_start = current_date - pd.Timedelta(days=window_size * 2)  # generous offset
-        history = df.loc[df.index < current_date].iloc[-window_size:]  # last window_size days before t
+        past_start = current_date - pd.Timedelta(
+            days=window_size * 2
+        )  # generous offset
+        history = df.loc[df.index < current_date].iloc[
+            -window_size:
+        ]  # last window_size days before t
 
         if len(history) == 0:
             continue

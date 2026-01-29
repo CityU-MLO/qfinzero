@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
-def optimize_ic_weights(ic_df: pd.DataFrame, lambda_risk=1.0, alpha_l1=0.0, non_negative=True):
+
+def optimize_ic_weights(
+    ic_df: pd.DataFrame, lambda_risk=1.0, alpha_l1=0.0, non_negative=True
+):
     """
     Optimize linear combination weights for IC mean-variance with optional L1 sparsity.
 
@@ -18,14 +21,16 @@ def optimize_ic_weights(ic_df: pd.DataFrame, lambda_risk=1.0, alpha_l1=0.0, non_
 
     def objective(w):
         # mean-variance + L1
-        return - (mu @ w - 0.5 * lambda_risk * (w.T @ Sigma @ w)) + alpha_l1 * np.sum(np.abs(w))
+        return -(mu @ w - 0.5 * lambda_risk * (w.T @ Sigma @ w)) + alpha_l1 * np.sum(
+            np.abs(w)
+        )
 
-    cons = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1}]
     bounds = [(0, 1) if non_negative else (None, None)] * n
     w0 = np.ones(n) / n
 
     res = minimize(objective, w0, bounds=bounds, constraints=cons)
-    return pd.Series(res.x, index=ic_df.columns, name='weight')
+    return pd.Series(res.x, index=ic_df.columns, name="weight")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ def FL_RankIc(factor, label, **kwargs):
 
 def FL_Ir(factor, label, **kwargs):
     """
-    Compute the Information Ratio (IR) as the mean of ICs over time 
+    Compute the Information Ratio (IR) as the mean of ICs over time
     divided by their standard deviation.
     """
     ics = []
@@ -71,7 +71,7 @@ def FL_RankIcir(factor, label, **kwargs):
 
 def FL_QuantileReturn(factor, label, quantiles=5, **kwargs):
     """
-    Compute the average return for each factor quantile and the spread between 
+    Compute the average return for each factor quantile and the spread between
     top and bottom quantiles across time.
     """
     returns = {}
