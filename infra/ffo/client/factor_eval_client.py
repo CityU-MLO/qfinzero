@@ -1,31 +1,50 @@
 #!/usr/bin/env python
 """
-Factor Evaluation REST API Client (updated for new unified input format).
+Factor Evaluation REST API Client - Unified Version
 
-Endpoints (expected):
+This unified client combines the original client with enhanced features:
+- Simple function-style API
+- Context manager support for automatic cleanup
+- Parallel batch processing with thread pools
+- Progress callbacks
+- Better error handling and retries
+
+Endpoints:
 - GET  /health
 - POST /factors/check
 - POST /factors/eval
-- POST /clear_cache          (optional)
-- GET  /cache_stats          (optional)
+- POST /clear_cache
+- GET  /cache_stats
 
-Unified input:
-- {"expression": "xxx"}                      # single
-- {"expression": {"name": "expr", ...}}      # dict (one or many)
-- {"expression": ["expr1", "expr2", ...]}    # list (no names)
-- {"expression": ["expr1", {"n2":"expr2"}]}  # mixed list (optional)
+Usage:
+    # Simple single evaluation
+    >>> from client import FactorEvalClient, evaluate
+    >>> result = evaluate("Rank($close, 20)")
+
+    # Parallel batch evaluation
+    >>> from client import evaluate_batch
+    >>> results = evaluate_batch(
+    ...     ["Rank($close, 20)", "Mean($volume, 5)"],
+    ...     parallel=True,
+    ...     max_workers=8
+    ... )
+
+    # Context manager for resource cleanup
+    >>> with FactorEvalClient() as client:
+    ...     results = client.evaluate_batch_parallel(expressions)
 """
 
 import time
 import json
 import logging
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_API_URL = "http://127.0.0.1:19320"
+DEFAULT_API_URL = "http://127.0.0.1:19330"
 DEFAULT_TIMEOUT = 120  # seconds
 MAX_RETRIES = 5
 RETRY_DELAY = 1  # seconds
@@ -35,13 +54,53 @@ ExpressionInput = Union[str, Dict[str, str], List[Union[str, Dict[str, str]]]]
 
 
 class FactorEvalClient:
-    """Client for Factor Evaluation API."""
+    """
+    Unified Factor Evaluation API Client.
+
+    Features:
+    - Simple API for single/batch factor evaluation
+    - Context manager support for automatic cleanup
+    - Parallel batch processing
+    - Progress tracking
+    - Automatic retries and error handling
+
+    Args:
+        base_url: API server URL (default: http://127.0.0.1:19330)
+        timeout: Request timeout in seconds (default: 120)
+
+    Example:
+        >>> client = FactorEvalClient()
+        >>> result = client.evaluate_factor("Rank($close, 20)")
+        >>> print(result[0]['metrics']['ic'])
+
+        # Or with context manager
+        >>> with FactorEvalClient() as client:
+        ...     results = client.evaluate_batch_parallel(expressions)
+    """
 
     def __init__(self, base_url: str = DEFAULT_API_URL, timeout: int = DEFAULT_TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
+        self._thread_pool: Optional[ThreadPoolExecutor] = None
         logger.info("FactorEvalClient initialized with base URL: %s", self.base_url)
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup resources."""
+        self.close()
+        return False
+
+    def close(self):
+        """Close connection pools and cleanup resources."""
+        if self._thread_pool:
+            self._thread_pool.shutdown(wait=True)
+            self._thread_pool = None
+        if self.session:
+            self.session.close()
 
     # ---------------------------
     # low-level request wrapper
@@ -266,6 +325,85 @@ class FactorEvalClient:
             else {"cache_size": 0, "max_cache_size": 0}
         )
 
+    # ---------------------------
+    # Enhanced parallel batch processing
+    # ---------------------------
+
+    def evaluate_batch_parallel(
+        self,
+        expressions: List[Union[str, Dict[str, str]]],
+        max_workers: int = 8,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        **kwargs
+    ) -> List[Dict]:
+        """
+        Evaluate multiple factors in parallel using thread pool.
+
+        Args:
+            expressions: List of factor expressions or dicts
+            max_workers: Number of parallel workers (default: 8)
+            progress_callback: Optional callback(completed, total) for progress
+            **kwargs: Additional arguments passed to evaluate_factor
+
+        Returns:
+            List of evaluation results
+
+        Example:
+            >>> with FactorEvalClient() as client:
+            ...     results = client.evaluate_batch_parallel(
+            ...         ["Rank($close, 20)", "Mean($volume, 5)"],
+            ...         max_workers=8,
+            ...         fast=True
+            ...     )
+        """
+        if not self._thread_pool:
+            self._thread_pool = ThreadPoolExecutor(max_workers=max_workers)
+
+        # Normalize expressions
+        factor_list = []
+        for expr in expressions:
+            if isinstance(expr, str):
+                factor_list.append(expr)
+            elif isinstance(expr, dict):
+                factor_list.append(expr)
+
+        # Submit all tasks
+        futures = {}
+        for expr in factor_list:
+            future = self._thread_pool.submit(
+                self.evaluate_factor,
+                expression=expr,
+                **kwargs
+            )
+            futures[future] = expr
+
+        # Collect results
+        results = []
+        completed = 0
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result[0] if isinstance(result, list) and len(result) > 0 else result)
+                completed += 1
+
+                if progress_callback:
+                    progress_callback(completed, len(factor_list))
+
+            except Exception as e:
+                logger.error(f"Failed to evaluate {futures[future]}: {e}")
+                results.append({
+                    "success": False,
+                    "expression": str(futures[future]),
+                    "error": str(e)
+                })
+                completed += 1
+
+                if progress_callback:
+                    progress_callback(completed, len(factor_list))
+
+        return results
+
 
 # ---------------------------
 # global convenience wrappers
@@ -322,3 +460,89 @@ def evaluate_factor_via_api(
         fast=fast,
         n_jobs_backtest=n_jobs_backtest,
     )
+
+
+# ---------------------------
+# New simple convenience functions
+# ---------------------------
+
+def evaluate(expression: str, **kwargs) -> Dict[str, Any]:
+    """
+    Evaluate a single factor using the global client (simple interface).
+
+    This is the simplest way to evaluate a factor - just call the function
+    without managing client instances.
+
+    Args:
+        expression: Factor expression (e.g., "Rank($close, 20)")
+        **kwargs: Additional evaluation parameters
+
+    Returns:
+        Single evaluation result dict (not a list)
+
+    Example:
+        >>> from client.factor_eval_client import evaluate
+        >>> result = evaluate("Rank($close, 20)", fast=True)
+        >>> print(f"IC: {result['metrics']['ic']:.4f}")
+    """
+    client = get_client()
+    results = client.evaluate_factor(expression=expression, **kwargs)
+    return results[0] if isinstance(results, list) and len(results) > 0 else results
+
+
+def evaluate_batch(
+    expressions: List[str],
+    parallel: bool = False,
+    max_workers: int = 8,
+    progress: bool = False,
+    **kwargs
+) -> List[Dict[str, Any]]:
+    """
+    Evaluate multiple factors (sequential or parallel).
+
+    Args:
+        expressions: List of factor expressions
+        parallel: Use parallel execution (default: False)
+        max_workers: Number of parallel workers if parallel=True (default: 8)
+        progress: Show progress (default: False)
+        **kwargs: Additional evaluation parameters
+
+    Returns:
+        List of evaluation results
+
+    Example:
+        >>> from client.factor_eval_client import evaluate_batch
+        >>> results = evaluate_batch(
+        ...     ["Rank($close, 20)", "Mean($volume, 5)"],
+        ...     parallel=True,
+        ...     fast=True,
+        ...     progress=True
+        ... )
+        >>> for r in results:
+        ...     print(f"{r['expression']}: IC={r['metrics']['ic']:.4f}")
+    """
+    client = get_client()
+
+    if progress:
+        def progress_callback(completed, total):
+            print(f"\rProgress: {completed}/{total} ({100*completed//total}%)", end="")
+            if completed == total:
+                print()  # New line when done
+    else:
+        progress_callback = None
+
+    if parallel:
+        return client.evaluate_batch_parallel(
+            expressions,
+            max_workers=max_workers,
+            progress_callback=progress_callback,
+            **kwargs
+        )
+    else:
+        results = []
+        for i, expr in enumerate(expressions):
+            result = evaluate(expr, **kwargs)
+            results.append(result)
+            if progress_callback:
+                progress_callback(i + 1, len(expressions))
+        return results
