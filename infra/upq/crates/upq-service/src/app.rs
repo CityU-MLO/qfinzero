@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -14,6 +15,7 @@ use duckdb::Connection;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use upq_core::rates::map_tenor_aliases;
 use upq_core::rates::split_by_month;
@@ -28,6 +30,14 @@ const MAX_LIMIT: usize = 100_000;
 #[derive(Clone, Debug)]
 pub struct AppState {
     storage_root: PathBuf,
+    rates_cache: Arc<RwLock<HashMap<RatesCacheKey, Vec<Value>>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RatesCacheKey {
+    start: String,
+    end: String,
+    projection: String,
 }
 
 #[derive(Debug, Error)]
@@ -46,11 +56,13 @@ pub fn build_router() -> Router {
 pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Router {
     let state = AppState {
         storage_root: storage_root.into(),
+        rates_cache: Arc::new(RwLock::new(HashMap::new())),
     };
 
     Router::new()
         .route("/stock", get(stock))
         .route("/stock/daily", get(stock_daily))
+        .route("/option", get(option))
         .route("/option/ticker_query", get(option_ticker_query))
         .route("/option/chain_query", get(option_chain_query))
         .route("/rates/query", get(rates_query))
@@ -296,6 +308,17 @@ async fn option_ticker_query(
     }
 }
 
+async fn option() -> axum::response::Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ticker_query_path": "/option/ticker_query",
+            "chain_query_path": "/option/chain_query"
+        })),
+    )
+        .into_response()
+}
+
 async fn option_chain_query(
     State(state): State<AppState>,
     Query(params): Query<OptionChainQuery>,
@@ -406,6 +429,15 @@ async fn rates_query(
         build_tenor_projection(&[])
     };
 
+    let cache_key = RatesCacheKey {
+        start: params.start.clone(),
+        end: params.end.clone(),
+        projection: projection.clone(),
+    };
+    if let Some(cached_rows) = state.rates_cache.read().await.get(&cache_key).cloned() {
+        return (StatusCode::OK, Json(Value::Array(cached_rows))).into_response();
+    }
+
     let file_path = state.storage_root.join("rates").join("rates.parquet");
     if !file_path.exists() {
         return (StatusCode::OK, Json(json!([]))).into_response();
@@ -466,6 +498,14 @@ async fn rates_query(
             .to_string();
         left_date.cmp(&right_date)
     });
+
+    {
+        let mut cache = state.rates_cache.write().await;
+        if cache.len() >= 512 {
+            cache.clear();
+        }
+        cache.insert(cache_key, rows.clone());
+    }
 
     (StatusCode::OK, Json(Value::Array(rows))).into_response()
 }

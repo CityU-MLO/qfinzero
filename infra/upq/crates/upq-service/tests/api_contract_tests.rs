@@ -41,6 +41,26 @@ async fn option_ticker_query_rejects_invalid_resolution() -> Result<(), Box<dyn 
 }
 
 #[tokio::test]
+async fn option_base_endpoint_returns_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder().uri("/option").body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    assert_eq!(
+        payload.get("ticker_query_path"),
+        Some(&Value::String("/option/ticker_query".to_string()))
+    );
+    assert_eq!(
+        payload.get("chain_query_path"),
+        Some(&Value::String("/option/chain_query".to_string()))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn rates_endpoint_requires_date_range() -> Result<(), Box<dyn std::error::Error>> {
     let app = upq_service::app::build_router();
     let request = Request::builder()
@@ -165,6 +185,49 @@ async fn rates_endpoint_reads_projected_tenors_from_parquet(
     assert_eq!(array[0].get("yield_10_year"), Some(&Value::from(1.88_f64)));
     assert_eq!(array[0].get("yield_5_year"), None);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn rates_endpoint_uses_cache_when_source_file_is_temporarily_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let parquet_path = rates_dir.join("rates.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-02', 1.53::DOUBLE, 1.54::DOUBLE, 1.56::DOUBLE, 1.58::DOUBLE, 1.67::DOUBLE, 1.88::DOUBLE, 2.33::DOUBLE),\
+                (DATE '2025-01-03', 1.52::DOUBLE, 1.52::DOUBLE, 1.55::DOUBLE, 1.53::DOUBLE, 1.59::DOUBLE, 1.80::DOUBLE, 2.26::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/rates/query?start=2025-01-01&end=2025-01-31&tenors=1M,10Y")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.clone().oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let first_payload: Value = serde_json::from_slice(&bytes)?;
+
+    fs::remove_file(&parquet_path)?;
+
+    let second_request = Request::builder()
+        .uri("/rates/query?start=2025-01-01&end=2025-01-31&tenors=1M,10Y")
+        .body(Body::empty())?;
+    let second_response = unwrap_infallible(app.oneshot(second_request).await);
+    assert_eq!(second_response.status(), StatusCode::OK);
+    let second_bytes = to_bytes(second_response.into_body(), usize::MAX).await?;
+    let second_payload: Value = serde_json::from_slice(&second_bytes)?;
+
+    assert_eq!(second_payload, first_payload);
     Ok(())
 }
 
