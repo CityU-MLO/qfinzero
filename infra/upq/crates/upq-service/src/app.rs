@@ -364,7 +364,7 @@ async fn option_chain_query(
     }
     if let Some(option_type) = params.r#type.as_deref() {
         filters.push(format!(
-            "right = '{}'",
+            "\"right\" = '{}'",
             sql_escape_literal(&option_type.trim().to_ascii_uppercase())
         ));
     }
@@ -631,7 +631,7 @@ fn parse_option_ticker_projection(
             "underlying",
             "expiry",
             "strike",
-            "right AS type",
+            "\"right\" AS type",
             "open",
             "high",
             "low",
@@ -666,7 +666,9 @@ fn parse_option_ticker_projection(
                 .iter()
                 .map(|field| {
                     if *field == "type" {
-                        "right AS type".to_string()
+                        "\"right\" AS type".to_string()
+                    } else if *field == "right" {
+                        "\"right\"".to_string()
                     } else {
                         (*field).to_string()
                     }
@@ -696,7 +698,7 @@ fn parse_option_chain_projection(fields_csv: Option<&str>) -> Result<String, &'s
         "underlying",
         "expiry",
         "strike",
-        "right AS type",
+        "\"right\" AS type",
         "close",
         "volume",
     ];
@@ -712,7 +714,9 @@ fn parse_option_chain_projection(fields_csv: Option<&str>) -> Result<String, &'s
             .iter()
             .map(|field| {
                 if *field == "type" {
-                    "right AS type".to_string()
+                    "\"right\" AS type".to_string()
+                } else if *field == "right" {
+                    "\"right\"".to_string()
                 } else {
                     (*field).to_string()
                 }
