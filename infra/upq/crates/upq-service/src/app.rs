@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,9 @@ use duckdb::Connection;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+use tokio::task::JoinSet;
 use upq_core::rates::map_tenor_aliases;
+use upq_core::rates::split_by_month;
 use upq_core::sql_builder::build_tenor_projection;
 use upq_core::validation::{
     parse_csv_list, validate_date, validate_date_or_datetime, validate_datetime, validate_fields,
@@ -31,6 +34,8 @@ pub struct AppState {
 enum ServiceError {
     #[error("duckdb error: {0}")]
     Duckdb(#[from] duckdb::Error),
+    #[error("join error: {0}")]
+    Join(String),
 }
 
 pub fn build_router() -> Router {
@@ -120,6 +125,14 @@ async fn stock(
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
     };
+    let start_date = match extract_date_from_datetime(&params.start) {
+        Ok(value) => value,
+        Err(message) => return invalid_argument(message),
+    };
+    let end_date = match extract_date_from_datetime(&params.end) {
+        Ok(value) => value,
+        Err(message) => return invalid_argument(message),
+    };
 
     let dataset_dir = state.storage_root.join("stock_minute");
     if !has_any_parquet_file(&dataset_dir) {
@@ -140,13 +153,16 @@ async fn stock(
 
     let sql = format!(
         "SELECT {projection} FROM read_parquet('{path}') \
-         WHERE ticker IN ({tickers}) AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND ticker IN ({tickers}) AND window_start >= {start_ns} AND window_start <= {end_ns} \
          ORDER BY ticker, window_start LIMIT {limit}",
         path = sql_escape_literal(&path_pattern),
+        start_date = sql_escape_literal(&start_date),
+        end_date = sql_escape_literal(&end_date),
         tickers = ticker_sql,
     );
 
-    match run_sql_json(&sql) {
+    match run_sql_json_async(sql).await {
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
     }
@@ -197,7 +213,7 @@ async fn stock_daily(
         end = sql_escape_literal(&params.end),
     );
 
-    match run_sql_json(&sql) {
+    match run_sql_json_async(sql).await {
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
     }
@@ -238,6 +254,14 @@ async fn option_ticker_query(
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
     };
+    let start_date = match extract_date_from_date_or_datetime(&params.start) {
+        Ok(value) => value,
+        Err(message) => return invalid_argument(message),
+    };
+    let end_date = match extract_date_from_date_or_datetime(&params.end) {
+        Ok(value) => value,
+        Err(message) => return invalid_argument(message),
+    };
 
     let dataset_dir = if resolution == "minute" {
         state.storage_root.join("option_minute")
@@ -257,13 +281,16 @@ async fn option_ticker_query(
 
     let sql = format!(
         "SELECT {projection} FROM read_parquet('{path}') \
-         WHERE ticker = {contract} AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND ticker = {contract} AND window_start >= {start_ns} AND window_start <= {end_ns} \
          ORDER BY window_start",
         path = sql_escape_literal(&path_pattern),
+        start_date = sql_escape_literal(&start_date),
+        end_date = sql_escape_literal(&end_date),
         contract = sql_quote(&params.contract),
     );
 
-    match run_sql_json(&sql) {
+    match run_sql_json_async(sql).await {
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
     }
@@ -348,7 +375,7 @@ async fn option_chain_query(
         filters = filters.join(" AND "),
     );
 
-    match run_sql_json(&sql) {
+    match run_sql_json_async(sql).await {
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
     }
@@ -387,14 +414,60 @@ async fn rates_query(
     let sql = format!(
         "SELECT {projection} FROM read_parquet('{path}') WHERE date >= DATE '{start}' AND date <= DATE '{end}' ORDER BY date",
         path = sql_escape_literal(&file_path.to_string_lossy()),
-        start = sql_escape_literal(&params.start),
-        end = sql_escape_literal(&params.end),
+        start = "{start}",
+        end = "{end}",
     );
+    let chunks = match split_by_month(&params.start, &params.end) {
+        Ok(value) => value,
+        Err(_) => return invalid_argument("start/end must be date: YYYY-MM-DD"),
+    };
 
-    match run_sql_json(&sql) {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
-        Err(error) => internal_error(error),
+    let mut join_set = JoinSet::new();
+    for (chunk_start, chunk_end) in chunks {
+        let sql = sql
+            .replace("{start}", &sql_escape_literal(&chunk_start))
+            .replace("{end}", &sql_escape_literal(&chunk_end));
+        join_set.spawn_blocking(move || run_sql_json(&sql));
     }
+
+    let mut rows = Vec::new();
+    while let Some(task_result) = join_set.join_next().await {
+        match task_result {
+            Ok(Ok(mut chunk_rows)) => rows.append(&mut chunk_rows),
+            Ok(Err(error)) => return internal_error(error),
+            Err(join_error) => return internal_error(ServiceError::Join(join_error.to_string())),
+        }
+    }
+
+    let mut seen_dates = BTreeSet::new();
+    rows.retain(|row| {
+        let key = row
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if seen_dates.contains(&key) {
+            return false;
+        }
+        seen_dates.insert(key);
+        true
+    });
+
+    rows.sort_by(|left, right| {
+        let left_date = left
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let right_date = right
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        left_date.cmp(&right_date)
+    });
+
+    (StatusCode::OK, Json(Value::Array(rows))).into_response()
 }
 
 fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
@@ -417,6 +490,12 @@ fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
     }
 
     Ok(out)
+}
+
+async fn run_sql_json_async(sql: String) -> Result<Vec<Value>, ServiceError> {
+    let task = tokio::task::spawn_blocking(move || run_sql_json(&sql));
+    task.await
+        .map_err(|error| ServiceError::Join(error.to_string()))?
 }
 
 fn value_ref_to_json(value: ValueRef<'_>) -> Value {
@@ -704,6 +783,19 @@ fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'sta
     dt.and_utc()
         .timestamp_nanos_opt()
         .ok_or("datetime overflow")
+}
+
+fn extract_date_from_datetime(input: &str) -> Result<String, &'static str> {
+    let dt = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+        .map_err(|_| "failed to parse datetime")?;
+    Ok(dt.date().format("%Y-%m-%d").to_string())
+}
+
+fn extract_date_from_date_or_datetime(input: &str) -> Result<String, &'static str> {
+    if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+        return Ok(date.format("%Y-%m-%d").to_string());
+    }
+    extract_date_from_datetime(input)
 }
 
 fn has_any_parquet_file(path: &Path) -> bool {
