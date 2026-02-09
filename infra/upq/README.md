@@ -6,7 +6,7 @@ UPQ is a Rust implementation of the price query service with API compatibility g
 - `crates/upq-core`: schema/validation/OPRA parser/SQL builders
 - `crates/upq-service`: Axum API routes and request validation
 - `crates/upq-ingest`: ingest metadata manifest and idempotency utilities
-- `crates/upq-bench`: benchmark entry point (placeholder)
+- `crates/upq-bench`: latency/throughput benchmark for CSV.GZ baseline vs DuckDB Parquet
 
 ## Docs
 - Design: `docs/plans/2026-02-09-upq-design.md`
@@ -14,6 +14,7 @@ UPQ is a Rust implementation of the price query service with API compatibility g
 - Schemas: `docs/schemas.md`
 - Test strategy: `docs/testing/test-strategy.md`
 - Test matrix: `docs/testing/test-matrix.md`
+- Benchmark report: `docs/testing/benchmark-report.md`
 
 ## Build and Test
 ```bash
@@ -27,3 +28,32 @@ cargo test --workspace
 cargo run -p upq-service
 ```
 Default bind: `127.0.0.1:23333`
+
+## Ingest Sample Data
+In this workspace, sample data is expected under `./raw_sample`:
+- `raw_sample/stock/day/*.csv.gz`
+- `raw_sample/stock/minute/*.csv.gz`
+- `raw_sample/options/day/*.csv.gz`
+- `raw_sample/options/minute/*.csv.gz`
+- `raw_sample/assets/treasury_yields.csv`
+
+Run ingest:
+```bash
+cargo run -p upq-ingest -- ingest \
+  --raw-root ./raw_sample \
+  --storage-root ./storage \
+  --manifest ./state/manifest.sqlite
+```
+
+## Benchmark
+Run stock-minute benchmark against gzip CSV baseline and DuckDB Parquet:
+```bash
+cargo run -p upq-bench -- \
+  --raw-root ./raw_sample \
+  --storage-root ./storage \
+  --ticker AAPL \
+  --start 2025-12-31T09:30:00 \
+  --end 2025-12-31T16:00:00 \
+  --iterations 20 \
+  --warmup 3
+```
