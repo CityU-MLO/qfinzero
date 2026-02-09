@@ -7,12 +7,14 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+duckdb.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+flate2 = "1.0"
 tempfile.workspace = true
 
 [lints]
