@@ -2,5 +2,6 @@
 
 pub mod error;
 pub mod opra;
+pub mod rates;
 pub mod sql_builder;
 pub mod validation;

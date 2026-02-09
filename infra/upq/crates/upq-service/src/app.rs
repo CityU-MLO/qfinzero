@@ -5,6 +5,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use upq_core::rates::map_tenor_aliases;
 use upq_core::validation::{parse_csv_list, validate_fields, validate_resolution};
 
 pub fn build_router() -> Router {
@@ -170,20 +171,7 @@ async fn rates_query(Query(params): Query<RatesQuery>) -> impl IntoResponse {
     if let Some(tenors_csv) = params.tenors.as_deref() {
         let tenors = parse_csv_list(tenors_csv);
         let refs: Vec<&str> = tenors.iter().map(String::as_str).collect();
-        if validate_fields(
-            &refs,
-            &[
-                "yield_1_month",
-                "yield_3_month",
-                "yield_1_year",
-                "yield_2_year",
-                "yield_5_year",
-                "yield_10_year",
-                "yield_30_year",
-            ],
-        )
-        .is_err()
-        {
+        if map_tenor_aliases(&refs).is_err() {
             return invalid_argument("tenors contains unsupported value");
         }
     }

@@ -8,4 +8,10 @@ pub enum CoreError {
     UnsupportedField(String),
     #[error("invalid OPRA contract: {0}")]
     InvalidOpraContract(String),
+    #[error("invalid date: {0}")]
+    InvalidDate(String),
+    #[error("invalid date range: start must be <= end")]
+    InvalidDateRange,
+    #[error("unsupported tenor: {0}")]
+    UnsupportedTenor(String),
 }
