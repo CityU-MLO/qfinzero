@@ -45,6 +45,11 @@ cargo run -p upq-ingest -- ingest \
   --manifest ./state/manifest.sqlite
 ```
 
+Compact partition files (merge multiple parquet files in each `trade_date=` partition):
+```bash
+cargo run -p upq-ingest -- compact --storage-root ./storage
+```
+
 ## Benchmark
 Run stock-minute benchmark against gzip CSV baseline and DuckDB Parquet:
 ```bash

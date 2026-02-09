@@ -25,6 +25,9 @@ fn parse_args_reads_sync_sample_options() -> Result<(), Box<dyn std::error::Erro
         IngestCommand::Ingest(_) => {
             return Err(std::io::Error::other("expected sync-sample command").into());
         }
+        IngestCommand::Compact(_) => {
+            return Err(std::io::Error::other("expected sync-sample command").into());
+        }
     }
 
     Ok(())
@@ -72,6 +75,34 @@ fn parse_args_reads_ingest_options() -> Result<(), Box<dyn std::error::Error>> {
         }
         IngestCommand::SyncSample(_) => {
             return Err(std::io::Error::other("expected ingest command").into());
+        }
+        IngestCommand::Compact(_) => {
+            return Err(std::io::Error::other("expected ingest command").into());
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn parse_args_reads_compact_options() -> Result<(), Box<dyn std::error::Error>> {
+    let args = vec![
+        "upq-ingest".to_string(),
+        "compact".to_string(),
+        "--storage-root".to_string(),
+        "./storage".to_string(),
+    ];
+
+    let command = parse_args(&args)?;
+    match command {
+        IngestCommand::Ingest(_) => {
+            return Err(std::io::Error::other("expected compact command").into());
+        }
+        IngestCommand::SyncSample(_) => {
+            return Err(std::io::Error::other("expected compact command").into());
+        }
+        IngestCommand::Compact(opts) => {
+            assert_eq!(opts.storage_root, "./storage");
         }
     }
 

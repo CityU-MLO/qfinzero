@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use upq_ingest::cli::{parse_args, IngestCommand};
+use upq_ingest::compact::{run_compaction, CompactOptions};
 use upq_ingest::ingest::{run_ingest, IngestOptions};
 use upq_ingest::sync_plan::build_sample_sync_plan;
 use upq_ingest::sync_remote::{collect_remote_files, run_sync_plan};
@@ -58,6 +59,22 @@ fn main() -> ExitCode {
                 report.processed_files, report.skipped_files
             );
         }
+        IngestCommand::Compact(options) => {
+            let report = match run_compaction(&CompactOptions {
+                storage_root: options.storage_root.into(),
+            }) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("compaction failed: {error}");
+                    return ExitCode::from(1);
+                }
+            };
+
+            println!(
+                "compaction complete: partitions_scanned={} partitions_compacted={}",
+                report.partitions_scanned, report.partitions_compacted
+            );
+        }
     }
 
     ExitCode::SUCCESS
@@ -65,6 +82,6 @@ fn main() -> ExitCode {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  upq-ingest sync-sample [--host qlib] [--days 14] [--remote-root /home/qlib/data] [--local-root ./raw_sample] [--execute]\n  upq-ingest ingest [--raw-root ./raw_sample] [--storage-root ./storage] [--manifest ./state/manifest.sqlite]"
+        "usage:\n  upq-ingest sync-sample [--host qlib] [--days 14] [--remote-root /home/qlib/data] [--local-root ./raw_sample] [--execute]\n  upq-ingest ingest [--raw-root ./raw_sample] [--storage-root ./storage] [--manifest ./state/manifest.sqlite]\n  upq-ingest compact [--storage-root ./storage]"
     );
 }

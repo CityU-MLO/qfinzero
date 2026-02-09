@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod compact;
 pub mod ingest;
 pub mod manifest;
 pub mod sample_sync;

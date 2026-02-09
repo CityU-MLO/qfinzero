@@ -17,9 +17,15 @@ pub struct IngestRunOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactRunOptions {
+    pub storage_root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IngestCommand {
     SyncSample(SyncSampleOptions),
     Ingest(IngestRunOptions),
+    Compact(CompactRunOptions),
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -36,6 +42,8 @@ pub enum ParseArgsError {
     UnknownFlag(String),
     #[error("unknown flag for ingest: {0}")]
     UnknownIngestFlag(String),
+    #[error("unknown flag for compact: {0}")]
+    UnknownCompactFlag(String),
 }
 
 pub fn parse_args(args: &[String]) -> Result<IngestCommand, ParseArgsError> {
@@ -43,6 +51,7 @@ pub fn parse_args(args: &[String]) -> Result<IngestCommand, ParseArgsError> {
     match subcommand.as_str() {
         "sync-sample" => parse_sync_sample(args),
         "ingest" => parse_ingest(args),
+        "compact" => parse_compact(args),
         other => Err(ParseArgsError::UnsupportedSubcommand(other.to_string())),
     }
 }
@@ -128,6 +137,27 @@ fn parse_ingest(args: &[String]) -> Result<IngestCommand, ParseArgsError> {
     }
 
     Ok(IngestCommand::Ingest(options))
+}
+
+fn parse_compact(args: &[String]) -> Result<IngestCommand, ParseArgsError> {
+    let mut options = CompactRunOptions {
+        storage_root: "./storage".to_string(),
+    };
+
+    let mut index = 2;
+    while index < args.len() {
+        let flag = &args[index];
+        match flag.as_str() {
+            "--storage-root" => {
+                let value = next_value(args, index, flag)?;
+                options.storage_root = value.to_string();
+                index += 2;
+            }
+            other => return Err(ParseArgsError::UnknownCompactFlag(other.to_string())),
+        }
+    }
+
+    Ok(IngestCommand::Compact(options))
 }
 
 fn next_value<'a>(args: &'a [String], index: usize, flag: &str) -> Result<&'a str, ParseArgsError> {

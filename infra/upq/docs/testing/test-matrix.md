@@ -25,6 +25,10 @@ Date: 2026-02-09
 - Result: PASS
 - Evidence: benchmark numbers captured in `docs/testing/benchmark-report.md`
 
+7. `cargo test -p upq-ingest --test compact_tests`
+- Result: PASS
+- Coverage intent: partition compaction merges multi-file parquet partitions without data loss
+
 ## Implemented Test Cases
 
 ### `upq-core`
@@ -55,6 +59,9 @@ Date: 2026-02-09
   - gzip CSV sample ingests into partitioned Parquet
   - option parquet includes both `ticker` and `contract` columns
   - second run skips unchanged files via manifest
+- `compact_tests.rs`
+  - multi-file partition is compacted to a single parquet file
+  - compacted output preserves row count
 
 ### `upq-bench`
 - `main.rs` unit tests
