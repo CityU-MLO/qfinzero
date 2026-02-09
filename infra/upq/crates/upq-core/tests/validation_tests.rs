@@ -19,3 +19,15 @@ fn validate_fields_accepts_known_columns() {
     let result = validate_fields(&["ticker", "close"], &allowlist);
     assert!(result.is_ok());
 }
+
+#[test]
+fn validate_date_rejects_invalid_format() {
+    let result = upq_core::validation::validate_date("2025/01/06");
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_datetime_rejects_invalid_format() {
+    let result = upq_core::validation::validate_datetime("2025-01-06 09:30:00");
+    assert!(result.is_err());
+}

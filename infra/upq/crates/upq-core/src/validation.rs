@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use chrono::{NaiveDate, NaiveDateTime};
+
 use crate::error::CoreError;
 
 pub fn validate_resolution(resolution: &str) -> Result<(), CoreError> {
@@ -21,6 +23,22 @@ pub fn validate_fields(fields: &[&str], allowlist: &[&str]) -> Result<(), CoreEr
         }
     }
     Ok(())
+}
+
+pub fn validate_date(value: &str) -> Result<(), CoreError> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| CoreError::InvalidDate(value.to_string()))
+}
+
+pub fn validate_datetime(value: &str) -> Result<(), CoreError> {
+    NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
+        .map(|_| ())
+        .map_err(|_| CoreError::InvalidDate(value.to_string()))
+}
+
+pub fn validate_date_or_datetime(value: &str) -> Result<(), CoreError> {
+    validate_date(value).or_else(|_| validate_datetime(value))
 }
 
 pub fn parse_csv_list(csv: &str) -> Vec<String> {

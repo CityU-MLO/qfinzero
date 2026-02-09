@@ -46,3 +46,27 @@ async fn rates_endpoint_requires_date_range() -> Result<(), axum::http::Error> {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     Ok(())
 }
+
+#[tokio::test]
+async fn stock_endpoint_rejects_invalid_datetime_format() -> Result<(), axum::http::Error> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder()
+        .uri("/stock?tickers=AAPL&start=2025-01-06%2009:30:00&end=2025-01-06T16:00:00")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
+async fn stock_daily_rejects_invalid_date_format() -> Result<(), axum::http::Error> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=AAPL&start=2025/01/06&end=2025-01-10")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}

@@ -6,7 +6,10 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 use upq_core::rates::map_tenor_aliases;
-use upq_core::validation::{parse_csv_list, validate_fields, validate_resolution};
+use upq_core::validation::{
+    parse_csv_list, validate_date, validate_date_or_datetime, validate_datetime, validate_fields,
+    validate_resolution,
+};
 
 pub fn build_router() -> Router {
     Router::new()
@@ -50,9 +53,11 @@ struct RatesQuery {
 }
 
 async fn stock(Query(params): Query<StockQuery>) -> impl IntoResponse {
-    let _ = params.start.as_str();
-    let _ = params.end.as_str();
     let _ = params.limit.unwrap_or(10_000);
+
+    if validate_datetime(&params.start).is_err() || validate_datetime(&params.end).is_err() {
+        return invalid_argument("start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS");
+    }
 
     let tickers = parse_csv_list(&params.tickers);
     if tickers.is_empty() {
@@ -85,8 +90,9 @@ async fn stock(Query(params): Query<StockQuery>) -> impl IntoResponse {
 }
 
 async fn stock_daily(Query(params): Query<StockQuery>) -> impl IntoResponse {
-    let _ = params.start.as_str();
-    let _ = params.end.as_str();
+    if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
+        return invalid_argument("start/end must be date: YYYY-MM-DD");
+    }
 
     let tickers = parse_csv_list(&params.tickers);
     if tickers.is_empty() {
@@ -107,6 +113,12 @@ async fn option_ticker_query(Query(params): Query<OptionTickerQuery>) -> impl In
         || params.end.trim().is_empty()
     {
         return invalid_argument("contract/start/end are required");
+    }
+
+    if validate_date_or_datetime(&params.start).is_err()
+        || validate_date_or_datetime(&params.end).is_err()
+    {
+        return invalid_argument("start/end must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS");
     }
 
     if let Some(fields_csv) = params.fields.as_deref() {
@@ -139,6 +151,10 @@ async fn option_chain_query(Query(params): Query<OptionChainQuery>) -> impl Into
         return invalid_argument("underlying/date are required");
     }
 
+    if validate_date(&params.date).is_err() {
+        return invalid_argument("date must be YYYY-MM-DD");
+    }
+
     if let Some(fields_csv) = params.fields.as_deref() {
         let fields = parse_csv_list(fields_csv);
         let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
@@ -166,6 +182,10 @@ async fn option_chain_query(Query(params): Query<OptionChainQuery>) -> impl Into
 async fn rates_query(Query(params): Query<RatesQuery>) -> impl IntoResponse {
     if params.start.trim().is_empty() || params.end.trim().is_empty() {
         return invalid_argument("start/end are required");
+    }
+
+    if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
+        return invalid_argument("start/end must be date: YYYY-MM-DD");
     }
 
     if let Some(tenors_csv) = params.tenors.as_deref() {
