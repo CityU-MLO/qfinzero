@@ -624,7 +624,39 @@ fn parse_option_ticker_projection(
             "volume",
             "transactions",
         ];
-        parse_projection(fields_csv, &default, &default)
+        let allowlist = [
+            "ticker",
+            "contract",
+            "window_start",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "transactions",
+        ];
+
+        if let Some(fields_csv) = fields_csv {
+            let fields = parse_csv_list(fields_csv);
+            let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+            if validate_fields(&refs, &allowlist).is_err() {
+                return Err("fields contains unsupported column");
+            }
+            let mapped = refs
+                .iter()
+                .map(|field| {
+                    if *field == "contract" {
+                        "ticker AS contract".to_string()
+                    } else {
+                        (*field).to_string()
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+            return Ok(mapped);
+        }
+
+        Ok(default.join(", "))
     } else {
         let default = [
             "ticker",
@@ -642,6 +674,7 @@ fn parse_option_ticker_projection(
         ];
         let allowlist = [
             "ticker",
+            "contract",
             "underlying",
             "expiry",
             "strike",
@@ -667,6 +700,8 @@ fn parse_option_ticker_projection(
                 .map(|field| {
                     if *field == "type" {
                         "\"right\" AS type".to_string()
+                    } else if *field == "contract" {
+                        "ticker AS contract".to_string()
                     } else if *field == "right" {
                         "\"right\"".to_string()
                     } else {
@@ -685,6 +720,7 @@ fn parse_option_ticker_projection(
 fn parse_option_chain_projection(fields_csv: Option<&str>) -> Result<String, &'static str> {
     let allowlist = [
         "ticker",
+        "contract",
         "underlying",
         "expiry",
         "strike",
@@ -715,6 +751,8 @@ fn parse_option_chain_projection(fields_csv: Option<&str>) -> Result<String, &'s
             .map(|field| {
                 if *field == "type" {
                     "\"right\" AS type".to_string()
+                } else if *field == "contract" {
+                    "ticker AS contract".to_string()
                 } else if *field == "right" {
                     "\"right\"".to_string()
                 } else {

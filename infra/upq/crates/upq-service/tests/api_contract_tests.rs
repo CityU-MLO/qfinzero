@@ -305,6 +305,54 @@ async fn option_ticker_query_reads_rows_from_parquet() -> Result<(), Box<dyn std
 }
 
 #[tokio::test]
+async fn option_ticker_query_supports_contract_field_alias(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let partition_dir = tmp.path().join("option_day").join("trade_date=2025-01-10");
+    fs::create_dir_all(&partition_dir)?;
+    let parquet_path = partition_dir.join("sample.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'O:NVDA250117C00136000' AS ticker, \
+                'NVDA' AS underlying, \
+                DATE '2025-01-17' AS expiry, \
+                136.0::DOUBLE AS strike, \
+                'C' AS right, \
+                1736496000000000000::BIGINT AS window_start, \
+                3.2::DOUBLE AS close, \
+                100::BIGINT AS volume, \
+                5::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250117C00136000&start=2025-01-10&end=2025-01-10&resolution=day&fields=contract,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("payload should be array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0].get("contract"),
+        Some(&Value::String("O:NVDA250117C00136000".to_string()))
+    );
+    assert_eq!(array[0].get("ticker"), None);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn option_chain_query_reads_filtered_rows_from_parquet(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let tmp = TempDir::new()?;
