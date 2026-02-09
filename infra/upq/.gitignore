@@ -1,2 +1,6 @@
 /target/
 .DS_Store
+/raw_sample/
+/storage/
+/state/
+/scripts_sync_sample_14d.sh

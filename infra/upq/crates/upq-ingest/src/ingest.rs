@@ -206,6 +206,7 @@ fn ingest_option(
 
     let select_sql = format!(
         "SELECT \
+            ticker AS ticker, \
             ticker AS contract, \
             NULLIF(regexp_extract(ticker, '{regex}', 1), '') AS underlying, \
             CAST(strptime(NULLIF(regexp_extract(ticker, '{regex}', 2), ''), '%y%m%d') AS DATE) AS expiry, \

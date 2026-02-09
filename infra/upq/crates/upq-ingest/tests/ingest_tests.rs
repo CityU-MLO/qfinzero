@@ -60,23 +60,31 @@ fn run_ingest_writes_parquet_and_respects_manifest() -> Result<(), Box<dyn std::
     assert_eq!(close, 10.5);
 
     let option_sql = format!(
-        "SELECT contract, underlying, CAST(expiry AS VARCHAR), strike, \"right\" \
+        "SELECT ticker, contract, underlying, CAST(expiry AS VARCHAR), strike, \"right\" \
          FROM read_parquet('{}')",
         storage_root
             .join("option_day/trade_date=2025-12-31/*.parquet")
             .to_string_lossy()
             .replace('\'', "''")
     );
-    let (contract, underlying, expiry, strike, right): (String, String, String, f64, String) = conn
-        .query_row(&option_sql, [], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        })?;
+    let (option_ticker, contract, underlying, expiry, strike, right): (
+        String,
+        String,
+        String,
+        String,
+        f64,
+        String,
+    ) = conn.query_row(&option_sql, [], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+        ))
+    })?;
+    assert_eq!(option_ticker, "O:NVDA250117C00136000");
     assert_eq!(contract, "O:NVDA250117C00136000");
     assert_eq!(underlying, "NVDA");
     assert_eq!(expiry, "2025-01-17");
