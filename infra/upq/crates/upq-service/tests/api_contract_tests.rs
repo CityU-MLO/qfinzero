@@ -36,7 +36,10 @@ async fn health_endpoint_returns_ok_status() -> Result<(), Box<dyn std::error::E
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    assert_eq!(payload.get("status"), Some(&Value::String("ok".to_string())));
+    assert_eq!(
+        payload.get("status"),
+        Some(&Value::String("ok".to_string()))
+    );
     Ok(())
 }
 
