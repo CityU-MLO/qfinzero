@@ -39,6 +39,64 @@ API routes:
 - `GET /option/chain_query`
 - `GET /rates/query`
 
+## Production Deployment (Concise)
+1. Build release binaries:
+```bash
+cargo build --release -p upq-ingest -p upq-service
+```
+
+2. Prepare runtime directories:
+```bash
+sudo mkdir -p /opt/upq/bin /var/lib/upq/storage /var/lib/upq/state
+sudo cp target/release/upq-ingest target/release/upq-service /opt/upq/bin/
+```
+
+3. Run one-time ingest (sample or full data):
+```bash
+/opt/upq/bin/upq-ingest ingest \
+  --raw-root /home/qlib/data \
+  --storage-root /var/lib/upq/storage \
+  --manifest /var/lib/upq/state/manifest.sqlite
+```
+
+4. Run service with storage path:
+```bash
+STORAGE_ROOT=/var/lib/upq/storage /opt/upq/bin/upq-service
+```
+
+5. `systemd` service example (`/etc/systemd/system/upq.service`):
+```ini
+[Unit]
+Description=UPQ Price Query Service
+After=network.target
+
+[Service]
+Type=simple
+Environment=STORAGE_ROOT=/var/lib/upq/storage
+ExecStart=/opt/upq/bin/upq-service
+Restart=always
+RestartSec=3
+User=qlib
+WorkingDirectory=/opt/upq
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now upq
+sudo systemctl status upq
+```
+
+6. Health check:
+```bash
+curl -sS http://127.0.0.1:23333/health
+```
+
+Notes:
+- Service currently binds `127.0.0.1:23333`; expose externally via reverse proxy if needed.
+- Rollback: keep previous binary under `/opt/upq/bin` and restart `upq` service.
+
 ## Ingest Sample Data
 In this workspace, sample data is expected under `./raw_sample`:
 - `raw_sample/stock/day/*.csv.gz`
