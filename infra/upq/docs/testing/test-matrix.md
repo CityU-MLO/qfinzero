@@ -1,6 +1,6 @@
 # Test Matrix
 
-Date: 2026-02-09
+Date: 2026-02-10
 
 ## Command Matrix
 
@@ -37,6 +37,14 @@ Date: 2026-02-09
 - Result: PASS
 - Output: `partitions_scanned=56 partitions_compacted=0` on current 14-day sample storage
 
+10. `cargo test -p upq-service --test api_contract_tests`
+- Result: PASS
+- Coverage intent: empty `fields` fallback behavior, rates default projection behavior, and `/health` parity endpoint
+
+11. `cargo test -p upq-ingest sync_remote`
+- Result: PASS
+- Coverage intent: rsync source discovery command path correctness for options day/minute datasets
+
 ## Implemented Test Cases
 
 ### `upq-core`
@@ -51,12 +59,16 @@ Date: 2026-02-09
   - stock SQL contains partition/ticker predicates and limit
   - chain SQL contains single-day and underlying filters
   - tenor projection only includes requested fields
+  - empty tenor filter returns full default rates projection
 
 ### `upq-service`
 - `api_contract_tests.rs`
   - `/stock` accepts valid query
   - `/option/ticker_query` rejects invalid resolution
   - `/rates/query` rejects missing required parameters
+  - blank `fields` fallback for `/stock`, `/stock/daily`, `/option/ticker_query`, `/option/chain_query`
+  - blank/missing `tenors` fallback returns full rates projection
+  - `/health` returns `{"status":"ok"}`
 
 ### `upq-ingest`
 - `manifest_tests.rs`
@@ -70,6 +82,8 @@ Date: 2026-02-09
 - `compact_tests.rs`
   - multi-file partition is compacted to a single parquet file
   - compacted output preserves row count
+- `sync_remote.rs` unit tests
+  - option day/minute remote `find` commands target exact dataset directories (no duplicated path segment)
 
 ### `upq-bench`
 - `main.rs` unit tests

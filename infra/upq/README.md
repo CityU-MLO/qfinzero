@@ -30,6 +30,15 @@ cargo run -p upq-service
 ```
 Default bind: `127.0.0.1:23333`
 
+API routes:
+- `GET /health`
+- `GET /stock`
+- `GET /stock/daily`
+- `GET /option`
+- `GET /option/ticker_query`
+- `GET /option/chain_query`
+- `GET /rates/query`
+
 ## Ingest Sample Data
 In this workspace, sample data is expected under `./raw_sample`:
 - `raw_sample/stock/day/*.csv.gz`
