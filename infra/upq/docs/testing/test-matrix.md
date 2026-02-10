@@ -33,6 +33,10 @@ Date: 2026-02-09
 - Result: PASS
 - Evidence: `docs/testing/server-readonly-validation.md`
 
+9. `cargo run -p upq-ingest -- compact --storage-root ./storage`
+- Result: PASS
+- Output: `partitions_scanned=56 partitions_compacted=0` on current 14-day sample storage
+
 ## Implemented Test Cases
 
 ### `upq-core`
