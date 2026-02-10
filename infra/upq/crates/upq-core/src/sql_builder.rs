@@ -25,7 +25,7 @@ pub fn build_option_chain_sql(fields: &[&str]) -> String {
 
 pub fn build_tenor_projection(tenors: &[&str]) -> String {
     if tenors.is_empty() {
-        return "date".to_string();
+        return "date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year".to_string();
     }
 
     format!("date, {}", tenors.join(", "))

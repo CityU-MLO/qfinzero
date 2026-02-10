@@ -22,3 +22,12 @@ fn tenor_projection_only_selects_requested_tenors() {
     let projection = build_tenor_projection(&["yield_1_month", "yield_10_year"]);
     assert_eq!(projection, "date, yield_1_month, yield_10_year");
 }
+
+#[test]
+fn tenor_projection_defaults_to_all_columns_when_filter_is_empty() {
+    let projection = build_tenor_projection(&[]);
+    assert_eq!(
+        projection,
+        "date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year"
+    );
+}

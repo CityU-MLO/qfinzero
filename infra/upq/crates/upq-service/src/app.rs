@@ -627,6 +627,9 @@ fn parse_stock_daily_projection(fields_csv: Option<&str>) -> Result<String, &'st
 
     if let Some(fields_csv) = fields_csv {
         let fields = parse_csv_list(fields_csv);
+        if fields.is_empty() {
+            return Ok(default.join(", "));
+        }
         let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
         if validate_fields(&refs, &allowlist).is_err() {
             return Err("fields contains unsupported column");
@@ -678,6 +681,9 @@ fn parse_option_ticker_projection(
 
         if let Some(fields_csv) = fields_csv {
             let fields = parse_csv_list(fields_csv);
+            if fields.is_empty() {
+                return Ok(default.join(", "));
+            }
             let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
             if validate_fields(&refs, &allowlist).is_err() {
                 return Err("fields contains unsupported column");
@@ -731,6 +737,9 @@ fn parse_option_ticker_projection(
 
         if let Some(fields_csv) = fields_csv {
             let fields = parse_csv_list(fields_csv);
+            if fields.is_empty() {
+                return Ok(default.join(", "));
+            }
             let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
             if validate_fields(&refs, &allowlist).is_err() {
                 return Err("fields contains unsupported column");
@@ -781,6 +790,9 @@ fn parse_option_chain_projection(fields_csv: Option<&str>) -> Result<String, &'s
 
     if let Some(fields_csv) = fields_csv {
         let fields = parse_csv_list(fields_csv);
+        if fields.is_empty() {
+            return Ok(default.join(", "));
+        }
         let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
         if validate_fields(&refs, &allowlist).is_err() {
             return Err("fields contains unsupported column");
@@ -814,6 +826,9 @@ fn parse_projection(
 ) -> Result<String, &'static str> {
     if let Some(fields_csv) = fields_csv {
         let fields = parse_csv_list(fields_csv);
+        if fields.is_empty() {
+            return Ok(default_fields.join(", "));
+        }
         let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
         if validate_fields(&refs, allowlist).is_err() {
             return Err("fields contains unsupported column");
