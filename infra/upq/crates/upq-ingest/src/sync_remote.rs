@@ -34,22 +34,8 @@ pub fn collect_remote_files(
             quoted_root
         ),
     )?;
-    let option_day_root = join_remote_path(&normalized_root, "us_options_opra/day_aggs_v1");
-    let option_day = ssh_glob(
-        host,
-        &format!(
-            "find {}/us_options_opra/day_aggs_v1 -type f -name '*.csv.gz' | sort",
-            shell_quote(&option_day_root)
-        ),
-    )?;
-    let option_minute_root = join_remote_path(&normalized_root, "us_options_opra/minute_aggs_v1");
-    let option_minute = ssh_glob(
-        host,
-        &format!(
-            "find {}/us_options_opra/minute_aggs_v1 -type f -name '*.csv.gz' | sort",
-            shell_quote(&option_minute_root)
-        ),
-    )?;
+    let option_day = ssh_glob(host, &build_option_day_find_cmd(&normalized_root))?;
+    let option_minute = ssh_glob(host, &build_option_minute_find_cmd(&normalized_root))?;
 
     let rates_path = join_remote_path(&normalized_root, "assets/treasury_yields.csv");
     let rates_file = if ssh_file_exists(host, &rates_path)? {
@@ -143,9 +129,27 @@ fn join_remote_path(root: &str, suffix: &str) -> String {
     }
 }
 
+fn build_option_day_find_cmd(remote_root: &str) -> String {
+    let option_day_root = join_remote_path(remote_root, "us_options_opra/day_aggs_v1");
+    format!(
+        "find {} -type f -name '*.csv.gz' | sort",
+        shell_quote(&option_day_root)
+    )
+}
+
+fn build_option_minute_find_cmd(remote_root: &str) -> String {
+    let option_minute_root = join_remote_path(remote_root, "us_options_opra/minute_aggs_v1");
+    format!(
+        "find {} -type f -name '*.csv.gz' | sort",
+        shell_quote(&option_minute_root)
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{join_remote_path, shell_quote};
+    use super::{
+        build_option_day_find_cmd, build_option_minute_find_cmd, join_remote_path, shell_quote,
+    };
 
     #[test]
     fn shell_quote_quotes_special_characters() {
@@ -168,6 +172,24 @@ mod tests {
         assert_eq!(
             join_remote_path("/home/qlib/data", "assets/treasury_yields.csv"),
             "/home/qlib/data/assets/treasury_yields.csv"
+        );
+    }
+
+    #[test]
+    fn option_day_find_command_targets_exact_day_aggs_path() {
+        let cmd = build_option_day_find_cmd("/home/qlib/data");
+        assert_eq!(
+            cmd,
+            "find '/home/qlib/data/us_options_opra/day_aggs_v1' -type f -name '*.csv.gz' | sort"
+        );
+    }
+
+    #[test]
+    fn option_minute_find_command_targets_exact_minute_aggs_path() {
+        let cmd = build_option_minute_find_cmd("/home/qlib/data");
+        assert_eq!(
+            cmd,
+            "find '/home/qlib/data/us_options_opra/minute_aggs_v1' -type f -name '*.csv.gz' | sort"
         );
     }
 }
