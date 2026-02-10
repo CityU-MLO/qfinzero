@@ -96,16 +96,19 @@ fn compact_partition(
     );
     conn.execute_batch(&sql)?;
 
+    if final_output.is_file() {
+        fs::remove_file(&final_output)?;
+    }
+    fs::rename(&compacted_tmp, &final_output)?;
+
     for file in parquet_files {
+        if file == &final_output {
+            continue;
+        }
         if file.is_file() {
             fs::remove_file(file)?;
         }
     }
-
-    if final_output.is_file() {
-        fs::remove_file(&final_output)?;
-    }
-    fs::rename(compacted_tmp, final_output)?;
     Ok(())
 }
 

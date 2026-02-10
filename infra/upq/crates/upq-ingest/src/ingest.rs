@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use duckdb::Connection;
 use regex::Regex;
@@ -47,6 +48,9 @@ struct SourceFile {
     dataset: DatasetKind,
     path: PathBuf,
 }
+
+static TRADE_DATE_FILE_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(\d{4}-\d{2}-\d{2})\.csv(\.gz)?$").ok());
 
 pub fn run_ingest(options: &IngestOptions) -> Result<IngestReport, IngestError> {
     fs::create_dir_all(&options.storage_root)?;
@@ -189,7 +193,7 @@ fn ingest_stock(
     );
 
     write_parquet(conn, &select_sql, &output_literal, &output)?;
-    row_count(conn, &source_literal)
+    row_count(conn, &output)
 }
 
 fn ingest_option(
@@ -228,7 +232,7 @@ fn ingest_option(
     );
 
     write_parquet(conn, &select_sql, &output_literal, &output)?;
-    row_count(conn, &source_literal)
+    row_count(conn, &output)
 }
 
 fn ingest_rates(
@@ -258,7 +262,7 @@ fn ingest_rates(
     );
 
     write_parquet(conn, &select_sql, &output_literal, &output)?;
-    row_count(conn, &source_literal)
+    row_count(conn, &output)
 }
 
 fn output_file_path(
@@ -296,9 +300,10 @@ fn write_parquet(
     Ok(())
 }
 
-fn row_count(conn: &Connection, source_literal: &str) -> Result<i64, IngestError> {
+fn row_count(conn: &Connection, parquet_path: &Path) -> Result<i64, IngestError> {
+    let source_literal = sql_escape_literal(parquet_path.to_string_lossy().as_ref());
     let sql = format!(
-        "SELECT COUNT(*) FROM read_csv_auto('{source}', header=true)",
+        "SELECT COUNT(*) FROM read_parquet('{source}')",
         source = source_literal,
     );
     let count: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
@@ -310,9 +315,9 @@ fn extract_trade_date(path: &Path) -> Result<String, IngestError> {
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or_else(|| IngestError::InvalidFileName(path.to_string_lossy().to_string()))?;
-    let regex = Regex::new(r"(\d{4}-\d{2}-\d{2})\.csv(\.gz)?$")
-        .map_err(|_| IngestError::InvalidFileName(name.to_string()))?;
-    let captures = regex
+    let captures = TRADE_DATE_FILE_REGEX
+        .as_ref()
+        .ok_or_else(|| IngestError::InvalidFileName(name.to_string()))?
         .captures(name)
         .ok_or_else(|| IngestError::InvalidFileName(name.to_string()))?;
     let date = captures

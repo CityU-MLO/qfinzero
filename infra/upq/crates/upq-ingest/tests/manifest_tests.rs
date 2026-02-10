@@ -51,3 +51,23 @@ fn mark_error_transitions_status() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(status, Some(FileStatus::Error));
     Ok(())
 }
+
+#[test]
+fn should_process_treats_canonical_and_dotted_paths_as_same_file(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let source = tmp.path().join("sample.csv.gz");
+    fs::write(&source, b"abc")?;
+
+    let dotted = tmp.path().join(".").join("sample.csv.gz");
+    let canonical = fs::canonicalize(&source)?;
+
+    let store = ManifestStore::open(tmp.path().join("manifest.sqlite"))?;
+    let first = store.should_process(&dotted)?;
+    assert!(first);
+    store.mark_done(&dotted, 100)?;
+
+    let second = store.should_process(&canonical)?;
+    assert!(!second);
+    Ok(())
+}

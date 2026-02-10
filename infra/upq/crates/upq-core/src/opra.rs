@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use chrono::NaiveDate;
 use regex::Regex;
 
@@ -11,12 +13,13 @@ pub struct ParsedOpraContract {
     pub strike: f64,
 }
 
-pub fn parse_opra_contract(contract: &str) -> Result<ParsedOpraContract, CoreError> {
-    let pattern = Regex::new(r"^O:([A-Z]+)[0-9]{0,2}(\d{6})([CP])(\d{8})$")
-        .map_err(|_| CoreError::InvalidOpraContract(contract.to_string()))?;
+static OPRA_CONTRACT_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^O:([A-Z]+)[0-9]{0,2}(\d{6})([CP])(\d{8})$").ok());
 
-    let captures = pattern
-        .captures(contract)
+pub fn parse_opra_contract(contract: &str) -> Result<ParsedOpraContract, CoreError> {
+    let captures = OPRA_CONTRACT_REGEX
+        .as_ref()
+        .and_then(|pattern| pattern.captures(contract))
         .ok_or_else(|| CoreError::InvalidOpraContract(contract.to_string()))?;
 
     let underlying = captures

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 use chrono::NaiveDate;
 use regex::Regex;
@@ -9,6 +10,9 @@ pub enum SampleSyncError {
     #[error("no trade dates found in source file list")]
     NoTradeDates,
 }
+
+static ISO_DATE_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(\d{4}-\d{2}-\d{2})").ok());
 
 pub fn latest_n_trade_dates(files: &[String], n: usize) -> Result<Vec<String>, SampleSyncError> {
     let mut unique_dates = BTreeSet::new();
@@ -40,8 +44,7 @@ pub fn select_files_for_dates(files: &[String], dates: &[String]) -> Vec<String>
 }
 
 fn extract_iso_date(path: &str) -> Option<String> {
-    let pattern = Regex::new(r"(\d{4}-\d{2}-\d{2})").ok()?;
-    let capture = pattern.captures(path)?;
+    let capture = ISO_DATE_REGEX.as_ref()?.captures(path)?;
     let value = capture.get(1)?.as_str();
 
     if NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() {

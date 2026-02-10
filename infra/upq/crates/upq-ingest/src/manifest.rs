@@ -173,7 +173,7 @@ impl ManifestStore {
 }
 
 fn normalized_path(path: &Path) -> String {
-    let resolved: PathBuf = path.to_path_buf();
+    let resolved: PathBuf = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     resolved.to_string_lossy().to_string()
 }
 

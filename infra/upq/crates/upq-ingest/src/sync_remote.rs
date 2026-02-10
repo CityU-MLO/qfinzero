@@ -13,6 +13,11 @@ pub enum SyncRemoteError {
     Io(#[from] std::io::Error),
 }
 
+const SSH_CONNECT_TIMEOUT_ARG: &str = "ConnectTimeout=10";
+const SSH_SERVER_ALIVE_INTERVAL_ARG: &str = "ServerAliveInterval=15";
+const SSH_SERVER_ALIVE_COUNT_MAX_ARG: &str = "ServerAliveCountMax=2";
+const RSYNC_IO_TIMEOUT_SECONDS: &str = "120";
+
 pub fn collect_remote_files(
     host: &str,
     remote_root: &str,
@@ -64,6 +69,7 @@ pub fn run_sync_plan(host: &str, plan: &[SyncItem], execute: bool) -> Result<(),
         let remote = format!("{}:{}", host, item.remote_path);
         let output = Command::new("rsync")
             .arg("-avz")
+            .arg(format!("--timeout={RSYNC_IO_TIMEOUT_SECONDS}"))
             .arg(remote)
             .arg(item.local_dir.as_str())
             .output()?;
@@ -78,7 +84,11 @@ pub fn run_sync_plan(host: &str, plan: &[SyncItem], execute: bool) -> Result<(),
 }
 
 fn ssh_glob(host: &str, remote_cmd: &str) -> Result<Vec<String>, SyncRemoteError> {
-    let output = Command::new("ssh").arg(host).arg(remote_cmd).output()?;
+    let output = Command::new("ssh")
+        .args(ssh_timeout_args())
+        .arg(host)
+        .arg(remote_cmd)
+        .output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         return Err(SyncRemoteError::CommandFailed(stderr));
@@ -98,7 +108,11 @@ fn ssh_file_exists(host: &str, remote_file: &str) -> Result<bool, SyncRemoteErro
         "if [ -f '{}' ]; then echo yes; else echo no; fi",
         remote_file.replace('\'', "'\"'\"'")
     );
-    let output = Command::new("ssh").arg(host).arg(cmd).output()?;
+    let output = Command::new("ssh")
+        .args(ssh_timeout_args())
+        .arg(host)
+        .arg(cmd)
+        .output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         return Err(SyncRemoteError::CommandFailed(stderr));
@@ -127,6 +141,19 @@ fn join_remote_path(root: &str, suffix: &str) -> String {
     } else {
         format!("{root}/{suffix}")
     }
+}
+
+fn ssh_timeout_args() -> [&'static str; 8] {
+    [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        SSH_CONNECT_TIMEOUT_ARG,
+        "-o",
+        SSH_SERVER_ALIVE_INTERVAL_ARG,
+        "-o",
+        SSH_SERVER_ALIVE_COUNT_MAX_ARG,
+    ]
 }
 
 fn build_option_day_find_cmd(remote_root: &str) -> String {
