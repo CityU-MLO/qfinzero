@@ -45,6 +45,18 @@ Date: 2026-02-10
 - Result: PASS
 - Coverage intent: rsync source discovery command path correctness for options day/minute datasets
 
+12. `cargo test -p upq-service --test api_contract_tests option_chain_query_rejects_non_finite_strike_filters`
+- Result: PASS
+- Coverage intent: reject non-finite numeric filters (`NaN`/`inf`) for chain strike bounds
+
+13. `cargo test -p upq-service --test api_contract_tests rates_cache_retains_recent_entry_when_capacity_exceeded`
+- Result: PASS
+- Coverage intent: rates cache eviction preserves most-recently-used entries after capacity overflow
+
+14. `cargo test -p upq-ingest --test manifest_tests should_process_treats_canonical_and_dotted_paths_as_same_file`
+- Result: PASS
+- Coverage intent: manifest path normalization prevents duplicate ingest for equivalent file paths
+
 ## Implemented Test Cases
 
 ### `upq-core`
@@ -69,12 +81,15 @@ Date: 2026-02-10
   - blank `fields` fallback for `/stock`, `/stock/daily`, `/option/ticker_query`, `/option/chain_query`
   - blank/missing `tenors` fallback returns full rates projection
   - `/health` returns `{"status":"ok"}`
+  - non-finite option chain strike filters are rejected with 400
+  - rates cache retains recently-used key after crossing capacity boundary
 
 ### `upq-ingest`
 - `manifest_tests.rs`
   - unchanged file gets skipped
   - changed file gets reprocessed
   - mark_error sets status to error
+  - canonical and dotted paths resolve to the same manifest key
 - `ingest_tests.rs`
   - gzip CSV sample ingests into partitioned Parquet
   - option parquet includes both `ticker` and `contract` columns
