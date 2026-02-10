@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,11 +27,12 @@ use upq_core::validation::{
 };
 
 const MAX_LIMIT: usize = 100_000;
+const RATES_CACHE_CAPACITY: usize = 512;
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     storage_root: PathBuf,
-    rates_cache: Arc<RwLock<HashMap<RatesCacheKey, Vec<Value>>>>,
+    rates_cache: Arc<RwLock<RatesCache>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,23 +42,63 @@ struct RatesCacheKey {
     projection: String,
 }
 
+#[derive(Debug, Default)]
+struct RatesCache {
+    rows_by_key: HashMap<RatesCacheKey, Vec<Value>>,
+    lru_order: VecDeque<RatesCacheKey>,
+}
+
+impl RatesCache {
+    fn get(&mut self, key: &RatesCacheKey) -> Option<Vec<Value>> {
+        let rows = self.rows_by_key.get(key)?.clone();
+        self.touch(key);
+        Some(rows)
+    }
+
+    fn insert(&mut self, key: RatesCacheKey, rows: Vec<Value>) {
+        if self.rows_by_key.contains_key(&key) {
+            self.rows_by_key.insert(key.clone(), rows);
+            self.touch(&key);
+            return;
+        }
+
+        if self.rows_by_key.len() >= RATES_CACHE_CAPACITY {
+            if let Some(oldest_key) = self.lru_order.pop_front() {
+                self.rows_by_key.remove(&oldest_key);
+            }
+        }
+        self.lru_order.push_back(key.clone());
+        self.rows_by_key.insert(key, rows);
+    }
+
+    fn touch(&mut self, key: &RatesCacheKey) {
+        if let Some(index) = self.lru_order.iter().position(|entry| entry == key) {
+            let _ = self.lru_order.remove(index);
+        }
+        self.lru_order.push_back(key.clone());
+    }
+}
+
 #[derive(Debug, Error)]
 enum ServiceError {
     #[error("duckdb error: {0}")]
     Duckdb(#[from] duckdb::Error),
     #[error("join error: {0}")]
     Join(String),
+    #[error("connection error: {0}")]
+    Connection(String),
 }
 
 pub fn build_router() -> Router {
     let storage_root = env::var("STORAGE_ROOT").unwrap_or_else(|_| "./storage".to_string());
+    eprintln!("upq-service storage_root={storage_root}");
     build_router_with_storage_root(storage_root)
 }
 
 pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Router {
     let state = AppState {
         storage_root: storage_root.into(),
-        rates_cache: Arc::new(RwLock::new(HashMap::new())),
+        rates_cache: Arc::new(RwLock::new(RatesCache::default())),
     };
 
     Router::new()
@@ -352,6 +394,16 @@ async fn option_chain_query(
             return invalid_argument("type must be C or P");
         }
     }
+    if let Some(strike_min) = params.strike_min {
+        if !strike_min.is_finite() {
+            return invalid_argument("strike_min must be finite");
+        }
+    }
+    if let Some(strike_max) = params.strike_max {
+        if !strike_max.is_finite() {
+            return invalid_argument("strike_max must be finite");
+        }
+    }
 
     let projection = match parse_option_chain_projection(params.fields.as_deref()) {
         Ok(value) => value,
@@ -439,7 +491,7 @@ async fn rates_query(
         end: params.end.clone(),
         projection: projection.clone(),
     };
-    if let Some(cached_rows) = state.rates_cache.read().await.get(&cache_key).cloned() {
+    if let Some(cached_rows) = state.rates_cache.write().await.get(&cache_key) {
         return (StatusCode::OK, Json(Value::Array(cached_rows))).into_response();
     }
 
@@ -448,12 +500,7 @@ async fn rates_query(
         return (StatusCode::OK, Json(json!([]))).into_response();
     }
 
-    let sql = format!(
-        "SELECT {projection} FROM read_parquet('{path}') WHERE date >= DATE '{start}' AND date <= DATE '{end}' ORDER BY date",
-        path = sql_escape_literal(&file_path.to_string_lossy()),
-        start = "{start}",
-        end = "{end}",
-    );
+    let file_path_literal = sql_escape_literal(&file_path.to_string_lossy());
     let chunks = match split_by_month(&params.start, &params.end) {
         Ok(value) => value,
         Err(_) => return invalid_argument("start/end must be date: YYYY-MM-DD"),
@@ -461,9 +508,14 @@ async fn rates_query(
 
     let mut join_set = JoinSet::new();
     for (chunk_start, chunk_end) in chunks {
-        let sql = sql
-            .replace("{start}", &sql_escape_literal(&chunk_start))
-            .replace("{end}", &sql_escape_literal(&chunk_end));
+        let sql = format!(
+            "SELECT {projection} FROM read_parquet('{path}') \
+             WHERE date >= DATE '{start}' AND date <= DATE '{end}' ORDER BY date",
+            projection = projection,
+            path = file_path_literal,
+            start = sql_escape_literal(&chunk_start),
+            end = sql_escape_literal(&chunk_end),
+        );
         join_set.spawn_blocking(move || run_sql_json(&sql));
     }
 
@@ -476,39 +528,25 @@ async fn rates_query(
         }
     }
 
-    let mut seen_dates = BTreeSet::new();
-    rows.retain(|row| {
-        let key = row
-            .get("date")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        if seen_dates.contains(&key) {
-            return false;
-        }
-        seen_dates.insert(key);
-        true
-    });
-
     rows.sort_by(|left, right| {
-        let left_date = left
-            .get("date")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let left_date = left.get("date").and_then(Value::as_str).unwrap_or_default();
         let right_date = right
             .get("date")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        left_date.cmp(&right_date)
+            .unwrap_or_default();
+        left_date.cmp(right_date)
+    });
+    rows.dedup_by(|left, right| {
+        let left_date = left.get("date").and_then(Value::as_str).unwrap_or_default();
+        let right_date = right
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        left_date == right_date
     });
 
     {
         let mut cache = state.rates_cache.write().await;
-        if cache.len() >= 512 {
-            cache.clear();
-        }
         cache.insert(cache_key, rows.clone());
     }
 
@@ -516,31 +554,52 @@ async fn rates_query(
 }
 
 fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
-    let conn = Connection::open_in_memory()?;
-    let mut stmt = conn.prepare(sql)?;
-    let mut rows = stmt.query([])?;
-    let columns = match rows.as_ref() {
-        Some(statement) => statement.column_names(),
-        None => Vec::new(),
-    };
+    with_thread_local_connection(|conn| {
+        let mut stmt = conn.prepare(sql)?;
+        let mut rows = stmt.query([])?;
+        let columns = match rows.as_ref() {
+            Some(statement) => statement.column_names(),
+            None => Vec::new(),
+        };
 
-    let mut out = Vec::new();
-    while let Some(row) = rows.next()? {
-        let mut object = Map::new();
-        for (idx, col) in columns.iter().enumerate() {
-            let value = row.get_ref(idx)?;
-            object.insert(col.clone(), value_ref_to_json(value));
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let mut object = Map::new();
+            for (idx, col) in columns.iter().enumerate() {
+                let value = row.get_ref(idx)?;
+                object.insert(col.clone(), value_ref_to_json(value));
+            }
+            out.push(Value::Object(object));
         }
-        out.push(Value::Object(object));
-    }
 
-    Ok(out)
+        Ok(out)
+    })
 }
 
 async fn run_sql_json_async(sql: String) -> Result<Vec<Value>, ServiceError> {
     let task = tokio::task::spawn_blocking(move || run_sql_json(&sql));
     task.await
         .map_err(|error| ServiceError::Join(error.to_string()))?
+}
+
+thread_local! {
+    static THREAD_LOCAL_DUCKDB_CONN: RefCell<Option<Connection>> = const { RefCell::new(None) };
+}
+
+fn with_thread_local_connection<T>(
+    f: impl FnOnce(&Connection) -> Result<T, ServiceError>,
+) -> Result<T, ServiceError> {
+    THREAD_LOCAL_DUCKDB_CONN.with(|cell| {
+        if cell.borrow().is_none() {
+            *cell.borrow_mut() = Some(Connection::open_in_memory()?);
+        }
+
+        let borrow = cell.borrow();
+        let conn = borrow.as_ref().ok_or_else(|| {
+            ServiceError::Connection("failed to initialize connection".to_string())
+        })?;
+        f(conn)
+    })
 }
 
 fn value_ref_to_json(value: ValueRef<'_>) -> Value {
@@ -906,11 +965,7 @@ fn has_any_parquet_file(path: &Path) -> bool {
     }
 
     if path.is_file() {
-        return path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("parquet"))
-            .unwrap_or(false);
+        return is_parquet_file(path);
     }
 
     let entries = match fs::read_dir(path) {
@@ -919,12 +974,35 @@ fn has_any_parquet_file(path: &Path) -> bool {
     };
 
     for entry in entries.flatten() {
-        if has_any_parquet_file(&entry.path()) {
+        let entry_path = entry.path();
+        if is_parquet_file(&entry_path) {
             return true;
+        }
+        if !entry_path.is_dir() {
+            continue;
+        }
+
+        let partition_entries = match fs::read_dir(entry_path) {
+            Ok(items) => items,
+            Err(_) => continue,
+        };
+        for partition_entry in partition_entries.flatten() {
+            if is_parquet_file(&partition_entry.path()) {
+                return true;
+            }
         }
     }
 
     false
+}
+
+fn is_parquet_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("parquet"))
+            .unwrap_or(false)
 }
 
 fn sql_escape_literal(value: &str) -> String {
