@@ -29,6 +29,10 @@ Date: 2026-02-09
 - Result: PASS
 - Coverage intent: partition compaction merges multi-file parquet partitions without data loss
 
+8. `./scripts/validate_server_readonly.sh qlib`
+- Result: PASS
+- Evidence: `docs/testing/server-readonly-validation.md`
+
 ## Implemented Test Cases
 
 ### `upq-core`

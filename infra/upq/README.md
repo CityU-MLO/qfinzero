@@ -15,6 +15,7 @@ UPQ is a Rust implementation of the price query service with API compatibility g
 - Test strategy: `docs/testing/test-strategy.md`
 - Test matrix: `docs/testing/test-matrix.md`
 - Benchmark report: `docs/testing/benchmark-report.md`
+- Server read-only validation: `docs/testing/server-readonly-validation.md`
 
 ## Build and Test
 ```bash
@@ -61,4 +62,9 @@ cargo run -p upq-bench -- \
   --end 2025-12-31T16:00:00 \
   --iterations 20 \
   --warmup 3
+```
+
+## Server Read-Only Validation
+```bash
+./scripts/validate_server_readonly.sh qlib
 ```
