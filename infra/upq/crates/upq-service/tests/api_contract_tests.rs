@@ -28,6 +28,19 @@ async fn stock_endpoint_accepts_valid_request() -> Result<(), Box<dyn std::error
 }
 
 #[tokio::test]
+async fn health_endpoint_returns_ok_status() -> Result<(), Box<dyn std::error::Error>> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder().uri("/health").body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    assert_eq!(payload.get("status"), Some(&Value::String("ok".to_string())));
+    Ok(())
+}
+
+#[tokio::test]
 async fn option_ticker_query_rejects_invalid_resolution() -> Result<(), Box<dyn std::error::Error>>
 {
     let app = upq_service::app::build_router();

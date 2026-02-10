@@ -60,6 +60,7 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
     };
 
     Router::new()
+        .route("/health", get(health))
         .route("/stock", get(stock))
         .route("/stock/daily", get(stock_daily))
         .route("/option", get(option))
@@ -317,6 +318,10 @@ async fn option() -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+async fn health() -> axum::response::Response {
+    (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
 }
 
 async fn option_chain_query(
