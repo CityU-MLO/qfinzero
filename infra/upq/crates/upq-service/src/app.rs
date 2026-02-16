@@ -10,6 +10,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use tower_http::trace::{self, TraceLayer};
+use tracing::Level;
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
@@ -109,6 +111,11 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         .route("/option/ticker_query", get(option_ticker_query))
         .route("/option/chain_query", get(option_chain_query))
         .route("/rates/query", get(rates_query))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state)
 }
 

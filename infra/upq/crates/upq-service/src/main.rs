@@ -1,9 +1,18 @@
 use std::net::SocketAddr;
 
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use upq_service::app::build_router;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "upq_service=info,tower_http=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let app = build_router();
     let port = std::env::var("PORT")
         .ok()
