@@ -42,7 +42,7 @@ cp .env.example .env
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `STORAGE_ROOT` | Yes | - | Path to ingested parquet data directory |
-| `PORT` | No | 23333 | Server port to bind |
+| `PORT` | No | 19350 | Server port to bind |
 | `RUST_LOG` | No | info | Log level (trace, debug, info, warn, error) |
 
 Example `.env`:
@@ -100,7 +100,7 @@ Expected output:
 ```bash
 cargo run -p upq-service
 ```
-Default bind: `127.0.0.1:23333`
+Default bind: `127.0.0.1:19350`
 
 API routes:
 - `GET /health`
@@ -162,11 +162,11 @@ sudo systemctl status upq
 
 6. Health check:
 ```bash
-curl -sS http://127.0.0.1:23333/health
+curl -sS http://127.0.0.1:19350/health
 ```
 
 Notes:
-- Service currently binds `127.0.0.1:23333`; expose externally via reverse proxy if needed.
+- Service currently binds `127.0.0.1:19350`; expose externally via reverse proxy if needed.
 - Rollback: keep previous binary under `/opt/upq/bin` and restart `upq` service.
 
 ## Ingest Sample Data
