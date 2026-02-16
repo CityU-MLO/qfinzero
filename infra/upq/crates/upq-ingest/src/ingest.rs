@@ -1,7 +1,9 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use duckdb::Connection;
 use regex::Regex;
@@ -58,30 +60,68 @@ pub fn run_ingest(options: &IngestOptions) -> Result<IngestReport, IngestError> 
     let manifest = ManifestStore::open(&options.manifest_path)?;
     let conn = Connection::open_in_memory()?;
     let files = discover_input_files(&options.raw_root)?;
+    let total_files = files.len();
 
     let mut report = IngestReport {
         processed_files: 0,
         skipped_files: 0,
     };
 
-    for source in files {
+    println!("Ingesting {} files...", total_files);
+    let start_time = Instant::now();
+
+    for (idx, source) in files.into_iter().enumerate() {
+        let current = idx + 1;
+        let file_name = source
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("file_{}", current));
+
         if !manifest.should_process(&source.path)? {
             report.skipped_files += 1;
+            println!(
+                "[{}/{}] SKIP {} (already processed)",
+                current, total_files, file_name
+            );
             continue;
         }
+
+        print!("[{}/{}] Processing {}... ", current, total_files, file_name);
+        Write::flush(&mut std::io::stdout()).ok();
 
         match ingest_file(&conn, &options.storage_root, &source) {
             Ok(rows) => {
                 manifest.mark_done(&source.path, rows)?;
                 report.processed_files += 1;
+
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let files_done = current;
+                let avg_time = elapsed / files_done as f64;
+                let remaining_files = total_files - current;
+                let eta_secs = avg_time * remaining_files as f64;
+
+                println!(
+                    "OK ({} rows) [{:.1}%] ETA: {:.0}s",
+                    rows,
+                    (files_done as f64 / total_files as f64) * 100.0,
+                    eta_secs
+                );
             }
             Err(error) => {
                 let message = error.to_string();
                 manifest.mark_error(&source.path, &message)?;
+                println!("ERROR: {}", message);
                 return Err(error);
             }
         }
     }
+
+    let total_elapsed = start_time.elapsed();
+    println!(
+        "\nIngest complete: {}/{} files processed, {} skipped in {:?}",
+        report.processed_files, total_files, report.skipped_files, total_elapsed
+    );
 
     Ok(report)
 }
