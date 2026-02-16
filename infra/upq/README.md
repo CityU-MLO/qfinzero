@@ -18,11 +18,38 @@ cargo run -p upq-ingest -- ingest \
   --storage-root ~/upq_storage \
   --manifest ~/upq_state/manifest.sqlite
 
-# 4. Run service
-STORAGE_ROOT=~/upq_storage PORT=19350 cargo run -p upq-service
+# 4. Configure environment
+cp .env.example .env
+# Edit .env to set your STORAGE_ROOT and PORT
 
-# 5. Test
+# 5. Run service
+cargo run -p upq-service
+
+# 6. Test
 curl http://127.0.0.1:19350/health
+```
+
+## Configuration
+
+Create a `.env` file from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `STORAGE_ROOT` | Yes | - | Path to ingested parquet data directory |
+| `PORT` | No | 23333 | Server port to bind |
+| `RUST_LOG` | No | info | Log level (trace, debug, info, warn, error) |
+
+Example `.env`:
+```bash
+PORT=19350
+STORAGE_ROOT=/home/qlib/upq_storage
+RUST_LOG=info
 ```
 
 ## Workspace

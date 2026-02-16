@@ -5,6 +5,11 @@ use upq_service::app::build_router;
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if present
+    if let Err(e) = dotenvy::dotenv() {
+        tracing::debug!("No .env file found or failed to load: {}", e);
+    }
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()

@@ -1,5 +1,6 @@
 /target/
 .DS_Store
+.env
 /raw_sample/
 /storage/
 /state/

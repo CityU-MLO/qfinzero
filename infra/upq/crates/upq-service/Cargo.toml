@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 axum.workspace = true
 chrono.workspace = true
+dotenvy.workspace = true
 duckdb.workspace = true
 serde.workspace = true
 serde_json.workspace = true
