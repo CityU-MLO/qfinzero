@@ -1,0 +1,13 @@
+{
+  "positions": [
+    {
+      "instrument_id": "STOCK:NVDA",
+      "type": "STOCK",
+      "qty": 100,
+      "avg_price": 140.1568,
+      "mark_price": 94.31,
+      "unrealized_pnl": -4584.68,
+      "realized_pnl": 0.0
+    }
+  ]
+}

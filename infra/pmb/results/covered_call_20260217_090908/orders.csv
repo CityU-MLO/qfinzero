@@ -1,0 +1,2 @@
+order_id,client_order_id,session_id,account_id,instrument_id,side,order_type,qty,filled_qty,remaining_qty,limit_price,stop_price,avg_fill_price,time_in_force,status,created_ts,last_update_ts,reject_reason
+ord_b660b61e,buy_stock_100,sess_5e5e8456,acct_7e6f0d,STOCK:NVDA,BUY,MARKET,100,100,0,None,None,140.1568,DAY,FILLED,2025-01-06T00:00:00+00:00,2025-01-07T00:00:00+00:00,None

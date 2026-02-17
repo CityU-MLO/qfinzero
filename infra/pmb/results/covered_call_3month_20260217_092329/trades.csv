@@ -1,0 +1,2 @@
+trade_id,order_id,instrument_id,side,qty,price,fees,ts
+trd_0a6d4f02,ord_0e552ba1,STOCK:NVDA,BUY,100,140.1568,0.5,2025-01-07T00:00:00+00:00

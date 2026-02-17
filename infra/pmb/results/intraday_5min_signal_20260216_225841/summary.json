@@ -1,0 +1,15 @@
+{
+  "session_id": "sess_3647b08c",
+  "run_id": "intraday_5min",
+  "start_ts": "2025-01-06T09:30:00",
+  "end_ts": "2025-01-06T16:00:00",
+  "final_equity": 25085.2,
+  "total_return": 0.003408,
+  "max_drawdown": 0.002373,
+  "fees_paid": 1.4,
+  "num_orders": 56,
+  "num_trades": 56,
+  "reject_rate": 0.0,
+  "invalid_action_rate": 0.0,
+  "margin_call_count": 0
+}

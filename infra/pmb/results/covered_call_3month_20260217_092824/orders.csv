@@ -1,0 +1,5 @@
+order_id,client_order_id,session_id,account_id,instrument_id,side,order_type,qty,filled_qty,remaining_qty,limit_price,stop_price,avg_fill_price,time_in_force,status,created_ts,last_update_ts,reject_reason
+ord_ed65f8d5,initial_stock_buy,sess_31f20f54,acct_4812b8,STOCK:NVDA,BUY,MARKET,100,100,0,None,None,140.1568,DAY,FILLED,2025-01-06T00:00:00+00:00,2025-01-07T00:00:00+00:00,None
+ord_8754406e,sell_call_2,sess_31f20f54,acct_4812b8,OPTION:O:NVDA250131C00130000,SELL,MARKET,1,0,1,None,None,None,GTC,ACCEPTED,2025-01-27T00:00:00+00:00,2025-01-27T00:00:00+00:00,None
+ord_9a87765e,sell_call_4,sess_31f20f54,acct_4812b8,OPTION:O:NVDA250214C00152500,SELL,MARKET,1,0,1,None,None,None,GTC,ACCEPTED,2025-02-14T00:00:00+00:00,2025-02-14T00:00:00+00:00,None
+ord_c2d3d24d,sell_call_8,sess_31f20f54,acct_4812b8,OPTION:O:NVDA250328C00123000,SELL,MARKET,1,0,1,None,None,None,GTC,ACCEPTED,2025-03-27T00:00:00+00:00,2025-03-27T00:00:00+00:00,None
