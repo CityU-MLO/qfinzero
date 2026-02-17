@@ -1,0 +1,931 @@
+openapi: 3.1.0
+info:
+  title: FFO - Formulaic Factor Optimization API
+  description: |
+    High-performance quantitative factor evaluation and optimization platform.
+    Supports factor syntax validation, IC/RankIC metric computation, portfolio
+    backtesting, and multi-factor combination training via LASSO or IC optimization.
+  version: 1.0.0
+  contact:
+    name: QFinZero
+
+servers:
+  - url: http://localhost:19320
+    description: Local development server
+
+tags:
+  - name: health
+    description: Service health and cache status
+  - name: factors
+    description: Factor validation and evaluation
+  - name: combination
+    description: Multi-factor combination training, backtesting, and model management
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check & cache statistics
+      tags: [health]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /factors/check:
+    post:
+      operationId: checkFactors
+      summary: Validate factor expression syntax
+      description: |
+        Quick syntax validation without full evaluation. Runs a short
+        evaluation window (default 2020-01-01 to 2020-01-15) to verify
+        the expression is parseable and computable.
+      tags: [factors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckRequest"
+      responses:
+        "200":
+          description: Validation results (may include per-expression failures)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CheckResultItem"
+        "400":
+          description: Malformed request (e.g. missing expression field)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CheckErrorItem"
+
+  /factors/eval:
+    post:
+      operationId: evalFactors
+      summary: Evaluate factors with IC metrics and optional portfolio backtest
+      description: |
+        Full factor evaluation. Computes IC, Rank IC, ICIR, and related metrics.
+        When `fast=false` (default), also runs a portfolio backtest with the
+        specified `topk` / `n_drop` parameters.
+
+        Supports single expression, dict of named expressions, list, or mixed list.
+        Always returns a JSON array, even for a single expression.
+      tags: [factors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvalRequest"
+      responses:
+        "200":
+          description: Evaluation results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EvalResultItem"
+        "400":
+          description: Invalid expression input
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EvalErrorItem"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EvalErrorItem"
+
+  /combination/train:
+    post:
+      operationId: trainCombination
+      summary: Train factor combination weights
+      description: |
+        Train optimal weights for multiple factors using LASSO regression
+        or IC optimization. Returns weights, combined expression, and training IC.
+      tags: [combination]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainRequest"
+      responses:
+        "200":
+          description: Training result with optimized weights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainResponse"
+        "400":
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Training failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/backtest:
+    post:
+      operationId: backtestCombination
+      summary: Backtest a trained factor combination
+      description: |
+        Run portfolio backtest using previously trained factor weights.
+        Accepts the trained model output from `/combination/train`.
+      tags: [combination]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BacktestRequest"
+      responses:
+        "200":
+          description: Backtest results with portfolio analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BacktestResponse"
+        "400":
+          description: Missing trained_model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Backtest failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/compare_methods:
+    post:
+      operationId: compareMethods
+      summary: Compare LASSO vs IC optimization on the same factors
+      description: |
+        Trains both methods on the same training period, then evaluates
+        on the test period to produce a side-by-side comparison.
+      tags: [combination]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompareMethodsRequest"
+      responses:
+        "200":
+          description: Method comparison results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompareMethodsResponse"
+        "400":
+          description: Missing factor_expressions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Comparison failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/automated_training:
+    post:
+      operationId: automatedTraining
+      summary: Rolling window automated factor training
+      description: |
+        Run automated rolling window training over a long period.
+        Retrains at `update_frequency_days` intervals using a
+        `training_window_days` lookback window.
+      tags: [combination]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomatedTrainingRequest"
+      responses:
+        "200":
+          description: Rolling training results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomatedTrainingResponse"
+        "400":
+          description: Missing factor_expressions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Training pipeline failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/generate_report:
+    post:
+      operationId: generateReport
+      summary: Generate a comprehensive factor combination report
+      tags: [combination]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateReportRequest"
+      responses:
+        "200":
+          description: Generated report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateReportResponse"
+        "400":
+          description: Missing training_results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Report generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/list_models:
+    get:
+      operationId: listModels
+      summary: List saved trained models
+      tags: [combination]
+      parameters:
+        - name: method
+          in: query
+          required: false
+          description: Filter by optimization method
+          schema:
+            type: string
+            enum: [lasso, ic_optimization]
+      responses:
+        "200":
+          description: List of saved models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListModelsResponse"
+        "500":
+          description: Failed to list models
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /combination/load_model:
+    get:
+      operationId: loadModel
+      summary: Load a saved model by method and training date
+      tags: [combination]
+      parameters:
+        - name: method
+          in: query
+          required: true
+          description: Optimization method
+          schema:
+            type: string
+            enum: [lasso, ic_optimization]
+        - name: training_date
+          in: query
+          required: true
+          description: Training date
+          schema:
+            type: string
+            format: date
+            example: "2024-01-15"
+      responses:
+        "200":
+          description: Loaded model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadModelResponse"
+        "400":
+          description: Missing method or training_date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to load model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    # ──────────────────────────────────────────────
+    # Shared / reusable
+    # ──────────────────────────────────────────────
+    FactorExpression:
+      description: |
+        A factor expression, or a collection of factor expressions.
+        Accepts a single string, a dict of name→expression, a list of strings,
+        or a mixed list of strings and single-key dicts.
+      oneOf:
+        - type: string
+          example: "Rank(Corr($close, $volume, 10), 252)"
+        - type: object
+          additionalProperties:
+            type: string
+          example:
+            momentum: "Rank($close, 20)"
+            volatility: "Std($close, 20)"
+        - type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                additionalProperties:
+                  type: string
+          example:
+            - "Mean($close, 20)"
+            - volatility: "Std($close, 20)"
+
+    Market:
+      type: string
+      enum: [csi300, csi500, csi1000]
+      default: csi300
+
+    ICMetrics:
+      type: object
+      properties:
+        ic:
+          type: number
+          description: Mean Information Coefficient
+        rank_ic:
+          type: number
+          description: Mean Spearman rank IC
+        ir:
+          type: number
+          description: Information Ratio of IC series
+        icir:
+          type: number
+          description: IC / std(IC)
+        rank_icir:
+          type: number
+          description: Rank IC / std(Rank IC)
+        turnover:
+          type: number
+          description: Portfolio turnover (0-1)
+        n_dates:
+          type: integer
+          description: Number of evaluation dates
+
+    PortfolioMetricSet:
+      type: object
+      properties:
+        mean_return:
+          type: number
+          description: Average return (%)
+        std:
+          type: number
+          description: Return standard deviation (%)
+        annualized_return:
+          type: number
+          description: Annualized return (%)
+        information_ratio:
+          type: number
+          description: Return per unit tracking error
+        max_drawdown:
+          type: number
+          description: Maximum drawdown (%)
+
+    PortfolioMetrics:
+      type: object
+      properties:
+        benchmark:
+          $ref: "#/components/schemas/PortfolioMetricSet"
+        pure_return_without_cost:
+          $ref: "#/components/schemas/PortfolioMetricSet"
+        pure_return_with_cost:
+          $ref: "#/components/schemas/PortfolioMetricSet"
+        excess_return_without_cost:
+          $ref: "#/components/schemas/PortfolioMetricSet"
+        excess_return_with_cost:
+          $ref: "#/components/schemas/PortfolioMetricSet"
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    TrainedModel:
+      type: object
+      properties:
+        weights:
+          type: array
+          items:
+            type: number
+        factor_names:
+          type: array
+          items:
+            type: string
+        combined_expression:
+          type: string
+        training_ic:
+          type: number
+        non_zero_count:
+          type: integer
+
+    # ──────────────────────────────────────────────
+    # Health
+    # ──────────────────────────────────────────────
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        service:
+          type: string
+          example: Factor Evaluation API
+        timestamp:
+          type: string
+          format: date-time
+        cache:
+          type: object
+          properties:
+            size:
+              type: integer
+            max_size:
+              type: integer
+
+    # ──────────────────────────────────────────────
+    # /factors/check
+    # ──────────────────────────────────────────────
+    CheckRequest:
+      type: object
+      required: [expression]
+      properties:
+        expression:
+          $ref: "#/components/schemas/FactorExpression"
+        instruments:
+          type: string
+          default: csi300
+        start:
+          type: string
+          format: date
+          default: "2020-01-01"
+        end:
+          type: string
+          format: date
+          default: "2020-01-15"
+        timeout:
+          type: integer
+          default: 120
+          description: Validation timeout in seconds
+
+    CheckResultItem:
+      type: object
+      properties:
+        success:
+          type: boolean
+        name:
+          type: string
+        expression:
+          type: string
+        is_valid:
+          type: boolean
+        error_message:
+          type: string
+        error_type:
+          type: string
+
+    CheckErrorItem:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: false
+        name:
+          type: string
+        expression:
+          type: string
+        error_message:
+          type: string
+        error_type:
+          type: string
+
+    # ──────────────────────────────────────────────
+    # /factors/eval
+    # ──────────────────────────────────────────────
+    EvalRequest:
+      type: object
+      required: [expression]
+      properties:
+        expression:
+          $ref: "#/components/schemas/FactorExpression"
+        start:
+          type: string
+          format: date
+          default: "2023-01-01"
+        end:
+          type: string
+          format: date
+          default: "2024-01-01"
+        market:
+          $ref: "#/components/schemas/Market"
+        label:
+          type: string
+          default: close_return
+          description: Label column for IC calculation (forward returns)
+        use_cache:
+          type: boolean
+          default: true
+          description: Enable persistent SQLite cache
+        topk:
+          type: integer
+          default: 50
+          description: Top K stocks to select in portfolio
+        n_drop:
+          type: integer
+          default: 5
+          description: Bottom N stocks to drop
+        fast:
+          type: boolean
+          default: false
+          description: Skip portfolio backtest, only compute IC metrics
+        n_jobs_backtest:
+          type: integer
+          default: 4
+          description: Parallel threads for portfolio backtest (ignored when fast=true)
+        timeout:
+          type: integer
+          default: 180
+          description: Evaluation timeout in seconds
+
+    EvalResultItem:
+      type: object
+      properties:
+        success:
+          type: boolean
+        name:
+          type: string
+        expression:
+          type: string
+        market:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        metrics:
+          $ref: "#/components/schemas/ICMetrics"
+        portfolio_metrics:
+          $ref: "#/components/schemas/PortfolioMetrics"
+        timestamp:
+          type: string
+          format: date-time
+
+    EvalErrorItem:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: false
+        name:
+          type: string
+        expression:
+          type: string
+        error:
+          type: string
+        error_type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/train
+    # ──────────────────────────────────────────────
+    TrainRequest:
+      type: object
+      required: [factor_expressions]
+      properties:
+        factor_expressions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: List of factor expression strings
+        method:
+          type: string
+          enum: [lasso, ic_optimization]
+          default: lasso
+        start_date:
+          type: string
+          format: date
+          default: "2018-01-01"
+        end_date:
+          type: string
+          format: date
+          default: "2020-12-31"
+        market:
+          $ref: "#/components/schemas/Market"
+        method_config:
+          type: object
+          description: |
+            Method-specific configuration.
+            LASSO: `{"alpha": 0.01}`
+            IC optimization: `{"lambda_risk": 1.0, "alpha_l1": 0.0, "non_negative": true}`
+          additionalProperties: true
+        n_jobs:
+          type: integer
+          default: 1
+          description: Parallel workers
+
+    TrainResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        method:
+          type: string
+          enum: [lasso, ic_optimization]
+        result:
+          $ref: "#/components/schemas/TrainedModel"
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/backtest
+    # ──────────────────────────────────────────────
+    BacktestRequest:
+      type: object
+      required: [trained_model]
+      properties:
+        trained_model:
+          $ref: "#/components/schemas/TrainedModel"
+        start_date:
+          type: string
+          format: date
+          default: "2021-01-01"
+        end_date:
+          type: string
+          format: date
+          default: "2021-12-31"
+        market:
+          $ref: "#/components/schemas/Market"
+        topk:
+          type: integer
+          default: 50
+        n_drop:
+          type: integer
+          default: 5
+
+    BacktestResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        backtest_result:
+          type: object
+          properties:
+            analysis:
+              type: object
+              description: Analysis DataFrame as dict
+              nullable: true
+            report_normal:
+              type: object
+              nullable: true
+            positions_normal:
+              type: object
+              nullable: true
+        method:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/compare_methods
+    # ──────────────────────────────────────────────
+    CompareMethodsRequest:
+      type: object
+      required: [factor_expressions]
+      properties:
+        factor_expressions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        train_start:
+          type: string
+          format: date
+          default: "2018-01-01"
+        train_end:
+          type: string
+          format: date
+          default: "2020-12-31"
+        test_start:
+          type: string
+          format: date
+          default: "2021-01-01"
+        test_end:
+          type: string
+          format: date
+          default: "2021-12-31"
+        market:
+          $ref: "#/components/schemas/Market"
+        lasso_config:
+          type: object
+          properties:
+            alpha:
+              type: number
+              default: 0.01
+        ic_config:
+          type: object
+          properties:
+            lambda_risk:
+              type: number
+              default: 1.0
+            alpha_l1:
+              type: number
+              default: 0.0
+
+    CompareMethodsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        comparison:
+          type: object
+          description: Side-by-side comparison results from both methods
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/automated_training
+    # ──────────────────────────────────────────────
+    AutomatedTrainingRequest:
+      type: object
+      required: [factor_expressions]
+      properties:
+        factor_expressions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        start_date:
+          type: string
+          format: date
+          default: "2018-01-01"
+        end_date:
+          type: string
+          format: date
+          default: "2022-12-31"
+        training_window_days:
+          type: integer
+          default: 252
+          description: Lookback window in trading days (~1 year)
+        update_frequency_days:
+          type: integer
+          default: 21
+          description: Retrain interval in trading days (~1 month)
+        methods:
+          type: array
+          items:
+            type: string
+            enum: [lasso, ic_optimization]
+          default: [lasso]
+        method_configs:
+          type: object
+          description: Per-method configuration
+          properties:
+            lasso:
+              type: object
+              additionalProperties: true
+            ic_optimization:
+              type: object
+              additionalProperties: true
+        market:
+          $ref: "#/components/schemas/Market"
+
+    AutomatedTrainingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        automated_training_result:
+          type: object
+          description: Rolling window training results
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/generate_report
+    # ──────────────────────────────────────────────
+    GenerateReportRequest:
+      type: object
+      required: [training_results]
+      properties:
+        training_results:
+          type: object
+          description: Output from automated training or train endpoint
+        backtest_results:
+          type: object
+          description: Optional backtest results to include
+        report_title:
+          type: string
+          default: Factor Combination Report
+
+    GenerateReportResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        report_result:
+          type: object
+          description: Generated report content
+        timestamp:
+          type: string
+          format: date-time
+
+    # ──────────────────────────────────────────────
+    # /combination/list_models & load_model
+    # ──────────────────────────────────────────────
+    ListModelsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              filename:
+                type: string
+              method:
+                type: string
+              training_date:
+                type: string
+              path:
+                type: string
+        total_count:
+          type: integer
+
+    LoadModelResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        model:
+          type: object
+          description: The loaded trained model
