@@ -1,131 +1,227 @@
-# QFinZero
+# **QFinZero: Foundational Infrastructure for Modern Quant Research**
 
-Modular infrastructure for quantitative finance research. Four services, each running as an independent REST API server with Python/Rust clients designed for agent integration.
+**QFinZero** is a modular and extensible infrastructure suite designed for quantitative finance research at scale.
+It consolidates four core components frequently needed across our research projects:
 
-## Services
+* **FFO — Formulaic Factor Optimizer**
+  A unified platform for **alpha factor execution, evaluation, and portfolio construction**.
 
-| Service | Full Name | Language | Default Port | Description |
-|---------|-----------|----------|--------------|-------------|
-| **FFO** | Formulaic Factor Optimization | Python (Flask) | 19330 | Factor evaluation, IC metrics, portfolio backtesting, multi-factor combination |
-| **NPP** | News Pushing Pipeline | Python | — | News ingestion, cleaning, tagging, and push to downstream consumers |
-| **PMB** | Paper Money Broker | Python (FastAPI) | 24444 | Step-driven paper trading broker for backtesting AI trading agents |
-| **UPQ** | Unified Price Query | Rust (Axum) | 19350 | High-performance stock/option/rates price data via REST API |
+* **OQL — Option Query Language**
+  A domain-specific language for **structuring, searching, and retrieving signals from option chains**.
 
-## Architecture
+* **NPP — News Push Pipeline**
+  A flexible pipeline for **collecting, parsing, and broadcasting news events** into downstream trading or modeling systems.
 
-All services follow the same pattern: **Server (REST API) → Client Library → Agent Interface**.
+* **UPQ — Unified Price Query**
+  A high-performance Rust-based service for **querying stock, option, and rates price data** via REST API.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    Agent / User                      │
-└──────────┬──────────┬──────────┬──────────┬─────────┘
-           │          │          │          │
-           v          v          v          v
-      ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-      │  FFO   │ │  NPP   │ │  PMB   │ │  UPQ   │
-      │ Client │ │ Client │ │ Client │ │ Client │
-      └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
-          │          │          │          │
-          v          v          v          v
-      ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-      │  FFO   │ │  NPP   │ │  PMB   │ │  UPQ   │
-      │ Server │ │ Server │ │ Server │ │ Server │
-      │ :19330 │ │        │ │ :24444 │ │ :19350 │
-      └────────┘ └────────┘ └───┬────┘ └────────┘
-                                │          ▲
-                                └──────────┘
-                              PMB reads market
-                              data from UPQ
-```
+QFinZero serves as the shared backbone for multiple ongoing projects, providing reusable abstractions, clean APIs, and scalable workflows.
 
-### Service Dependencies
+---
 
-- **PMB → UPQ**: PMB fetches market data (stock/option bars) from UPQ at session creation time.
-- All other services are independent.
-
-## Project Structure
+## **🧩 Architecture Overview**
 
 ```
-qfinzero/
-├── README.md                   # This file
-├── docs/                       # Centralized documentation
-│   ├── ffo/                    #   FFO docs + OpenAPI spec
-│   ├── npp/                    #   NPP docs + OpenAPI spec
-│   ├── pmb/                    #   PMB docs + OpenAPI spec
-│   └── upq/                    #   UPQ docs + OpenAPI spec
-├── clients/                    # Client libraries (per-service)
-│   ├── ffo/                    #   FFO Python client
-│   ├── npp/                    #   NPP Python client
-│   ├── pmb/                    #   PMB Python client
-│   └── upq/                    #   UPQ Python client
-├── demos/                      # Usage demos for all services
-│   ├── ffo/                    #   FFO demo scripts
-│   ├── npp/                    #   NPP demo scripts
-│   ├── pmb/                    #   PMB demo scripts
-│   └── upq/                    #   UPQ demo scripts
-├── infra/                      # Service implementations
-│   ├── ffo/                    #   FFO server
-│   ├── npp/                    #   NPP server
-│   ├── pmb/                    #   PMB server
-│   └── upq/                    #   UPQ server (Rust workspace)
-├── documents/                  # Legacy / research documents
-└── server/                     # Legacy server code
+QFinZero
+│
+├── FFO (Factor & Portfolio)
+│   ├── DSL execution engine
+│   ├── Backtesting + IC/ICIR/Sharpe metrics
+│   ├── Factor evaluation APIs
+│   └── Daily/rolling portfolio optimizer
+│
+├── OQL (Option Query Language)
+│   ├── Unified DSL for option chain filtering
+│   ├── Greeks / IV surface integration
+│   ├── Multi-step search operators (AND, OR, windows)
+│   └── LLM-friendly serialization + parser
+│
+├── NPP (News Push Pipeline)
+│   ├── Multi-source news ingestion
+│   ├── Cleaning + metadata tagging
+│   ├── Priority scoring
+│   └── Real-time push to downstream agents or DB
+│
+└── UPQ (Unified Price Query)
+    ├── High-performance Rust service
+    ├── Stock/Option/Rates data via REST API
+    ├── DuckDB Parquet backend
+    └── Support for minute/daily resolution
 ```
 
-## Quick Start
+---
 
-### 1. UPQ (Price Data)
+# **📦 Modules**
+
+## **1. FFO — Formulaic Factor Optimizer**
+
+FFO provides a complete workflow for factor-based quantitative strategies:
+
+### **Core Features**
+
+* Executable **factor DSL** compatible with price/volume features
+* Unified evaluation metrics:
+
+  * IC, RankIC
+  * ICIR, Sharpe
+  * Turnover, stability
+* Built-in factor scoring & filtering
+* Rolling backtesting engine
+* Portfolio optimizer supporting:
+
+  * Long-only / long-short
+  * Sparse constraints
+  * Custom objective (IC, risk parity, etc.)
+
+### **Typical Usage**
+
+* Factor evaluation for AlphaBench
+* LLM-generated factor testing
+* Daily portfolio rebalancing using dynamic factor signals
+
+---
+
+## **2. OQL — Option Query Language**
+
+OQL is a compact DSL designed to express queries over **option chain data**.
+
+### **Why OQL**
+
+Option-chain search is often ad-hoc and requires repeated filtering logic.
+OQL standardizes this process with an LLM-friendly syntax.
+
+### **Capabilities**
+
+* Window-based filters (Δ, moneyness, volume spikes)
+* Structural operators (AND / OR / NOT)
+* Complete access to:
+
+  * IV surface
+  * Greeks
+  * Liquidity metrics
+  * Chain-level patterns
+
+### **Use Cases**
+
+* Strategy search for OptionBench / OptionQuant
+* Building IV-based signals
+* Automated trading rule generation with LLM agents
+
+---
+
+## **3. NPP — News Push Pipeline**
+
+NPP provides a unified framework for managing **real-time news data**.
+
+### **Components**
+
+* Multi-source ingestion (RSS, APIs, scrapers)
+* Content cleaning and normalization
+* Entity tagging & timestamp alignment
+* Priority scoring / relevancy estimation
+* Push service to:
+
+  * search agents
+  * memory DB
+  * research servers
+  * factor generators
+
+### **Why NPP**
+
+Most research pipelines need a consistent way to bring news into factor models, RL agents, or option strategies.
+NPP ensures news data is structured, deduped, and can be consumed in real time.
+
+---
+
+## **4. UPQ — Unified Price Query**
+
+UPQ is a Rust-based high-performance price query service providing REST API access to stock, option, and treasury rates data.
+
+### **Core Features**
+
+* Fast REST API for price data queries
+* Support for multiple data types:
+
+  * Stock minute/daily OHLCV data
+  * Option chain data (minute/daily)
+  * Treasury yield curves
+* DuckDB + Parquet backend for efficient storage
+* Automatic data ingestion from CSV.GZ sources
+* Idempotent ingest with manifest tracking
+* LRU cache for rates data
+* Comprehensive OpenAPI 3.0 specification
+
+### **API Endpoints**
+
+* `GET /health` — Health check
+* `GET /stock` — Stock minute data (ISO datetime)
+* `GET /stock/daily` — Stock daily data (date format)
+* `GET /option/ticker_query` — Query by option contract
+* `GET /option/chain_query` — Query option chain with filters
+* `GET /rates/query` — Treasury yields
+
+### **Quick Start**
 
 ```bash
+# 1. Sync data from qlib server
 cd infra/upq
+./scripts/sync_from_qlib.sh
+
+# 2. Build and run
 cargo build --release
 cargo run -p upq-ingest -- ingest --raw-root ~/upq_data --storage-root ~/upq_storage
-STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# Health check: curl http://127.0.0.1:19350/health
+STORAGE_ROOT=~/upq_storage PORT=19350 cargo run -p upq-service
+
+# 3. Test
+curl http://localhost:19350/health
+curl "http://localhost:19350/stock/daily?tickers=AAPL&start=2025-12-01&end=2025-12-31"
 ```
 
-### 2. FFO (Factor Evaluation)
+See [infra/upq/README.md](infra/upq/README.md) for detailed documentation.
+
+---
+
+# **🚀 Getting Started**
+
+### **Install**
 
 ```bash
-cd infra/ffo
-pip install -r requirements.txt  # if needed
-python backend_app.py
-# Health check: curl http://127.0.0.1:19330/health
-```
-
-### 3. PMB (Paper Trading)
-
-```bash
-cd infra/pmb
+git clone https://github.com/yourname/qfinzero.git
+cd qfinzero
 pip install -r requirements.txt
-python main.py                   # requires UPQ running
-# Health check: curl http://127.0.0.1:24444/v1/health
 ```
 
-### 4. NPP (News Pipeline)
+### **Basic Example (Factor Execution)**
 
-```bash
-cd infra/npp
-pip install -r requirements.txt
-python massive_news.py           # or other ingestion scripts
+```python
+from qfinzero.ffo import run_factor
+
+result = run_factor("Ts_Mean($close, 20) - Ts_Mean($close, 60)")
+print(result.ic, result.sharpe)
 ```
 
-## Documentation
+### **Basic Example (OQL Search)**
 
-Per-service documentation lives in [docs/](docs/):
+```python
+from qfinzero.oql import query
 
-- [FFO Documentation](docs/ffo/README.md) — Factor evaluation API, OpenAPI spec
-- [NPP Documentation](docs/npp/README.md) — News pipeline API, OpenAPI spec
-- [PMB Documentation](docs/pmb/README.md) — Paper trading API, OpenAPI spec
-- [UPQ Documentation](docs/upq/README.md) — Price query API, OpenAPI spec
+expr = "ATM & IV_Change > 5% & Volume_Surge"
+matches = query(expr, chain_data)
+```
 
-OpenAPI specifications:
+### **Basic Example (NPP)**
 
-- [FFO OpenAPI](docs/ffo/openapi.yaml)
-- [NPP OpenAPI](docs/npp/openapi.yaml)
-- [PMB OpenAPI](docs/pmb/openapi.yaml)
-- [UPQ OpenAPI](docs/upq/openapi.yaml)
+```python
+from qfinzero.npp import push_news
 
-## License
+push_news({
+    "headline": "...",
+    "source": "Bloomberg",
+    "timestamp": ...
+})
+```
 
-MIT License
+---
+# **📜 License**
+
+MIT License (or your preferred license).
