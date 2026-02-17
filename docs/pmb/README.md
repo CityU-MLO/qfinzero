@@ -101,6 +101,91 @@ curl -X POST http://127.0.0.1:24444/v1/orders \
   }'
 ```
 
+## Python Client
+
+The PMB client library (`clients/pmb/`) wraps the REST API for clean Python usage.
+
+### Install
+
+No extra dependencies — uses `requests` (same as the server's requirements).
+
+### Basic Usage
+
+```python
+from clients.pmb import PMBClient
+
+with PMBClient() as pmb:
+    # Create account and session
+    acct = pmb.create_account(initial_cash=50000.0, start_date="2025-01-06")
+    sess = pmb.create_session(
+        account_id=acct["account_id"],
+        frequency="1d",
+        start_ts="2025-01-06",
+        end_ts="2025-01-31",
+        universe={"stocks": ["AAPL"]},
+    )
+
+    # Step through simulation
+    while True:
+        result = pmb.step(sess["session_id"])
+        if not result.is_running:
+            break
+
+        price = result.get_stock_price("AAPL")
+        snap = result.get_snapshot()
+
+        # Place orders
+        pmb.buy(sess["session_id"], acct["account_id"], "AAPL", 10)
+
+    # Get results
+    summary = pmb.get_summary(sess["session_id"])
+    print(f"Return: {summary['total_return']*100:+.2f}%")
+```
+
+### Client API
+
+| Method | Description |
+|--------|-------------|
+| `create_account(initial_cash, ...)` | Create trading account |
+| `get_account(account_id)` | Get account state |
+| `get_positions(account_id)` | Get current positions |
+| `create_session(account_id, frequency, start_ts, end_ts, universe, ...)` | Create replay session |
+| `step(session_id, n=1)` | Advance clock, returns `StepResult` |
+| `buy(session_id, account_id, symbol, qty, ...)` | Buy stock |
+| `sell(session_id, account_id, symbol, qty, ...)` | Sell stock |
+| `buy_option(session_id, account_id, contract, qty, ...)` | Buy option |
+| `sell_option(session_id, account_id, contract, qty, ...)` | Sell option |
+| `cancel_order(order_id, session_id, account_id)` | Cancel order |
+| `get_summary(session_id)` | Get session performance metrics |
+| `export(session_id, fmt="json")` | Export orders, trades, equity curve |
+| `get_market(session_id)` | Get current market snapshot |
+
+### StepResult
+
+`step()` returns a `StepResult` with convenience accessors:
+
+```python
+result = pmb.step(session_id)
+
+result.is_running          # bool: session still active
+result.current_ts          # str: current timestamp
+result.get_stock_price("AAPL")  # float: close price
+result.get_stock_bar("AAPL")    # dict: full OHLCV bar
+result.get_market_tick()   # dict: {"stocks": [...], "options": [...]}
+result.get_snapshot()      # dict: account snapshot (cash, equity, positions)
+```
+
+### Error Handling
+
+```python
+from clients.pmb import PMBClient, PMBError
+
+try:
+    pmb.buy(session_id, account_id, "AAPL", 10)
+except PMBError as e:
+    print(f"Error: {e}, status={e.status_code}")
+```
+
 ## Configuration
 
 | Environment Variable | Default | Description |

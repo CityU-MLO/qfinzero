@@ -67,6 +67,70 @@ curl "http://127.0.0.1:19350/option/chain_query?underlying=NVDA&date=2025-01-15&
 curl "http://127.0.0.1:19350/rates/query?start=2025-01-01&end=2025-01-31&tenors=1M,10Y"
 ```
 
+## Python Client
+
+The UPQ client library (`clients/upq/`) wraps the REST API for clean Python usage.
+
+### Basic Usage
+
+```python
+from clients.upq import UPQClient
+
+with UPQClient() as upq:
+    # Stock daily bars
+    bars = upq.stock_daily(["AAPL", "MSFT"], "2025-01-06", "2025-01-31")
+    for bar in bars:
+        print(bar["ticker"], bar["date"], bar["close"])
+
+    # Stock minute bars
+    bars = upq.stock_minute(["AAPL"], "2025-01-06T09:30:00", "2025-01-06T16:00:00")
+
+    # Option chain
+    chain = upq.option_chain("NVDA", "2025-01-06", type="C",
+                              strike_min=130, strike_max=150)
+
+    # Specific option contract
+    bars = upq.option_contract("O:NVDA250117C00136000",
+                                "2025-01-06", "2025-01-17", resolution="day")
+
+    # Treasury yields
+    yields = upq.rates("2025-01-02", "2025-01-31", tenors="1M,10Y")
+```
+
+### Client API
+
+| Method | Description |
+|--------|-------------|
+| `stock_daily(tickers, start, end)` | Daily OHLCV bars (date format) |
+| `stock_minute(tickers, start, end)` | Minute OHLCV bars (datetime format) |
+| `option_chain(underlying, date, ...)` | Option chain with strike/expiry/type filters |
+| `option_contract(contract, start, end, resolution)` | Specific contract price data |
+| `rates(start, end, tenors)` | Treasury yield curve |
+| `health()` | Health check |
+
+### Utilities
+
+```python
+# Build OPRA contract ID
+UPQClient.make_opra("NVDA", "2025-01-17", "C", 136.0)
+# -> "O:NVDA250117C00136000"
+
+# Convert nanosecond timestamp to datetime
+UPQClient.ns_to_datetime(1736155800000000000)
+# -> datetime(2025, 1, 6, 9, 30, tzinfo=UTC)
+```
+
+### Error Handling
+
+```python
+from clients.upq import UPQClient, UPQError
+
+try:
+    bars = upq.stock_daily(["INVALID"], "bad-date", "2025-01-31")
+except UPQError as e:
+    print(f"Error: {e}, code={e.code}, status={e.status_code}")
+```
+
 ## Configuration
 
 | Environment Variable | Required | Default | Description |
