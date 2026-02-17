@@ -17,3 +17,9 @@ env/
 
 # macOS
 .DS_Store
+
+# local caches
+**/factor_cache.sqlite
+**/factor_cache*.sqlite
+**/cache_data/*.db
+**/*.sqlite
