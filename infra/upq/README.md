@@ -9,6 +9,7 @@ UPQ is a Rust implementation of the price query service with API compatibility g
 - `crates/upq-bench`: latency/throughput benchmark for CSV.GZ baseline vs DuckDB Parquet
 
 ## Docs
+- **API usage (human & agent):** `docs/api-usage.md`
 - Design: `docs/plans/2026-02-09-upq-design.md`
 - Implementation plan: `docs/plans/2026-02-09-upq-implementation-plan.md`
 - Schemas: `docs/schemas.md`
