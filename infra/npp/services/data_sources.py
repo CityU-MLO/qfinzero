@@ -8,6 +8,7 @@ Three async connectors that normalise raw rows into the canonical Event schema:
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Optional
@@ -222,9 +223,9 @@ class MongoNewsSource:
         if tickers:
             query["tickers"] = {"$in": [t.upper() for t in tickers]}
         if keyword:
-            query["title"] = {"$regex": keyword, "$options": "i"}
+            query["title"] = {"$regex": re.escape(keyword), "$options": "i"}
         if publisher:
-            query["publisher.name"] = {"$regex": publisher, "$options": "i"}
+            query["publisher.name"] = {"$regex": re.escape(publisher), "$options": "i"}
         if cursor:
             cursor_time = _parse_utc(cursor[0])
             cursor_id = cursor[1].removeprefix("news_")

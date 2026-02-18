@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ class NewsSearchRequest(BaseModel):
     end_utc: Optional[str] = None
     keyword: Optional[str] = None
     publisher: Optional[str] = None
-    limit: int = 50
+    limit: int = Field(default=50, ge=1, le=500)
     cursor: Optional[str] = None
     now_utc: Optional[str] = None
 

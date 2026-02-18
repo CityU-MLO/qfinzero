@@ -18,8 +18,11 @@ def _encode_cursor(time_utc: str, event_id: str) -> str:
 def _decode_cursor(cursor: str | None) -> tuple[str, str] | None:
     if not cursor:
         return None
-    raw = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
-    return (raw[0], raw[1])
+    try:
+        raw = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+        return (raw[0], raw[1])
+    except (ValueError, IndexError, KeyError):
+        raise HTTPException(status_code=400, detail="Invalid cursor")
 
 
 def _parse_now(now_utc: str | None) -> datetime:
@@ -66,16 +69,22 @@ async def news_search(req: NewsSearchRequest, request: Request):
     now = _parse_now(req.now_utc)
 
     if req.start_utc:
-        start = datetime.fromisoformat(req.start_utc.replace("Z", "+00:00"))
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
+        try:
+            start = datetime.fromisoformat(req.start_utc.replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_utc format")
     else:
         start = now - timedelta(days=7)
 
     if req.end_utc:
-        end = datetime.fromisoformat(req.end_utc.replace("Z", "+00:00"))
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
+        try:
+            end = datetime.fromisoformat(req.end_utc.replace("Z", "+00:00"))
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_utc format")
     else:
         end = now
 

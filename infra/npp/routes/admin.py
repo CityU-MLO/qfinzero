@@ -61,7 +61,9 @@ async def sanity_check(request: Request):
     if ds.news.available:
         try:
             coll = ds.news._coll
+            since = now - timedelta(days=30)
             dup_pipeline = [
+                {"$match": {"published_utc": {"$gte": since}}},
                 {"$group": {"_id": "$article_url", "count": {"$sum": 1}}},
                 {"$match": {"count": {"$gt": 1}}},
                 {"$sort": {"count": -1}},
@@ -75,6 +77,7 @@ async def sanity_check(request: Request):
                 })
             # Count number of URLs that have duplicates
             count_pipeline = [
+                {"$match": {"published_utc": {"$gte": since}}},
                 {"$group": {"_id": "$article_url", "count": {"$sum": 1}}},
                 {"$match": {"count": {"$gt": 1}}},
                 {"$count": "total"},

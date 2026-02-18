@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 logger = logging.getLogger("npp.stats")
 
@@ -13,7 +13,7 @@ async def news_stats(request: Request, days: int = Query(default=7, ge=1, le=90)
     ds = request.app.state.data_sources
 
     if not ds.news.available:
-        return {"error": "MongoDB unavailable", "total_count": 0}
+        raise HTTPException(status_code=503, detail="MongoDB unavailable")
 
     coll = ds.news._coll
     now = datetime.now(timezone.utc)
@@ -125,6 +125,6 @@ async def news_stats(request: Request, days: int = Query(default=7, ge=1, le=90)
             },
         }
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error computing news stats")
-        return {"error": str(e), "total_count": 0}
+        raise HTTPException(status_code=500, detail="Internal error computing stats")
