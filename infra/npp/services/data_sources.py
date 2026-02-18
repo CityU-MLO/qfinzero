@@ -202,6 +202,48 @@ class MongoNewsSource:
             events.append(self._to_event(doc, now_utc))
         return events
 
+    async def search_news(
+        self,
+        start_utc: datetime,
+        end_utc: datetime,
+        tickers: Optional[list[str]],
+        keyword: Optional[str],
+        publisher: Optional[str],
+        limit: int,
+        cursor: Optional[tuple[str, str]],
+        now_utc: datetime,
+    ) -> list[Event]:
+        if not self.available:
+            return []
+
+        query: dict[str, Any] = {
+            "published_utc": {"$gte": start_utc, "$lt": end_utc},
+        }
+        if tickers:
+            query["tickers"] = {"$in": [t.upper() for t in tickers]}
+        if keyword:
+            query["title"] = {"$regex": keyword, "$options": "i"}
+        if publisher:
+            query["publisher.name"] = {"$regex": publisher, "$options": "i"}
+        if cursor:
+            cursor_time = _parse_utc(cursor[0])
+            cursor_id = cursor[1].removeprefix("news_")
+            query["$or"] = [
+                {"published_utc": {"$gt": cursor_time}},
+                {"published_utc": cursor_time, "_id": {"$gt": cursor_id}},
+            ]
+            query["published_utc"] = {"$gte": start_utc, "$lt": end_utc}
+
+        docs = (
+            self._coll.find(query)
+            .sort([("published_utc", 1), ("_id", 1)])
+            .limit(limit)
+        )
+        events = []
+        async for doc in docs:
+            events.append(self._to_event(doc, now_utc))
+        return events
+
     async def get_by_id(self, news_id: str) -> Optional[dict]:
         if not self.available:
             return None

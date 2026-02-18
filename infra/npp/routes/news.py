@@ -1,6 +1,35 @@
+import base64
+import json
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Request
 
+from models import NewsSearchRequest, PaginatedResponse
+
 router = APIRouter(tags=["news"])
+
+
+def _encode_cursor(time_utc: str, event_id: str) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps([time_utc, event_id]).encode()
+    ).decode()
+
+
+def _decode_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if not cursor:
+        return None
+    raw = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+    return (raw[0], raw[1])
+
+
+def _parse_now(now_utc: str | None) -> datetime:
+    if now_utc:
+        s = now_utc.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    return datetime.now(timezone.utc)
 
 
 @router.get("/npp/news/{news_id}/body")
@@ -29,3 +58,51 @@ async def news_body(news_id: str, request: Request):
         "publisher": doc.get("publisher"),
         "insights": doc.get("insights"),
     }
+
+
+@router.post("/npp/news/search")
+async def news_search(req: NewsSearchRequest, request: Request):
+    ds = request.app.state.data_sources
+    now = _parse_now(req.now_utc)
+
+    if req.start_utc:
+        start = datetime.fromisoformat(req.start_utc.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+    else:
+        start = now - timedelta(days=7)
+
+    if req.end_utc:
+        end = datetime.fromisoformat(req.end_utc.replace("Z", "+00:00"))
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+    else:
+        end = now
+
+    cursor = _decode_cursor(req.cursor)
+    fetch_limit = req.limit + 1
+
+    events = await ds.news.search_news(
+        start_utc=start,
+        end_utc=end,
+        tickers=req.tickers,
+        keyword=req.keyword,
+        publisher=req.publisher,
+        limit=fetch_limit,
+        cursor=cursor,
+        now_utc=now,
+    )
+
+    has_more = len(events) > req.limit
+    page = events[: req.limit]
+    next_cursor = (
+        _encode_cursor(page[-1].time_utc, page[-1].event_id)
+        if has_more and page
+        else None
+    )
+
+    return PaginatedResponse(
+        server_time_utc=datetime.now(timezone.utc).isoformat(),
+        events=page,
+        next_cursor=next_cursor,
+    ).model_dump()

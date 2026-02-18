@@ -112,6 +112,17 @@ class EarningsCalendarRequest(BaseModel):
     now_utc: Optional[str] = None
 
 
+class NewsSearchRequest(BaseModel):
+    tickers: Optional[list[str]] = None
+    start_utc: Optional[str] = None
+    end_utc: Optional[str] = None
+    keyword: Optional[str] = None
+    publisher: Optional[str] = None
+    limit: int = 50
+    cursor: Optional[str] = None
+    now_utc: Optional[str] = None
+
+
 # ── Response Models ──────────────────────────────────────────────
 
 class PaginatedResponse(BaseModel):
