@@ -44,9 +44,9 @@ async def news_stats(request: Request, days: int = Query(default=7, ge=1, le=90)
             }},
             {"$sort": {"_id": 1}},
         ]
-        daily_counts = {}
+        daily_counts = []
         async for doc in coll.aggregate(daily_pipeline):
-            daily_counts[doc["_id"]] = doc["count"]
+            daily_counts.append({"date": doc["_id"], "count": doc["count"]})
 
         # Top tickers
         ticker_pipeline = [

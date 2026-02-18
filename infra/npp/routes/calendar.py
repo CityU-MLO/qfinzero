@@ -54,25 +54,26 @@ async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1
         earn_total = row[2]
 
     # Daily counts
-    earn_daily = {}
+    earn_daily = []
+    earn_daily_dates = set()
     async with earnings_db.execute(
         "SELECT date, COUNT(*) as cnt FROM earnings WHERE date >= ? AND date <= ? GROUP BY date ORDER BY date",
         [start_date, end_date],
     ) as cur:
         async for row in cur:
-            earn_daily[row[0]] = row[1]
+            earn_daily.append({"date": row[0], "count": row[1]})
+            earn_daily_dates.add(row[0])
 
-    earn_missing = sorted(all_weekdays - set(earn_daily.keys()))
+    earn_missing = sorted(all_weekdays - earn_daily_dates)
 
     # By importance
     earn_by_importance = {}
     async with earnings_db.execute(
-        "SELECT importance, COUNT(*) as cnt FROM earnings WHERE date >= ? AND date <= ? GROUP BY importance ORDER BY importance",
+        "SELECT CASE WHEN importance >= 4 THEN 'HIGH' WHEN importance >= 2 THEN 'MEDIUM' ELSE 'LOW' END AS level, COUNT(*) as cnt FROM earnings WHERE date >= ? AND date <= ? GROUP BY level ORDER BY cnt DESC",
         [start_date, end_date],
     ) as cur:
         async for row in cur:
-            label = str(row[0]) if row[0] is not None else "null"
-            earn_by_importance[label] = row[1]
+            earn_by_importance[row[0]] = row[1]
 
     # ── Economic events coverage ─────────────────────────────────
     econ_db = ds.econ._db
@@ -87,15 +88,17 @@ async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1
         econ_total = row[2]
 
     # Daily counts
-    econ_daily = {}
+    econ_daily = []
+    econ_daily_dates = set()
     async with econ_db.execute(
         "SELECT date, COUNT(*) as cnt FROM econ_events WHERE country = 'United States' AND date >= ? AND date <= ? GROUP BY date ORDER BY date",
         [start_date, end_date],
     ) as cur:
         async for row in cur:
-            econ_daily[row[0]] = row[1]
+            econ_daily.append({"date": row[0], "count": row[1]})
+            econ_daily_dates.add(row[0])
 
-    econ_missing = sorted(all_weekdays - set(econ_daily.keys()))
+    econ_missing = sorted(all_weekdays - econ_daily_dates)
 
     # By country (for US data)
     econ_by_country = {}
@@ -113,7 +116,7 @@ async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1
         [start_date, end_date],
     ) as cur:
         async for row in cur:
-            econ_by_type.append({"event_name": row[0], "count": row[1]})
+            econ_by_type.append({"event_type": row[0], "count": row[1]})
 
     return {
         "earnings": {

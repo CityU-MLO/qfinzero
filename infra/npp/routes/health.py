@@ -40,7 +40,7 @@ async def health_freshness(request: Request):
             logger.warning("Error getting news freshness: %s", e)
 
     # ── Earnings (SQLite) ────────────────────────────────────────
-    earnings_info = {"latest_date": None, "latest_timestamp": None, "record_count": 0}
+    earnings_info = {"latest_date": None, "latest_timestamp": None, "record_count": 0, "unique_keys": 0, "unique_key_label": "tickers"}
     try:
         db = ds.earnings._db
         async with db.execute("SELECT MAX(last_updated), COUNT(*) FROM earnings") as cur:
@@ -52,11 +52,15 @@ async def health_freshness(request: Request):
             row = await cur.fetchone()
             if row:
                 earnings_info["latest_date"] = row[0]
+        async with db.execute("SELECT COUNT(DISTINCT ticker) FROM earnings") as cur:
+            row = await cur.fetchone()
+            if row:
+                earnings_info["unique_keys"] = row[0]
     except Exception as e:
         logger.warning("Error getting earnings freshness: %s", e)
 
     # ── Econ Events (SQLite) ─────────────────────────────────────
-    econ_info = {"latest_timestamp": None, "record_count": 0}
+    econ_info = {"latest_timestamp": None, "record_count": 0, "unique_keys": 0, "unique_key_label": "event_types"}
     try:
         db = ds.econ._db
         async with db.execute(
@@ -66,6 +70,12 @@ async def health_freshness(request: Request):
             if row:
                 econ_info["latest_timestamp"] = row[0]
                 econ_info["record_count"] = row[1]
+        async with db.execute(
+            "SELECT COUNT(DISTINCT event_name) FROM econ_events WHERE country = 'United States'"
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                econ_info["unique_keys"] = row[0]
     except Exception as e:
         logger.warning("Error getting econ freshness: %s", e)
 

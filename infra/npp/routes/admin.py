@@ -43,7 +43,7 @@ async def sanity_check(request: Request):
                     pub_iso = pub.isoformat() if hasattr(pub, "isoformat") else str(pub)
                     future_check["samples"].append({
                         "id": str(doc["_id"]),
-                        "title": doc.get("title", "")[:100],
+                        "title": doc.get("title", "")[:80],
                         "published_utc": pub_iso,
                     })
         except Exception as e:
@@ -67,24 +67,23 @@ async def sanity_check(request: Request):
                 {"$sort": {"count": -1}},
                 {"$limit": 5},
             ]
-            dup_total = 0
             samples = []
             async for doc in coll.aggregate(dup_pipeline):
-                dup_total += doc["count"] - 1
                 samples.append({
-                    "article_url": doc["_id"],
+                    "url": doc["_id"],
                     "count": doc["count"],
                 })
-            # Get exact total of duplicates
+            # Count number of URLs that have duplicates
             count_pipeline = [
                 {"$group": {"_id": "$article_url", "count": {"$sum": 1}}},
                 {"$match": {"count": {"$gt": 1}}},
-                {"$group": {"_id": None, "total_duplicates": {"$sum": {"$subtract": ["$count", 1]}}}},
+                {"$count": "total"},
             ]
+            dup_url_count = 0
             async for doc in coll.aggregate(count_pipeline):
-                dup_total = doc["total_duplicates"]
-            dup_check["count"] = dup_total
-            dup_check["status"] = _check_status(dup_total)
+                dup_url_count = doc["total"]
+            dup_check["count"] = dup_url_count
+            dup_check["status"] = _check_status(dup_url_count)
             dup_check["samples"] = samples
         except Exception as e:
             logger.warning("Error checking duplicate URLs: %s", e)
@@ -116,7 +115,7 @@ async def sanity_check(request: Request):
                     pub_iso = pub.isoformat() if hasattr(pub, "isoformat") else str(pub)
                     invalid_check["samples"].append({
                         "id": str(doc["_id"]),
-                        "title": doc.get("title", "")[:100],
+                        "title": doc.get("title", "")[:80],
                         "published_utc": pub_iso,
                     })
         except Exception as e:
@@ -158,7 +157,7 @@ async def sanity_check(request: Request):
         missing_dates = sorted(all_weekdays - dates_with_data)
         missing_check["count"] = len(missing_dates)
         missing_check["status"] = _check_status(len(missing_dates))
-        missing_check["samples"] = missing_dates[:10]
+        missing_check["samples"] = [{"date": d} for d in missing_dates[:10]]
     except Exception as e:
         logger.warning("Error checking missing trading days: %s", e)
     checks.append(missing_check)
@@ -170,6 +169,7 @@ async def sanity_check(request: Request):
     fail_count = sum(1 for c in checks if c["status"] == "fail")
 
     return {
+        "checked_at": now.isoformat(),
         "summary": {
             "total": total,
             "pass": pass_count,
