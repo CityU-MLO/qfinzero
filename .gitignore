@@ -23,7 +23,7 @@ env/
 **/factor_cache*.sqlite
 **/cache_data/*.db
 **/*.sqlite
-
+**/eval_outputs
 **/results
 
 # Build artifacts
@@ -31,4 +31,5 @@ env/
 dist/
 build/
 data/
+runs/
 logs/

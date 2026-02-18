@@ -1,0 +1,66 @@
+# QFinZero Multi-Step Planning Eval — Configuration
+# ===================================================
+# Adjust to match your local deployment.
+
+# ── Database connections ────────────────────────────────────────────────────
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "qfinzero"
+  collections:
+    ticker_news:   "ticker_news"    # per-ticker news articles
+    market_news:   "market_news"    # broad market news
+
+sqlite:
+  path: "data/qfinzero.db"
+  tables:
+    earnings_calendar:  "earnings_calendar"   # columns: ticker, report_date, eps_estimate, ...
+    economic_calendar:  "economic_calendar"   # columns: event_name, event_date, importance, actual, forecast, ...
+
+# ── Service base URLs ───────────────────────────────────────────────────────
+services:
+  upq:
+    base_url: "http://127.0.0.1:23333"   # Unified Price Query (external port)
+  npp:
+    base_url: "http://127.0.0.1:19330"   # News Pushing Pipeline
+  pmb:
+    base_url: "http://127.0.0.1:19320"   # Paper Money Broker
+
+# ── Paper trading setup ─────────────────────────────────────────────────────
+# Runner pre-creates ONE account + ONE session before running any episode.
+# session_id and account_id are then injected into every episode instruction.
+paper_trading:
+  initial_cash:    100000.0
+  base_currency:   "USD"
+  account_type:    "MARGIN"           # MARGIN | CASH
+  timezone:        "America/New_York"
+  start_date:      "2025-01-06"       # First trading day of 2025 (Mon)
+  end_date:        "2025-01-31"
+  frequency:       "1d"               # 1d | 1m
+  universe:
+    stocks:
+      - "AAPL"
+      - "MSFT"
+      - "NVDA"
+      - "TSLA"
+      - "JPM"
+      - "BAC"
+      - "GS"
+    options: []   # options populated dynamically by chain queries
+
+# ── Evaluation settings ─────────────────────────────────────────────────────
+eval:
+  seed:            42
+  model_timeout_s: 90      # seconds to wait for model response
+  live_tool_timeout_s: 30  # seconds per tool call in live mode
+
+  # Scoring thresholds
+  episode_success_threshold: 70.0   # overall score >= 70 → episode "succeeded"
+  recovery_partial_credit:   0.5    # RS=0.5 if recovery tool present but failed
+
+  # Tolerance overrides (leave null to use defaults in evaluator code)
+  tolerances:
+    intraday_minutes:  5
+    daily_days:        1
+    loose_days:        2
+    horizon_minutes:   60
+    numeric_rel:       0.0001
