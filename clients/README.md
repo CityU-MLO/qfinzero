@@ -16,14 +16,14 @@ clients/
 
 | Client | Import | Default Port | Agent Guide |
 |--------|--------|-------------|-------------|
-| PMB | `from clients.pmb import PMBClient` | 24444 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
-| UPQ | `from clients.upq import UPQClient` | 19350 | [docs/upq/agent-guide.md](../docs/upq/agent-guide.md) |
+| PMB | `from qfinzero.clients.pmb import PMBClient` | 24444 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
+| UPQ | `from qfinzero.clients.upq import UPQClient` | 19350 | [docs/upq/agent-guide.md](../docs/upq/agent-guide.md) |
 
 ### Quick Start
 
 ```python
-from clients.pmb import PMBClient, StepResult, PMBError
-from clients.upq import UPQClient, UPQError
+from qfinzero.clients.pmb import PMBClient, StepResult, PMBError
+from qfinzero.clients.upq import UPQClient, UPQError
 
 # Both clients support context manager
 with PMBClient() as pmb, UPQClient() as upq:

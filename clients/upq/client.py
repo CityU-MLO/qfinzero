@@ -2,7 +2,7 @@
 UPQ Client — Python client for the Unified Price Query REST API.
 
 Usage:
-    from clients.upq import UPQClient
+    from qfinzero.clients.upq import UPQClient
 
     with UPQClient() as upq:
         bars = upq.stock_daily(["AAPL", "MSFT"], "2025-01-06", "2025-01-31")

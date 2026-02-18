@@ -2,7 +2,7 @@
 PMB Client — Python client for the Paper Money Broker REST API.
 
 Usage:
-    from clients.pmb import PMBClient
+    from qfinzero.clients.pmb import PMBClient
 
     with PMBClient() as pmb:
         acct = pmb.create_account(initial_cash=50000.0, start_date="2025-01-06")

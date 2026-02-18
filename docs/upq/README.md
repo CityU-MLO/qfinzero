@@ -74,7 +74,7 @@ The UPQ client library (`clients/upq/`) wraps the REST API for clean Python usag
 ### Basic Usage
 
 ```python
-from clients.upq import UPQClient
+from qfinzero.clients.upq import UPQClient
 
 with UPQClient() as upq:
     # Stock daily bars
@@ -123,7 +123,7 @@ UPQClient.ns_to_datetime(1736155800000000000)
 ### Error Handling
 
 ```python
-from clients.upq import UPQClient, UPQError
+from qfinzero.clients.upq import UPQClient, UPQError
 
 try:
     bars = upq.stock_daily(["INVALID"], "bad-date", "2025-01-31")

@@ -112,7 +112,7 @@ No extra dependencies — uses `requests` (same as the server's requirements).
 ### Basic Usage
 
 ```python
-from clients.pmb import PMBClient
+from qfinzero.clients.pmb import PMBClient
 
 with PMBClient() as pmb:
     # Create account and session
@@ -178,7 +178,7 @@ result.get_snapshot()      # dict: account snapshot (cash, equity, positions)
 ### Error Handling
 
 ```python
-from clients.pmb import PMBClient, PMBError
+from qfinzero.clients.pmb import PMBClient, PMBError
 
 try:
     pmb.buy(session_id, account_id, "AAPL", 10)

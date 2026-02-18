@@ -13,12 +13,7 @@ Usage:
   python demos/pmb/client_demos/intraday_5min_signal.py
 """
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-from clients.pmb import PMBClient
+from qfinzero.clients.pmb import PMBClient
 
 
 def main():

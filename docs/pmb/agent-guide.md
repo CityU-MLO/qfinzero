@@ -7,9 +7,7 @@ PMB is a step-driven paper trading simulator. The typical workflow is: **create 
 ## Setup
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from clients.pmb import PMBClient, StepResult, PMBError
+from qfinzero.clients.pmb import PMBClient, StepResult, PMBError
 pmb = PMBClient()  # default: http://127.0.0.1:24444
 ```
 
@@ -620,7 +618,7 @@ Events are emitted during `step()` and accessed via `result.events`:
 All methods raise `PMBError` on failure:
 
 ```python
-from clients.pmb import PMBError
+from qfinzero.clients.pmb import PMBError
 
 try:
     pmb.buy(sid, aid, "INVALID", 10)
@@ -704,7 +702,7 @@ with PMBClient() as pmb:
 Use UPQ to find an option contract, then trade it in PMB:
 
 ```python
-from clients.upq import UPQClient
+from qfinzero.clients.upq import UPQClient
 
 with PMBClient() as pmb, UPQClient() as upq:
     # Find a call option via UPQ

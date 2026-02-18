@@ -1,13 +1,6 @@
-# 核心依赖
-requests==2.31.0
-beautifulsoup4==4.14.2
-python-dateutil==2.9.0.post0
-pandas==2.1.4  # ecocal dependency
-lxml>=6.0.2    # HTML parsing
-holidays>=0.83  # Trading calendar holidays
-
-# 经济日历
-ecocal==1.2.1  # 使用 Python 3.11 环境
-
-# 开发依赖
-pytest>=7.0.0  # 单元测试
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+motor>=3.3.0
+aiosqlite>=0.19.0

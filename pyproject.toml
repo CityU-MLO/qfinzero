@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qfinzero"
+version = "0.1.0"
+description = "QFinZero — quantitative finance toolkit"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.28"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = [
+    "qfinzero",
+    "qfinzero.clients",
+    "qfinzero.clients.pmb",
+    "qfinzero.clients.upq",
+    "qfinzero.clients.npp",
+]
+
+[tool.setuptools.package-dir]
+"qfinzero" = "qfinzero"
+"qfinzero.clients" = "clients"
+"qfinzero.clients.pmb" = "clients/pmb"
+"qfinzero.clients.upq" = "clients/upq"
+"qfinzero.clients.npp" = "clients/npp"

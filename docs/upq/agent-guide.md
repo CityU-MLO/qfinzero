@@ -5,9 +5,7 @@ This document describes the UPQ (Unified Price Query) client as a set of callabl
 ## Setup
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from clients.upq import UPQClient, UPQError
+from qfinzero.clients.upq import UPQClient, UPQError
 upq = UPQClient()  # default: http://127.0.0.1:19350
 ```
 
@@ -92,7 +90,7 @@ bars = upq.stock_minute(["AAPL"], "2025-01-06T09:30:00", "2025-01-06T10:00:00")
 
 **Note:** `window_start` is nanoseconds since epoch. Convert with:
 ```python
-from clients.upq import UPQClient
+from qfinzero.clients.upq import UPQClient
 dt = UPQClient.ns_to_datetime(1736155800000000000)
 # -> datetime(2025, 1, 6, 9, 30, tzinfo=UTC)
 ```
@@ -291,7 +289,7 @@ UPQClient.ns_to_datetime(1736155800000000000)
 All methods raise `UPQError` on failure:
 
 ```python
-from clients.upq import UPQError
+from qfinzero.clients.upq import UPQError
 
 try:
     bars = upq.stock_daily(["INVALID"], "bad-date", "2025-01-31")
@@ -308,7 +306,7 @@ except UPQError as e:
 ### Example 1: Get Current Stock Price
 
 ```python
-from clients.upq import UPQClient
+from qfinzero.clients.upq import UPQClient
 
 with UPQClient() as upq:
     bars = upq.stock_daily(["AAPL"], "2025-01-31", "2025-01-31")

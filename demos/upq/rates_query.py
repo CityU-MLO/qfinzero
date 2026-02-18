@@ -13,12 +13,7 @@ Usage:
   python demos/upq/rates_query.py
 """
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from clients.upq import UPQClient
+from qfinzero.clients.upq import UPQClient
 
 
 def main():

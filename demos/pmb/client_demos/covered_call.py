@@ -13,14 +13,9 @@ Usage:
   python demos/pmb/client_demos/covered_call.py
 """
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
 import requests
 from datetime import datetime, timedelta
-from clients.pmb import PMBClient
+from qfinzero.clients.pmb import PMBClient
 
 UPQ_URL = "http://127.0.0.1:19350"
 

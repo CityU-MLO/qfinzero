@@ -23,3 +23,11 @@ env/
 **/factor_cache*.sqlite
 **/cache_data/*.db
 **/*.sqlite
+
+**/results
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+data/

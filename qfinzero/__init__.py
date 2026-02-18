@@ -1,0 +1,1 @@
+"""QFinZero — quantitative finance toolkit."""
