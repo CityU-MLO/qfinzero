@@ -6,7 +6,7 @@ Buy 10 shares of AAPL at close every trading day for January 2025.
 
 Prerequisites:
   - UPQ running with AAPL daily data
-  - PMB running on http://127.0.0.1:24444
+  - PMB running on http://127.0.0.1:19320
 
 Usage:
   cd qfinzero

@@ -5,7 +5,7 @@ Trading strategy demos for the Paper Money Broker. Two versions of each demo: ra
 ## Prerequisites
 
 1. **UPQ** running (port 19350) with market data
-2. **PMB** running (port 24444)
+2. **PMB** running (port 19320)
 
 ```bash
 # Terminal 1: UPQ

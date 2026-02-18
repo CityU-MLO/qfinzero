@@ -10,7 +10,7 @@ Three comprehensive demos showcasing different trading strategies using the Pape
    cargo run -p upq-service
    ```
 
-2. **PMB Service Running** (port 24444)
+2. **PMB Service Running** (port 19320)
    ```bash
    cd infra/pmb
    python main.py
@@ -200,7 +200,7 @@ print(f"Max drawdown: {summary['max_drawdown']*100:.2f}%")
 
 **"session not found"**:
 - Ensure PMB service is running
-- Check port 24444: `curl http://127.0.0.1:24444/v1/health`
+- Check port 19320: `curl http://127.0.0.1:19320/v1/health`
 
 **"invalid_argument: limit_price required"**:
 - Check order type matches required fields

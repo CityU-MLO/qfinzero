@@ -9,7 +9,7 @@ Strategy:
 
 Prerequisites:
   - UPQ running on http://127.0.0.1:23333 with NVDA stock data
-  - PMB running on http://127.0.0.1:24444
+  - PMB running on http://127.0.0.1:19320
 
 Note: This demo simulates a rolling covered call strategy.
       If actual option data is unavailable from UPQ, it will track stock only.
@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from demos.result_saver import ResultSaver
 
 
-BASE = "http://127.0.0.1:24444"
+BASE = "http://127.0.0.1:19320"
 OPTION_CHAIN_API = "http://127.0.0.1:19350"
 
 

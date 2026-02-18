@@ -6,7 +6,7 @@ Every 5 minutes: if price down -> BUY 5, if price up and holding -> SELL 5.
 
 Prerequisites:
   - UPQ running with AAPL minute data
-  - PMB running on http://127.0.0.1:24444
+  - PMB running on http://127.0.0.1:19320
 
 Usage:
   cd qfinzero

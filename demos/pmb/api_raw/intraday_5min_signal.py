@@ -9,7 +9,7 @@ Strategy:
 
 Prerequisites:
   - UPQ running on http://127.0.0.1:23333 with AAPL minute data
-  - PMB running on http://127.0.0.1:24444
+  - PMB running on http://127.0.0.1:19320
 
 Usage:
   python demos/intraday_5min_signal.py
@@ -24,7 +24,7 @@ import json
 from demos.result_saver import ResultSaver
 
 
-BASE = "http://127.0.0.1:24444"
+BASE = "http://127.0.0.1:19320"
 
 
 def print_section(title):

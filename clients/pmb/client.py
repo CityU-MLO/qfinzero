@@ -95,7 +95,7 @@ class StepResult:
 class PMBClient:
     """Synchronous client for the Paper Money Broker REST API."""
 
-    DEFAULT_URL = "http://127.0.0.1:24444"
+    DEFAULT_URL = "http://127.0.0.1:19320"
 
     def __init__(self, base_url: str = None, timeout: int = 30):
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")

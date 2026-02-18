@@ -6,7 +6,7 @@ Buy 100 NVDA shares, sell OTM calls every 2 weeks over 3 months.
 
 Prerequisites:
   - UPQ running with NVDA stock + option data
-  - PMB running on http://127.0.0.1:24444
+  - PMB running on http://127.0.0.1:19320
 
 Usage:
   cd qfinzero

@@ -7,7 +7,7 @@ Shows how to:
   - Simulate GateAgent polling loop with replay mode
 
 Prerequisites:
-  - NPP running on http://127.0.0.1:19340
+  - NPP running on http://127.0.0.1:19330
 
 Usage:
   cd qfinzero

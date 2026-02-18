@@ -3,7 +3,7 @@ Demo: AAPL single-day minute replay with stock trades.
 
 Prerequisites:
   - UPQ running on http://127.0.0.1:23333 with AAPL minute data for 2025-01-06
-  - PMB running on http://127.0.0.1:24444 (python main.py)
+  - PMB running on http://127.0.0.1:19320 (python main.py)
 
 Usage:
   python demo.py
@@ -12,7 +12,7 @@ Usage:
 import requests
 import json
 
-BASE = "http://127.0.0.1:24444"
+BASE = "http://127.0.0.1:19320"
 
 
 def pp(label: str, resp):

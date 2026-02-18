@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
-    port: int = 19340
+    port: int = 19330
 
     # MongoDB
     mongo_uri: str = "mongodb://localhost:27018"

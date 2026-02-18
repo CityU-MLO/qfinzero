@@ -7,7 +7,7 @@ Shows how to:
   - Fetch full article body by news ID
 
 Prerequisites:
-  - NPP running on http://127.0.0.1:19340
+  - NPP running on http://127.0.0.1:19330
   - MongoDB running on localhost:27018 with market_news.ticker_news
 
 Usage:

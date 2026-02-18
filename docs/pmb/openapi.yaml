@@ -13,7 +13,7 @@ info:
     name: QFinZero
 
 servers:
-  - url: http://localhost:24444/v1
+  - url: http://localhost:19320/v1
     description: Local development server
 
 paths:
