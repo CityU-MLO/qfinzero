@@ -6,8 +6,7 @@ Python client libraries for each QFinZero service. Each client wraps the service
 
 ```
 clients/
-├── ffo/     # FFO client — factor evaluation & combination (planned)
-├── npp/     # NPP client — news query & push (planned)
+├── npp/     # NPP client — news and event queries
 ├── pmb/     # PMB client — paper trading session management
 └── upq/     # UPQ client — price data queries
 ```
@@ -16,19 +15,24 @@ clients/
 
 | Client | Import | Default Port | Agent Guide |
 |--------|--------|-------------|-------------|
-| PMB | `from qfinzero.clients.pmb import PMBClient` | 24444 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
+| PMB | `from qfinzero.clients.pmb import PMBClient` | 19320 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
+| NPP | `from qfinzero.clients.npp import NPPClient` | 19330 | [docs/npp/agent-guide.md](../docs/npp/agent-guide.md) |
 | UPQ | `from qfinzero.clients.upq import UPQClient` | 19350 | [docs/upq/agent-guide.md](../docs/upq/agent-guide.md) |
 
 ### Quick Start
 
 ```python
 from qfinzero.clients.pmb import PMBClient, StepResult, PMBError
+from qfinzero.clients.npp import NPPClient, NPPError
 from qfinzero.clients.upq import UPQClient, UPQError
 
-# Both clients support context manager
-with PMBClient() as pmb, UPQClient() as upq:
+# All clients support context manager
+with PMBClient() as pmb, NPPClient() as npp, UPQClient() as upq:
     # Query stock prices via UPQ
     bars = upq.stock_daily(["AAPL"], "2025-01-06", "2025-01-31")
+
+    # Fetch upcoming events via NPP
+    events = npp.query_events(mode="upcoming", horizon_minutes=120)
 
     # Run a paper trading simulation via PMB
     acct = pmb.create_account(initial_cash=50000.0, start_date="2025-01-06")
@@ -46,9 +50,5 @@ with PMBClient() as pmb, UPQClient() as upq:
 The agent guide documents describe each client method as a callable tool with exact parameters, return types, and JSON response schemas. Use these when building agent skills:
 
 - **[PMB Agent Guide](../docs/pmb/agent-guide.md)** — 16 tools for paper trading (account, session, orders, market)
+- **[NPP Agent Guide](../docs/npp/agent-guide.md)** — 6 tools for news, earnings, and macro events
 - **[UPQ Agent Guide](../docs/upq/agent-guide.md)** — 6 tools + 2 utilities for price data queries
-
-## Planned Clients
-
-- FFO: `infra/ffo/client/` (existing, to be consolidated)
-- NPP: `infra/npp/massive_client.py` (existing, to be consolidated)

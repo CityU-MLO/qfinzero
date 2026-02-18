@@ -6,7 +6,6 @@ Usage demonstrations for each QFinZero service. Each subdirectory contains runna
 
 ```
 demos/
-├── ffo/     # Factor evaluation & combination demos
 ├── npp/     # News ingestion & query demos
 ├── pmb/     # Paper trading strategy demos
 └── upq/     # Price data query demos
@@ -18,7 +17,6 @@ Make sure the relevant service is running before running its demos. See the root
 
 ## Existing Demos
 
-Some demo scripts currently live within each service's directory:
-
-- **FFO**: `infra/ffo/examples/enhanced_usage.py` — 6 usage patterns for factor evaluation
-- **PMB**: `infra/pmb/demos/` — Daily accumulation, intraday mean reversion, covered call strategies
+- **NPP**: `demos/npp/` — earnings calendar, economic calendar, news search, trigger checks
+- **UPQ**: `demos/upq/` — stock, option, and rates queries
+- **PMB**: `demos/pmb/` and `infra/pmb/demos/` — daily accumulation, intraday mean reversion, covered call strategies

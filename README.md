@@ -2,11 +2,17 @@
 
 **A Unified Trading Environment for LLM Agents**
 
-QFinZero is an agent-oriented financial toolchain that standardizes interaction with market prices, structured news and event data, and brokerage execution through consistent, time-aligned interfaces. By abstracting financial infrastructure into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation through comprehensive logging and deterministic replay.
+QFinZero unifies price data, event/news retrieval, and brokerage simulation behind consistent, time-aligned APIs so LLM agents can query, reason, and trade in a coherent environment.
 
-> Haochen Luo, Binh Minh An, Ho Tin Ko, Junjie Xu, Pok Hin Tang, Wang Chak Wong, Yifan Li, Yuan Gao, Zhengzhao Lai, Yuan Zhang, Chen Liu
+> Haochen Luo1*, Binh Minh An1, Ho Tin Ko2, Junjie Xu5, Pok Hin Tang1, Wang Chak Wong1, Yifan Li1, Yuan Gao1, Zhengzhao Lai4, Yuan Zhang3, Chen Liu1
 >
-> City University of Hong Kong, Shanghai University of Finance and Economics, USTC, CUHK(SZ)
+> 1 City University of Hong Kong, 2 Yuen Long Merchants Association Secondary School, 3 Shanghai University of Finance and Economics, 4 University of Science and Technology of China, 5 The Chinese University of Hong Kong (Shenzhen)
+>
+> Correspondence: chester.hc.luo@my.cityu.edu.hk, zhang.yuan@sufe.edu.cn, chen.liu@cityu.edu.hk
+
+## Abstract
+
+Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (NPP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
 
 ## Services
 
@@ -76,6 +82,8 @@ from qfinzero.clients.pmb import PMBClient
 ```
 
 ## Quick Start
+
+Edit `config/qfinzero.env` if you want to change ports, host, or data paths.
 
 ### Start All Services
 
@@ -160,6 +168,8 @@ qfinzero/
 │   ├── upq/                    #   UPQ API docs + OpenAPI
 │   ├── npp/                    #   NPP API docs + OpenAPI
 │   └── pmb/                    #   PMB API docs + OpenAPI
+├── config/                     # Global service config
+│   └── qfinzero.env
 ├── data/                       # Local databases
 │   ├── benzinga_earnings.sqlite3
 │   └── nasdaq_econ_events.sqlite3
@@ -172,14 +182,16 @@ qfinzero/
 
 ## Configuration
 
-Global port assignments are defined in [`qfinzero/config.py`](qfinzero/config.py):
+Global service configuration lives in `config/qfinzero.env` and can be overridden by environment variables. The service scripts automatically load this file.
+
+`qfinzero/config.py` reads the same environment variables so clients stay consistent.
 
 | Service | Port | Env Override |
 |---------|------|-------------|
 | PMB | 19320 | `PMB_PORT` |
 | NPP | 19330 | `NPP_PORT` |
-| UPQ | 19350 | `PORT` |
-| Dashboard | 19380 | (reserved) |
+| UPQ | 19350 | `UPQ_PORT` (service reads `PORT`) |
+| Dashboard | 19380 | `DASHBOARD_PORT` (reserved) |
 
 Each service also accepts host/port via its own environment variables (e.g., `PMB_HOST`, `NPP_MONGO_URI`).
 
