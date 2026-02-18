@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, date, timezone
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from models import EconCalendarRequest, EarningsCalendarRequest
 
@@ -27,6 +27,8 @@ async def earnings_calendar(req: EarningsCalendarRequest, request: Request):
 @router.get("/npp/calendar/coverage")
 async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1, le=365)):
     ds = request.app.state.data_sources
+    if ds.earnings._db is None and ds.econ._db is None:
+        raise HTTPException(status_code=503, detail="Calendar databases unavailable")
     now = datetime.now(timezone.utc)
     start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")
     end_date = now.strftime("%Y-%m-%d")

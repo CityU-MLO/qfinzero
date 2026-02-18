@@ -367,6 +367,76 @@ class NPPClient:
             self._handle(resp)
         return resp
 
+    def earnings_export(
+        self,
+        format: str = "csv",
+        start: str = None,
+        end: str = None,
+        ticker: str = None,
+    ) -> requests.Response:
+        """Export earnings data as JSONL or CSV.
+
+        Args:
+            format: "jsonl" or "csv"
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
+            ticker: Comma-separated ticker filter
+
+        Returns:
+            Raw Response object (use .text or .iter_lines() for content)
+        """
+        params = {"format": format}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        if ticker:
+            params["ticker"] = ticker
+        resp = self._session.get(
+            f"{self.base_url}/npp/calendar/earnings/export",
+            params=params,
+            timeout=self.timeout,
+            stream=True,
+        )
+        if resp.status_code >= 400:
+            self._handle(resp)
+        return resp
+
+    def economic_export(
+        self,
+        format: str = "csv",
+        start: str = None,
+        end: str = None,
+        country: str = None,
+    ) -> requests.Response:
+        """Export economic events as JSONL or CSV.
+
+        Args:
+            format: "jsonl" or "csv"
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
+            country: Country filter
+
+        Returns:
+            Raw Response object (use .text or .iter_lines() for content)
+        """
+        params = {"format": format}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        if country:
+            params["country"] = country
+        resp = self._session.get(
+            f"{self.base_url}/npp/calendar/economic/export",
+            params=params,
+            timeout=self.timeout,
+            stream=True,
+        )
+        if resp.status_code >= 400:
+            self._handle(resp)
+        return resp
+
     def calendar_coverage(self, days: int = 30) -> dict:
         """Calendar data coverage — daily counts, missing dates, breakdowns.
 

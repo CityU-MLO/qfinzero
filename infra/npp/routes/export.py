@@ -44,12 +44,31 @@ def _stream_csv(rows, fieldnames):
         buf.truncate(0)
 
 
+async def _stream_jsonl_async(aiter):
+    async for row in aiter:
+        yield json.dumps(row, default=str) + "\n"
+
+
+async def _stream_csv_async(aiter, fieldnames):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    yield buf.getvalue()
+    buf.seek(0)
+    buf.truncate(0)
+    async for row in aiter:
+        writer.writerow(row)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+
 # ── News Export ──────────────────────────────────────────────────
 
 @router.get("/npp/news/export")
 async def export_news(
     request: Request,
-    format: str = Query(default="jsonl", regex="^(jsonl|csv)$"),
+    format: str = Query(default="jsonl", pattern="^(jsonl|csv)$"),
     tickers: Optional[str] = Query(default=None),
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
@@ -76,34 +95,34 @@ async def export_news(
             detail=f"Result set ({count}) exceeds export limit ({EXPORT_LIMIT}). Narrow your query.",
         )
 
-    cursor = coll.find(query).sort([("published_utc", 1)]).limit(EXPORT_LIMIT)
-    rows = []
-    async for doc in cursor:
-        pub = doc.get("published_utc")
-        pub_iso = pub.isoformat() if hasattr(pub, "isoformat") else str(pub) if pub else None
-        publisher = doc.get("publisher")
-        pub_name = publisher.get("name") if isinstance(publisher, dict) else None
-        rows.append({
-            "id": str(doc.get("_id", "")),
-            "title": doc.get("title", ""),
-            "published_utc": pub_iso,
-            "tickers": ",".join(doc.get("tickers") or []),
-            "publisher": pub_name or "",
-            "article_url": doc.get("article_url", ""),
-            "author": doc.get("author", ""),
-            "description": (doc.get("description") or "")[:500],
-        })
+    async def _news_rows():
+        cursor = coll.find(query).sort([("published_utc", 1)]).limit(EXPORT_LIMIT)
+        async for doc in cursor:
+            pub = doc.get("published_utc")
+            pub_iso = pub.isoformat() if hasattr(pub, "isoformat") else str(pub) if pub else None
+            publisher = doc.get("publisher")
+            pub_name = publisher.get("name") if isinstance(publisher, dict) else None
+            yield {
+                "id": str(doc.get("_id", "")),
+                "title": doc.get("title", ""),
+                "published_utc": pub_iso,
+                "tickers": ",".join(doc.get("tickers") or []),
+                "publisher": pub_name or "",
+                "article_url": doc.get("article_url", ""),
+                "author": doc.get("author", ""),
+                "description": (doc.get("description") or "")[:500],
+            }
 
+    fieldnames = ["id", "title", "published_utc", "tickers", "publisher", "article_url", "author", "description"]
     if format == "jsonl":
         return StreamingResponse(
-            _stream_jsonl(rows),
+            _stream_jsonl_async(_news_rows()),
             media_type="application/x-ndjson",
             headers={"Content-Disposition": "attachment; filename=news_export.jsonl"},
         )
     else:
-        fieldnames = ["id", "title", "published_utc", "tickers", "publisher", "article_url", "author", "description"]
         return StreamingResponse(
-            _stream_csv(rows, fieldnames),
+            _stream_csv_async(_news_rows(), fieldnames),
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=news_export.csv"},
         )
@@ -114,13 +133,15 @@ async def export_news(
 @router.get("/npp/calendar/earnings/export")
 async def export_earnings(
     request: Request,
-    format: str = Query(default="csv", regex="^(jsonl|csv)$"),
+    format: str = Query(default="csv", pattern="^(jsonl|csv)$"),
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
     ticker: Optional[str] = Query(default=None),
 ):
     ds = request.app.state.data_sources
     db = ds.earnings._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Earnings database unavailable")
     now = datetime.now(timezone.utc)
 
     start_date = start or (now - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -176,13 +197,15 @@ async def export_earnings(
 @router.get("/npp/calendar/economic/export")
 async def export_economic(
     request: Request,
-    format: str = Query(default="csv", regex="^(jsonl|csv)$"),
+    format: str = Query(default="csv", pattern="^(jsonl|csv)$"),
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
     country: Optional[str] = Query(default=None),
 ):
     ds = request.app.state.data_sources
     db = ds.econ._db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Economic events database unavailable")
     now = datetime.now(timezone.utc)
 
     start_date = start or (now - timedelta(days=30)).strftime("%Y-%m-%d")

@@ -116,8 +116,8 @@ class NewsSearchRequest(BaseModel):
     tickers: Optional[list[str]] = None
     start_utc: Optional[str] = None
     end_utc: Optional[str] = None
-    keyword: Optional[str] = None
-    publisher: Optional[str] = None
+    keyword: Optional[str] = Field(default=None, max_length=200)
+    publisher: Optional[str] = Field(default=None, max_length=200)
     limit: int = Field(default=50, ge=1, le=500)
     cursor: Optional[str] = None
     now_utc: Optional[str] = None
