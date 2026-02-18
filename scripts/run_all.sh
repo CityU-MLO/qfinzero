@@ -77,9 +77,22 @@ start_upq() {
     info "UPQ started (PID: $(cat "$LOG_DIR/upq.pid"))"
 }
 
+start_dashboard() {
+    info "Starting Dashboard on port $DASHBOARD_PORT..."
+    cd "$ROOT_DIR/infra/dashboard"
+    DASHBOARD_HOST="$QFZ_HOST" DASHBOARD_PORT="$DASHBOARD_PORT" \
+        DASHBOARD_PMB_URL="http://$QFZ_HOST:$PMB_PORT" \
+        DASHBOARD_NPP_URL="http://$QFZ_HOST:$NPP_PORT" \
+        DASHBOARD_UPQ_URL="http://$QFZ_HOST:$UPQ_PORT" \
+        python main.py > "$LOG_DIR/dashboard.log" 2>&1 &
+    echo $! > "$LOG_DIR/dashboard.pid"
+    info "Dashboard started (PID: $(cat "$LOG_DIR/dashboard.pid"))"
+    info "Open http://$QFZ_HOST:$DASHBOARD_PORT"
+}
+
 # ── Main ─────────────────────────────────────────────────────────
 
-SERVICES="${@:-pmb npp upq}"
+SERVICES="${@:-pmb npp upq dashboard}"
 
 echo ""
 echo "=========================================="
@@ -92,7 +105,8 @@ for svc in $SERVICES; do
         pmb) start_pmb ;;
         npp) start_npp ;;
         upq) start_upq ;;
-        *)   warn "Unknown service: $svc (valid: pmb, npp, upq)" ;;
+        dashboard) start_dashboard ;;
+        *)   warn "Unknown service: $svc (valid: pmb, npp, upq, dashboard)" ;;
     esac
 done
 
@@ -109,6 +123,7 @@ for svc in $SERVICES; do
         pmb) PORT="$PMB_PORT" ;;
         npp) PORT="$NPP_PORT" ;;
         upq) PORT="$UPQ_PORT" ;;
+        dashboard) PORT="$DASHBOARD_PORT" ;;
         *)   continue ;;
     esac
     SVC_UPPER=$(echo "$svc" | tr '[:lower:]' '[:upper:]')

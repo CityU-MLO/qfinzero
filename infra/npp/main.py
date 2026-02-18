@@ -84,6 +84,9 @@ async def generic_error_handler(request: Request, exc: Exception):
     )
 
 
+from qfinzero.metrics import attach_metrics
+attach_metrics(app, service_name="npp")
+
 # Register routes
 app.include_router(health.router)
 app.include_router(events.router)

@@ -64,6 +64,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
+from qfinzero.metrics import attach_metrics
+attach_metrics(app, service_name="pmb")
+
 app.include_router(health.router)
 app.include_router(accounts.router)
 app.include_router(sessions.router)

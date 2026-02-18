@@ -16,6 +16,7 @@ fi
 : "${PMB_PORT:=19320}"
 : "${NPP_PORT:=19330}"
 : "${UPQ_PORT:=19350}"
+: "${DASHBOARD_PORT:=19380}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

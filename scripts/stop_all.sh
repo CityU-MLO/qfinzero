@@ -15,7 +15,7 @@ echo "  QFinZero — Stopping Services"
 echo "=========================================="
 echo ""
 
-for svc in pmb npp upq; do
+for svc in pmb npp upq dashboard; do
     PID_FILE="$LOG_DIR/$svc.pid"
     SVC_UPPER=$(echo "$svc" | tr '[:lower:]' '[:upper:]')
     if [ -f "$PID_FILE" ]; then
