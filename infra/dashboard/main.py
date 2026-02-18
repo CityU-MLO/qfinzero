@@ -26,9 +26,9 @@ logging.basicConfig(level=settings.log_level, format="%(asctime)s %(name)s %(lev
 logger = logging.getLogger("dashboard")
 
 SERVICES = {
-    "PMB": {"url": settings.pmb_url, "stats": "/_stats", "health": "/v1/health"},
-    "NPP": {"url": settings.npp_url, "stats": "/_stats", "health": "/npp/health"},
-    "UPQ": {"url": settings.upq_url, "stats": None, "health": "/health"},
+    "PMB": {"url": settings.pmb_url, "stats": "/_stats", "health": "/v1/health", "freshness": None},
+    "NPP": {"url": settings.npp_url, "stats": "/_stats", "health": "/npp/health", "freshness": "/npp/health/freshness"},
+    "UPQ": {"url": settings.upq_url, "stats": None, "health": "/health", "freshness": "/health/freshness"},
 }
 
 
@@ -45,7 +45,7 @@ app = FastAPI(title="QFinZero Dashboard", version="0.1.0", lifespan=lifespan)
 
 async def _fetch_service(http: httpx.AsyncClient, name: str, svc: dict) -> dict:
     base = svc["url"]
-    result = {"name": name, "status": "down", "stats": None, "health": None}
+    result = {"name": name, "status": "down", "stats": None, "health": None, "freshness": None}
 
     # Try health
     try:
@@ -63,6 +63,15 @@ async def _fetch_service(http: httpx.AsyncClient, name: str, svc: dict) -> dict:
             if r.status_code < 400:
                 result["stats"] = r.json()
                 result["status"] = "up"
+        except Exception:
+            pass
+
+    # Try freshness
+    if svc.get("freshness"):
+        try:
+            r = await http.get(f"{base}{svc['freshness']}")
+            if r.status_code < 400:
+                result["freshness"] = r.json()
         except Exception:
             pass
 
@@ -187,6 +196,24 @@ function renderCard(svc) {
     html += '<div class="metric-row"><span class="metric-label">Health</span><span class="metric-value">OK (no detailed stats)</span></div>';
   } else {
     html += '<div class="metric-row"><span class="metric-label">Status</span><span class="metric-value" style="color:#f85149">Unreachable</span></div>';
+  }
+
+  // Freshness section
+  if (svc.freshness && svc.freshness.sources) {
+    const sources = Object.entries(svc.freshness.sources);
+    if (sources.length > 0) {
+      html += '<div class="section-label">Data Freshness</div>';
+      html += '<table class="endpoint-table">';
+      html += '<tr><th>Source</th><th>Latest</th><th>Records</th><th>Keys</th></tr>';
+      for (const [name, info] of sources) {
+        const latest = info.latest_timestamp || info.latest_date || '-';
+        const displayLatest = latest.length > 19 ? latest.substring(0, 19) : latest;
+        const records = info.record_count != null ? info.record_count.toLocaleString() : '-';
+        const keys = info.unique_keys != null ? `${info.unique_keys} ${info.unique_key_label || ''}` : '-';
+        html += `<tr><td>${name}</td><td>${displayLatest}</td><td>${records}</td><td>${keys}</td></tr>`;
+      }
+      html += '</table>';
+    }
   }
 
   html += '</div>';
