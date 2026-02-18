@@ -105,6 +105,7 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
 
     Router::new()
         .route("/health", get(health))
+        .route("/health/freshness", get(health_freshness))
         .route("/stock", get(stock))
         .route("/stock/daily", get(stock_daily))
         .route("/option", get(option))
@@ -371,6 +372,159 @@ async fn option() -> axum::response::Response {
 
 async fn health() -> axum::response::Response {
     (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
+}
+
+async fn health_freshness(State(state): State<AppState>) -> axum::response::Response {
+    let storage_root = state.storage_root.clone();
+    let result = tokio::task::spawn_blocking(move || build_freshness_response(&storage_root)).await;
+    match result {
+        Ok(Ok(value)) => (StatusCode::OK, Json(value)).into_response(),
+        Ok(Err(error)) => internal_error(error),
+        Err(join_error) => internal_error(ServiceError::Join(join_error.to_string())),
+    }
+}
+
+fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> {
+    let checked_at = chrono::Utc::now().to_rfc3339();
+    let mut sources = Map::new();
+
+    // Partitioned datasets: (name, unique_key_label, has_window_start)
+    // has_window_start=true means the dataset has a window_start BIGINT column
+    let partitioned_datasets = [
+        ("stock_minute", "tickers", true),
+        ("stock_daily", "tickers", false),
+        ("option_minute", "tickers", true),
+        ("option_day", "tickers", true),
+    ];
+
+    for (dataset_name, unique_key_label, has_window_start) in &partitioned_datasets {
+        let dataset_dir = storage_root.join(dataset_name);
+        if !has_any_parquet_file(&dataset_dir) {
+            continue;
+        }
+
+        let partition_dirs = collect_partition_dirs(&dataset_dir);
+        if partition_dirs.is_empty() {
+            continue;
+        }
+
+        let partition_count = partition_dirs.len() as i64;
+        let latest_date = partition_dirs
+            .iter()
+            .filter_map(|dir_name| dir_name.strip_prefix("trade_date="))
+            .max()
+            .map(String::from);
+
+        let latest_date_str = match &latest_date {
+            Some(d) => d.as_str(),
+            None => continue,
+        };
+
+        let latest_partition_path = dataset_dir
+            .join(format!("trade_date={latest_date_str}"))
+            .join("*.parquet")
+            .to_string_lossy()
+            .to_string();
+
+        let mut source_info = Map::new();
+        source_info.insert("latest_date".to_string(), json!(latest_date_str));
+
+        // Single DuckDB query for all stats on the latest partition
+        let ts_col = if *has_window_start {
+            ", MAX(window_start) AS latest_timestamp"
+        } else {
+            ""
+        };
+        let stats_sql = format!(
+            "SELECT COUNT(*) AS record_count, COUNT(DISTINCT ticker) AS unique_keys{ts_col} FROM read_parquet('{}')",
+            sql_escape_literal(&latest_partition_path)
+        );
+
+        if let Ok(rows) = run_sql_json(&stats_sql) {
+            if let Some(row) = rows.first() {
+                if let Some(record_count) = row.get("record_count") {
+                    source_info.insert("record_count".to_string(), record_count.clone());
+                }
+                if let Some(unique_keys) = row.get("unique_keys") {
+                    source_info.insert("unique_keys".to_string(), unique_keys.clone());
+                }
+                if *has_window_start {
+                    if let Some(latest_ts) = row.get("latest_timestamp") {
+                        if !latest_ts.is_null() {
+                            source_info
+                                .insert("latest_timestamp".to_string(), latest_ts.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        source_info.insert(
+            "unique_key_label".to_string(),
+            json!(unique_key_label),
+        );
+        source_info.insert("partition_count".to_string(), json!(partition_count));
+
+        sources.insert(dataset_name.to_string(), Value::Object(source_info));
+    }
+
+    // Rates dataset
+    let rates_file = storage_root.join("rates").join("rates.parquet");
+    if rates_file.exists() {
+        let rates_path = rates_file.to_string_lossy().to_string();
+        let sql = format!(
+            "SELECT MAX(date) AS latest_date FROM read_parquet('{}')",
+            sql_escape_literal(&rates_path)
+        );
+        if let Ok(rows) = run_sql_json(&sql) {
+            if let Some(row) = rows.first() {
+                let mut rates_info = Map::new();
+                if let Some(latest_date) = row.get("latest_date") {
+                    rates_info.insert("latest_date".to_string(), latest_date.clone());
+                }
+                // 7 standard tenors: 1M, 3M, 1Y, 2Y, 5Y, 10Y, 30Y
+                rates_info.insert("unique_keys".to_string(), json!(7));
+                rates_info.insert(
+                    "unique_key_label".to_string(),
+                    json!("tenors"),
+                );
+                sources.insert("rates".to_string(), Value::Object(rates_info));
+            }
+        }
+    }
+
+    Ok(json!({
+        "service": "upq",
+        "checked_at": checked_at,
+        "sources": Value::Object(sources),
+    }))
+}
+
+fn collect_partition_dirs(dataset_dir: &Path) -> Vec<String> {
+    let entries = match fs::read_dir(dataset_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut partition_names = Vec::new();
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let dir_name = match entry.file_name().to_str() {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        if !dir_name.starts_with("trade_date=") {
+            continue;
+        }
+        // Only count partitions that contain parquet files
+        if has_any_parquet_file(&entry_path) {
+            partition_names.push(dir_name);
+        }
+    }
+    partition_names
 }
 
 async fn option_chain_query(

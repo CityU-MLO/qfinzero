@@ -8,6 +8,144 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tower::util::ServiceExt;
 
+#[tokio::test]
+async fn freshness_endpoint_returns_sources_for_empty_storage(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/health/freshness")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    assert_eq!(
+        payload.get("service"),
+        Some(&Value::String("upq".to_string()))
+    );
+    assert!(payload.get("checked_at").is_some());
+    assert!(payload.get("sources").is_some());
+    assert!(payload["sources"].is_object());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn freshness_endpoint_detects_latest_partition_date(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    // Create two stock_minute partitions with parquet files
+    let older_dir = tmp
+        .path()
+        .join("stock_minute")
+        .join("trade_date=2025-01-06");
+    let newer_dir = tmp
+        .path()
+        .join("stock_minute")
+        .join("trade_date=2025-01-10");
+    fs::create_dir_all(&older_dir)?;
+    fs::create_dir_all(&newer_dir)?;
+
+    let conn = Connection::open_in_memory()?;
+
+    let older_parquet = older_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'AAPL' AS ticker, \
+                1736155800000000000::BIGINT AS window_start, \
+                100.0::DOUBLE AS open, \
+                101.0::DOUBLE AS high, \
+                99.0::DOUBLE AS low, \
+                100.5::DOUBLE AS close, \
+                1000::BIGINT AS volume, \
+                10::BIGINT AS transactions, \
+                DATE '2025-01-06' AS trade_date\
+         ) TO '{}' (FORMAT PARQUET)",
+        older_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let newer_parquet = newer_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('AAPL', 1736496000000000000::BIGINT, 102.0::DOUBLE, 103.0::DOUBLE, 101.0::DOUBLE, 102.5::DOUBLE, 2000::BIGINT, 20::BIGINT, DATE '2025-01-10'),\
+                ('MSFT', 1736496000000000000::BIGINT, 200.0::DOUBLE, 201.0::DOUBLE, 199.0::DOUBLE, 200.5::DOUBLE, 3000::BIGINT, 30::BIGINT, DATE '2025-01-10')\
+            ) AS t(ticker, window_start, open, high, low, close, volume, transactions, trade_date)\
+         ) TO '{}' (FORMAT PARQUET)",
+        newer_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/health/freshness")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+
+    let stock_minute = &payload["sources"]["stock_minute"];
+    assert_eq!(
+        stock_minute.get("latest_date"),
+        Some(&Value::String("2025-01-10".to_string()))
+    );
+    assert_eq!(stock_minute.get("record_count"), Some(&Value::from(2)));
+    assert_eq!(stock_minute.get("unique_keys"), Some(&Value::from(2)));
+    assert_eq!(stock_minute.get("partition_count"), Some(&Value::from(2)));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn freshness_endpoint_includes_rates_source() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let parquet_path = rates_dir.join("rates.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-02', 1.53::DOUBLE, 1.54::DOUBLE, 1.56::DOUBLE, 1.58::DOUBLE, 1.67::DOUBLE, 1.88::DOUBLE, 2.33::DOUBLE),\
+                (DATE '2025-01-03', 1.52::DOUBLE, 1.52::DOUBLE, 1.55::DOUBLE, 1.53::DOUBLE, 1.59::DOUBLE, 1.80::DOUBLE, 2.26::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/health/freshness")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+
+    let rates = &payload["sources"]["rates"];
+    assert_eq!(
+        rates.get("latest_date"),
+        Some(&Value::String("2025-01-03".to_string()))
+    );
+    assert_eq!(rates.get("unique_keys"), Some(&Value::from(7)));
+    assert_eq!(
+        rates.get("unique_key_label"),
+        Some(&Value::String("tenors".to_string()))
+    );
+
+    Ok(())
+}
+
 fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {
     match result {
         Ok(value) => value,
