@@ -5,28 +5,23 @@
 
 models:
   # --- Remote hosted models ---
-  - model_name: gpt-4.1
-    base_url: https://api.openai-proxy.com/v1
-    api_key: "${OPENAI_PROXY_API_KEY}"
-    provider_type: openai_compatible
+  # - model_name: gpt-4.1
+  #   base_url: https://api.openai-proxy.com/v1
+  #   api_key: "${OPENAI_PROXY_API_KEY}"
+  #   provider_type: openai_compatible
 
-  - model_name: gpt-4.1-mini
-    base_url: https://api.openai-proxy.com/v1
-    api_key: "${OPENAI_PROXY_API_KEY}"
-    provider_type: openai_compatible
+  # - model_name: gpt-4.1-mini
+  #   base_url: https://api.openai-proxy.com/v1
+  #   api_key: "${OPENAI_PROXY_API_KEY}"
+  #   provider_type: openai_compatible
 
-  - model_name: deepseek-chat
-    base_url: https://api.deepseek.com/v1
-    api_key: "${DEEPSEEK_API_KEY}"
-    provider_type: openai_compatible
-
-  # - model_name: claude-sonnet-4-5
-  #   base_url: https://api.anthropic.com/v1
-  #   api_key: ${ANTHROPIC_API_KEY}
+  # - model_name: deepseek-chat
+  #   base_url: https://api.deepseek.com/v1
+  #   api_key: "${DEEPSEEK_API_KEY}"
   #   provider_type: openai_compatible
 
   # --- Local vLLM models ---
-  # - model_name: qwen2.5-72b
-  #   base_url: http://localhost:8000/v1
-  #   api_key: null
-  #   provider_type: vllm_openai_compatible
+  - model_name: Qwen/Qwen2.5-7B-Instruct
+    base_url: http://localhost:8000/v1
+    api_key: null
+    provider_type: vllm_openai_compatible

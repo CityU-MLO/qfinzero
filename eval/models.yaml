@@ -1,0 +1,51 @@
+# QFinZero Evaluation — Unified Model Configuration
+# ===================================================
+# Shared by both eval/calling and eval/planning suites.
+#
+# Fields per entry:
+#   model_name     : display name used in reports
+#   base_url       : OpenAI-compatible API base (must expose /chat/completions)
+#   api_key        : API key, or null for local models
+#   provider_type  : openai_compatible | vllm_openai_compatible
+
+models:
+  # ── Remote models ────────────────────────────────────────────────────────
+  - model_name: gpt-4o
+    base_url: https://api.openai-proxy.com/v1
+    api_key: "${OPENAI_PROXY_API_KEY}"
+    provider_type: openai_compatible
+
+  - model_name: gpt-4.1-mini
+    base_url: https://api.openai-proxy.com/v1
+    api_key: "${OPENAI_PROXY_API_KEY}"
+    provider_type: openai_compatible
+
+  - model_name: gemini-2.5-flash
+    base_url: https://gemini-openai-proxy.deno.dev/v1
+    api_key: "${GOOGLE_API_KEY}"
+    provider_type: openai_compatible
+
+  - model_name: deepseek-chat
+    base_url: https://api.deepseek.com/v1
+    api_key: "${DEEPSEEK_API_KEY}"
+    provider_type: openai_compatible
+
+  # ── Local vLLM models ────────────────────────────────────────────────────
+  # CUDA_VISIBLE_DEVICES=0 vllm serve "Qwen/Qwen2.5-7B-Instruct" --port 8001
+  # CUDA_VISIBLE_DEVICES=1 vllm serve "meta-llama/Llama-3.1-8B-Instruct" --port 8002
+  # CUDA_VISIBLE_DEVICES=2 vllm serve "Qwen/Qwen3-4B-Instruct-2507" --port 8003 --max_model_len 10240
+  # 
+  - model_name: Qwen/Qwen2.5-7B-Instruct
+    base_url: http://localhost:8001/v1
+    api_key: null
+    provider_type: vllm_openai_compatible
+
+  - model_name: meta-llama/Llama-3.1-8B-Instruct
+    base_url: http://localhost:8002/v1
+    api_key: null
+    provider_type: vllm_openai_compatible
+
+  - model_name: Qwen/Qwen3-4B-Instruct-2507
+    base_url: http://localhost:8003/v1
+    api_key: null
+    provider_type: vllm_openai_compatible

@@ -13,10 +13,10 @@ models:
   #   api_key: ${OPENAI_API_KEY}
   #   provider_type: openai_compatible
 
-  - model_name: deepseek-chat
-    base_url: https://api.deepseek.com/v1
-    api_key: "${DEEPSEEK_API_KEY}"
-    provider_type: openai_compatible
+  # - model_name: deepseek-chat
+  #   base_url: https://api.deepseek.com/v1
+  #   api_key: "${DEEPSEEK_API_KEY}"
+  #   provider_type: openai_compatible
 
   # - model_name: claude-sonnet-4-5
   #   base_url: https://api.anthropic.com/v1
