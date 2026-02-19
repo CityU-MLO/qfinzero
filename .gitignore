@@ -32,3 +32,8 @@ dist/
 build/
 data/
 logs/
+
+# Agent configurations
+.agents/
+.claude/
+.cursor/
