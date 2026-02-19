@@ -317,6 +317,7 @@ def write_per_model_csv(records: list[dict], path: Path) -> None:
         *METRIC_COLS,
         "failure_modes", "latency_s", "parse_error",
     ]
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
