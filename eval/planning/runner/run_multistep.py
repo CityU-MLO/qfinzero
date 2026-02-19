@@ -142,7 +142,7 @@ def load_config(path: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def load_models(path: str) -> list[dict[str, Any]]:
+def load_models(path: str, global_call_latency_s: float = 0.0) -> list[dict[str, Any]]:
     with open(path) as f:
         data = yaml.safe_load(f)
     models = data.get("models", [])
@@ -151,6 +151,8 @@ def load_models(path: str) -> list[dict[str, Any]]:
     for m in models:
         m.setdefault("api_key", None)
         m.setdefault("provider_type", "openai_compatible")
+        # Per-model YAML setting takes precedence; CLI global default fills the rest
+        m.setdefault("call_latency_s", global_call_latency_s)
     return models
 
 
@@ -555,6 +557,11 @@ def run_episode(
             # Successful parse — record output and stop retrying
             ep.raw_output = raw
             ep.latency_s = round(latency, 3)
+            # Rate-limiting delay (applied per successful call to avoid hitting API limits)
+            call_delay = model_cfg.get("call_latency_s", 0.0)
+            if call_delay > 0:
+                log.debug(f"[{ep.episode_id}] Rate-limit delay: {call_delay}s")
+                time.sleep(call_delay)
             break
 
         remaining = MAX_PARSE_RETRIES - attempt
@@ -639,10 +646,13 @@ def main() -> None:
                         help="dry-run: no HTTP calls; live: execute tool calls")
     parser.add_argument("--output-dir", default=None,
                         help="Override output dir (default: ../../runs/<model>/<timestamp>/)")
+    parser.add_argument("--call-latency", type=float, default=0.0, metavar="SECONDS",
+                        help="Seconds to sleep after each LLM call (rate-limit guard). "
+                             "Per-model call_latency_s in models.yaml takes precedence (default: 0)")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    models = load_models(args.model_config)
+    models = load_models(args.model_config, global_call_latency_s=args.call_latency)
     cases = load_benchmark(args.benchmark)
     # Index benchmark by episode id for inline scoring
     bench_index: dict[str, dict] = {c["id"]: c for c in cases}
@@ -654,6 +664,14 @@ def main() -> None:
     }
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    # Base output directory — shared across all models for the summary CSV
+    base_out_dir = Path(args.output_dir) if args.output_dir else (
+        Path(__file__).parent.parent.parent.parent / "runs" / timestamp
+    )
+
+    # Collect per-model aggregate scores for the cross-model summary CSV
+    all_model_aggs: dict[str, dict[str, Any]] = {}
 
     with httpx.Client(timeout=90) as http_client:
         # ── PRE-CREATE account + session (live only) ──────────────────────
@@ -674,11 +692,13 @@ def main() -> None:
             model_name = model_cfg["model_name"]
             log.info(f"=== Evaluating model: {model_name} ===")
 
-            # Output path
+            # BUG FIX: each model gets its own subdirectory so results don't
+            # overwrite each other when --output-dir is provided.
+            safe_name = re.sub(r"[^\w\-]", "_", model_name)
             if args.output_dir:
-                out_dir = Path(args.output_dir)
+                out_dir = Path(args.output_dir) / safe_name
             else:
-                out_dir = Path(__file__).parent.parent.parent.parent / "runs" / model_name / timestamp
+                out_dir = Path(__file__).parent.parent.parent.parent / "runs" / safe_name / timestamp
             out_dir.mkdir(parents=True, exist_ok=True)
 
             results_path = out_dir / "multistep_results.jsonl"
@@ -738,8 +758,33 @@ def main() -> None:
             if _SCORING_AVAILABLE and all_ep_scores:
                 agg = aggregate(all_ep_scores)
                 _print_summary(model_name, agg, all_ep_scores, out_dir)
+                all_model_aggs[model_name] = agg
+
+    # ── Write cross-model summary CSV (mirrors calling runner's summary.csv) ──
+    if _SCORING_AVAILABLE and all_model_aggs:
+        _write_summary_csv(all_model_aggs, base_out_dir)
 
     log.info("Done.")
+
+
+def _write_summary_csv(all_model_aggs: dict[str, dict[str, Any]], out_dir: Path) -> None:
+    """Write a cross-model summary CSV — one row per model, mirroring calling/summary.csv."""
+    import csv as _csv
+    SCORE_METRICS = ["TM", "PA", "TA", "SS", "DC", "ER", "RS", "EF", "overall"]
+    fieldnames = ["model_name", *[f"mean_{m}" for m in SCORE_METRICS], "ESR", "n_episodes"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "summary.csv"
+    with open(path, "w", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for model_name, agg in all_model_aggs.items():
+            row: dict[str, Any] = {"model_name": model_name}
+            for m in SCORE_METRICS:
+                row[f"mean_{m}"] = round(agg.get(f"mean_{m}", 0.0), 4)
+            row["ESR"] = round(agg.get("ESR", 0.0), 4)
+            row["n_episodes"] = agg.get("n_episodes", 0)
+            writer.writerow(row)
+    log.info(f"  Cross-model summary CSV → {path}")
 
 
 def _print_summary(

@@ -97,6 +97,7 @@ def run_calling(
     mode: str,
     max_workers: int,
     seed: int,
+    call_latency_s: float = 0.0,
 ) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -107,6 +108,7 @@ def run_calling(
         "--max-workers",    str(max_workers),
         "--seed",           str(seed),
         "--output-dir",     str(out_dir),
+        "--call-latency",   str(call_latency_s),
     ]
     # calling/runner.py imports from the same directory (metrics, schema)
     return _run(cmd, cwd=CALLING_RUNNER.parent, label="calling")
@@ -116,6 +118,7 @@ def run_planning(
     models_path: Path,
     out_dir: Path,
     mode: str,
+    call_latency_s: float = 0.0,
 ) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -125,6 +128,7 @@ def run_planning(
         "--config",       str(PLANNING_CFG),
         "--mode",         mode,
         "--output-dir",   str(out_dir),
+        "--call-latency", str(call_latency_s),
     ]
     # run_multistep.py imports eval_multistep via sys.path insertion
     return _run(cmd, cwd=PLANNING_RUNNER.parent, label="planning")
@@ -165,6 +169,12 @@ def main() -> None:
         "--seed", type=int, default=42,
         help="Random seed for the calling suite (default: 42)",
     )
+    parser.add_argument(
+        "--call-latency", type=float, default=0.0, metavar="SECONDS",
+        help="Seconds to sleep after each LLM call to avoid rate limits. "
+             "Applied to both suites. Per-model call_latency_s in models.yaml "
+             "takes precedence over this global default (default: 0)",
+    )
     args = parser.parse_args()
 
     models_path  = Path(args.models).resolve()
@@ -179,6 +189,8 @@ def main() -> None:
     _banner(f"QFinZero Eval  |  mode={args.mode}  |  suite={args.suite}  |  {timestamp}")
     print(f"  models   : {models_path}")
     print(f"  outputs  : {run_root}")
+    if args.call_latency > 0:
+        print(f"  latency  : {args.call_latency}s per call (global default)")
 
     exit_codes: dict[str, int] = {}
 
@@ -186,20 +198,22 @@ def main() -> None:
     if args.suite in ("calling", "both"):
         _banner("Suite: tool-calling")
         exit_codes["calling"] = run_calling(
-            models_path  = models_path,
-            out_dir      = run_root / "calling",
-            mode         = args.mode,
-            max_workers  = args.max_workers,
-            seed         = args.seed,
+            models_path   = models_path,
+            out_dir       = run_root / "calling",
+            mode          = args.mode,
+            max_workers   = args.max_workers,
+            seed          = args.seed,
+            call_latency_s= args.call_latency,
         )
 
     # ── Planning suite ───────────────────────────────────────────────────────
     if args.suite in ("planning", "both"):
         _banner("Suite: multi-step planning")
         exit_codes["planning"] = run_planning(
-            models_path = models_path,
-            out_dir     = run_root / "planning",
-            mode        = args.mode,
+            models_path   = models_path,
+            out_dir       = run_root / "planning",
+            mode          = args.mode,
+            call_latency_s= args.call_latency,
         )
 
     # ── Final summary ────────────────────────────────────────────────────────

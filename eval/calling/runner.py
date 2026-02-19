@@ -75,7 +75,7 @@ SERVICE_PORTS = {"UPQ": 19350, "NPP": 19330, "PMB": 19320}
 # ---------------------------------------------------------------------------
 # Model config loader
 # ---------------------------------------------------------------------------
-def load_model_configs(path: str) -> list[dict[str, Any]]:
+def load_model_configs(path: str, global_call_latency_s: float = 0.0) -> list[dict[str, Any]]:
     """
     Load model endpoint configs from YAML.
 
@@ -85,6 +85,7 @@ def load_model_configs(path: str) -> list[dict[str, Any]]:
         base_url: https://api.openai.com/v1
         api_key: sk-...
         provider_type: openai_compatible
+        call_latency_s: 1.0   # optional: seconds to sleep after each API call
       - model_name: local-llama
         base_url: http://localhost:8000/v1
         api_key: null
@@ -100,6 +101,8 @@ def load_model_configs(path: str) -> list[dict[str, Any]]:
             raise ValueError(f"Each model needs model_name and base_url: {m}")
         m.setdefault("api_key", None)
         m.setdefault("provider_type", "openai_compatible")
+        # Per-model YAML setting takes precedence; CLI global default fills the rest
+        m.setdefault("call_latency_s", global_call_latency_s)
     return models
 
 
@@ -249,6 +252,10 @@ def evaluate_case(
         raw, latency = call_model(http_client, model_cfg, instruction)
         record["raw_output"] = raw
         record["latency_s"] = round(latency, 3)
+        # Rate-limiting delay (applied per successful call to avoid hitting API limits)
+        call_delay = model_cfg.get("call_latency_s", 0.0)
+        if call_delay > 0:
+            time.sleep(call_delay)
     except Exception as e:
         log.error(f"[{case_id}] Model call failed: {e}")
         record["parse_error"] = f"Model call failed: {e}"
@@ -487,6 +494,7 @@ def run_evaluation(
     max_workers: int,
     seed: int,
     output_dir: str | None = None,
+    call_latency_s: float = 0.0,
 ) -> dict[str, list[dict]]:
     """
     Run the full evaluation pipeline.
@@ -500,6 +508,8 @@ def run_evaluation(
     max_workers : thread pool size
     seed : random seed for deterministic ordering
     output_dir : override output directory (default: auto-generated)
+    call_latency_s : global default seconds to sleep after each LLM call;
+                     per-model call_latency_s in models.yaml takes precedence
 
     Returns
     -------
@@ -507,7 +517,7 @@ def run_evaluation(
     """
     # Load inputs
     cases = load_benchmark(benchmark_path)
-    models = load_model_configs(model_config_path)
+    models = load_model_configs(model_config_path, global_call_latency_s=call_latency_s)
 
     # Deterministic ordering
     random.seed(seed)
@@ -652,6 +662,11 @@ def main():
         "--output-dir", default=None,
         help="Override output directory (default: ./eval_outputs/<run_id>/)",
     )
+    parser.add_argument(
+        "--call-latency", type=float, default=0.0, metavar="SECONDS",
+        help="Seconds to sleep after each LLM call (rate-limit guard). "
+             "Per-model call_latency_s in models.yaml takes precedence (default: 0)",
+    )
     args = parser.parse_args()
 
     run_evaluation(
@@ -662,6 +677,7 @@ def main():
         max_workers=args.max_workers,
         seed=args.seed,
         output_dir=args.output_dir,
+        call_latency_s=args.call_latency,
     )
 
 
