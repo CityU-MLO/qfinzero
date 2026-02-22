@@ -7,7 +7,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langgraph.prebuilt import create_react_agent
 
-from mcp_tools import load_tools
+from mcp_tools import get_tools
 
 
 def build_system_prompt(as_of_date: str) -> str:
@@ -51,56 +51,54 @@ async def run_agent_stream(
         {"type": "error",      "message": str}
     """
     try:
-        # Load tools fresh per request (MCP server is stateless)
-        tools = await load_tools()
+        async with get_tools() as tools:
+            # Init LLM with user-provided config
+            llm = init_chat_model(
+                model=model,
+                model_provider="openai",  # openai-compatible
+                base_url=base_url,
+                api_key=api_key,
+                streaming=True,
+            )
 
-        # Init LLM with user-provided config
-        llm = init_chat_model(
-            model=model,
-            model_provider="openai",  # openai-compatible
-            base_url=base_url,
-            api_key=api_key,
-            streaming=True,
-        )
+            # Build agent
+            system_msg = build_system_prompt(as_of_date)
+            agent = create_react_agent(llm, tools, prompt=system_msg)
 
-        # Build agent
-        system_msg = build_system_prompt(as_of_date)
-        agent = create_react_agent(llm, tools, prompt=system_msg)
+            # Convert messages
+            lc_messages = convert_messages(messages)
+            input_state = {"messages": lc_messages}
 
-        # Convert messages
-        lc_messages = convert_messages(messages)
-        input_state = {"messages": lc_messages}
+            # Stream events
+            async for event in agent.astream_events(input_state, version="v2"):
+                kind = event.get("event")
 
-        # Stream events
-        async for event in agent.astream_events(input_state, version="v2"):
-            kind = event.get("event")
+                if kind == "on_tool_start":
+                    yield {
+                        "type": "tool_start",
+                        "tool": event["name"],
+                        "input": event.get("data", {}).get("input", {}),
+                    }
 
-            if kind == "on_tool_start":
-                yield {
-                    "type": "tool_start",
-                    "tool": event["name"],
-                    "input": event.get("data", {}).get("input", {}),
-                }
+                elif kind == "on_tool_end":
+                    raw_output = event.get("data", {}).get("output", "")
+                    # Tool output is JSON string from mcp/server.py
+                    try:
+                        output = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+                    except Exception:
+                        output = raw_output
+                    yield {
+                        "type": "tool_end",
+                        "tool": event["name"],
+                        "output": output,
+                    }
 
-            elif kind == "on_tool_end":
-                raw_output = event.get("data", {}).get("output", "")
-                # Tool output is JSON string from mcp/server.py
-                try:
-                    output = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
-                except Exception:
-                    output = raw_output
-                yield {
-                    "type": "tool_end",
-                    "tool": event["name"],
-                    "output": output,
-                }
+                elif kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        yield {"type": "llm_chunk", "content": chunk.content}
 
-            elif kind == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    yield {"type": "llm_chunk", "content": chunk.content}
-
-        yield {"type": "done"}
+            yield {"type": "done"}
 
     except Exception as e:
         yield {"type": "error", "message": str(e)}
