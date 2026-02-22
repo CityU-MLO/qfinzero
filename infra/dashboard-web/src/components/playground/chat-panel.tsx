@@ -22,6 +22,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
   const [streaming, setStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const pendingByTool = useRef<Record<string, string[]>>({});
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -79,8 +80,8 @@ export function ChatPanel({ config }: ChatPanelProps) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      // Track active tool call id for pairing start/end
-      const toolCallMap: Record<string, ToolCallData> = {};
+      // Reset FIFO queue for this request
+      pendingByTool.current = {};
 
       while (true) {
         const { done, value } = await reader.read();
@@ -106,13 +107,17 @@ export function ChatPanel({ config }: ChatPanelProps) {
 
           if (type === "tool_start") {
             const callId = makeId();
+            const toolName = event.tool as string;
+            if (!pendingByTool.current[toolName]) {
+              pendingByTool.current[toolName] = [];
+            }
+            pendingByTool.current[toolName].push(callId);
             const call: ToolCallData = {
               id: callId,
-              tool: event.tool as string,
+              tool: toolName,
               input: event.input as Record<string, unknown>,
               status: "loading",
             };
-            toolCallMap[event.tool as string] = call;
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
@@ -122,20 +127,23 @@ export function ChatPanel({ config }: ChatPanelProps) {
             );
           } else if (type === "tool_end") {
             const toolName = event.tool as string;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? {
-                      ...m,
-                      toolCalls: (m.toolCalls ?? []).map((c) =>
-                        c.tool === toolName
-                          ? { ...c, output: event.output, status: "done" as const }
-                          : c
-                      ),
-                    }
-                  : m
-              )
-            );
+            const callId = pendingByTool.current[toolName]?.shift();
+            if (callId) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        toolCalls: (m.toolCalls ?? []).map((c) =>
+                          c.id === callId
+                            ? { ...c, output: event.output, status: "done" as const }
+                            : c
+                        ),
+                      }
+                    : m
+                )
+              );
+            }
           } else if (type === "llm_chunk") {
             setMessages((prev) =>
               prev.map((m) =>
