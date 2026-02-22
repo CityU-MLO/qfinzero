@@ -33,8 +33,15 @@ build/
 data/
 runs/
 logs/
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
 
 # Agent configurations
 .agents/
 .claude/
 .cursor/
+
+# Git worktrees
+.worktrees/
