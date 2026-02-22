@@ -482,7 +482,7 @@ def npp_news_body(news_id: str) -> str:
 
 @mcp.tool()
 def npp_timeline(
-    tickers: list[str],
+    tickers: Optional[list[str]],
     start_utc: str,
     end_utc: str,
     bucket_minutes: Optional[int] = None,
