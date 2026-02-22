@@ -88,11 +88,10 @@ start_dashboard() {
         UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
         pnpm build
     fi
-    PORT="$DASHBOARD_PORT" \
     PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
     NPP_BASE_URL="http://$QFZ_HOST:$NPP_PORT" \
     UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
-    pnpm start > "$LOG_DIR/dashboard.log" 2>&1 &
+    node_modules/.bin/next start -p "$DASHBOARD_PORT" > "$LOG_DIR/dashboard.log" 2>&1 &
     echo $! > "$LOG_DIR/dashboard.pid"
     info "Dashboard started (PID: $(cat "$LOG_DIR/dashboard.pid"))"
     info "Open http://$QFZ_HOST:$DASHBOARD_PORT"

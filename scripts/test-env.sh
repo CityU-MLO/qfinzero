@@ -235,7 +235,7 @@ nohup env PORT=${WEB_PORT} \
     PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
     NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
     UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
-    pnpm start > '${log_file}' 2>&1 &
+    node_modules/.bin/next start -p ${WEB_PORT} > '${log_file}' 2>&1 &
 echo \$! > '${pid_file}'
 echo "WEB started with PID \$(cat '${pid_file}')"
 EOF
