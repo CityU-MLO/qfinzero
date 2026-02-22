@@ -3,6 +3,7 @@
 import json
 from typing import AsyncIterator
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -42,7 +43,27 @@ async def health():
     return {"status": "ok", "service": "playground"}
 
 
-@app.post("/chat")
+class TestConnectionRequest(BaseModel):
+    base_url: str
+    api_key: str
+
+
+@app.post("/test-connection")
+async def test_connection(req: TestConnectionRequest):
+    """Test LLM provider connectivity by hitting the /models endpoint."""
+    url = req.base_url.rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                url, headers={"Authorization": f"Bearer {req.api_key}"}
+            )
+        if resp.status_code == 200:
+            return {"ok": True}
+        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 async def chat(req: ChatRequest):
     async def event_generator() -> AsyncIterator[dict]:
         # Only the last user message is passed; full history is in the checkpointer
