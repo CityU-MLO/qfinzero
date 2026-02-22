@@ -1,0 +1,41 @@
+# QFinZero Evaluation — Model Endpoint Configuration
+# ===================================================
+# Add your model endpoints here. Each entry needs:
+#   model_name     : display name for reports
+#   base_url       : OpenAI-compatible API base (must have /chat/completions)
+#   api_key        : API key (null for local models)
+#   provider_type  : openai_compatible | vllm_openai_compatible | custom
+
+models:
+  # --- Remote hosted models ---
+  # - model_name: gpt-4o
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${OPENAI_API_KEY}
+  #   provider_type: openai_compatible
+
+  # - model_name: deepseek-chat
+  #   base_url: https://api.deepseek.com/v1
+  #   api_key: "${DEEPSEEK_API_KEY}"
+  #   provider_type: openai_compatible
+
+  # - model_name: claude-sonnet-4-5
+  #   base_url: https://api.anthropic.com/v1
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   provider_type: openai_compatible
+
+  # # --- Local vLLM models ---
+  # - model_name: qwen2.5-72b
+  #   base_url: http://localhost:8000/v1
+  #   api_key: null
+  #   provider_type: vllm_openai_compatible
+
+  # - model_name: llama3.1-70b
+  #   base_url: http://localhost:8001/v1
+  #   api_key: null
+  #   provider_type: vllm_openai_compatible
+
+  # --- Add more models below ---
+  # - model_name: my-finetuned-model
+  #   base_url: http://localhost:8002/v1
+  #   api_key: null
+  #   provider_type: vllm_openai_compatible
