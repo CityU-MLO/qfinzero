@@ -246,7 +246,7 @@ def npp_query_events(
     min_importance: Optional[str] = None,
     limit: Optional[int] = None,
     cursor: Optional[str] = None,
-    view: Optional[str] = None,
+    view: Optional[str] = "full",
     now_utc: Optional[str] = None,
 ) -> str:
     """Query unified events from all sources (news, earnings, economic calendar).
