@@ -98,7 +98,7 @@ def upq_stock_minute(
     start: str,
     end: str,
     fields: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 10000,
 ) -> str:
     """Query minute-level OHLCV bars for one or more stocks.
 
@@ -334,7 +334,7 @@ def npp_stream_events(
     cursor: Optional[str] = None,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
-    limit: Optional[int] = None,
+    limit: int = 50,
     now_utc: Optional[str] = None,
 ) -> str:
     """Incrementally poll for new events since a cursor position.
@@ -369,7 +369,7 @@ def npp_econ_calendar(
     start_date: str,
     end_date: str,
     min_importance: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
 ) -> str:
@@ -405,7 +405,7 @@ def npp_earnings_calendar(
     end_date: str,
     tickers: Optional[list[str]] = None,
     min_importance: int = 0,
-    limit: Optional[int] = None,
+    limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
 ) -> str:
@@ -441,8 +441,8 @@ def npp_earnings_calendar(
 def npp_next_triggers(
     tickers: Optional[list[str]] = None,
     min_importance: Optional[str] = None,
-    horizon_minutes: Optional[int] = None,
-    limit: Optional[int] = None,
+    horizon_minutes: int = 1440,
+    limit: int = 5,
     now_utc: Optional[str] = None,
 ) -> str:
     """Get the next high-importance events to use as agent wakeup triggers.
@@ -495,7 +495,7 @@ def npp_search_news(
     end_utc: Optional[str] = None,
     keyword: Optional[str] = None,
     publisher: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 20,
     cursor: Optional[str] = None,
 ) -> str:
     """Search news articles with keyword and publisher filtering.
@@ -531,7 +531,7 @@ def npp_timeline(
     tickers: Optional[list[str]] = None,
     start_utc: str = None,
     end_utc: str = None,
-    bucket_minutes: Optional[int] = None,
+    bucket_minutes: int = 60,
     now_utc: Optional[str] = None,
 ) -> str:
     """Get a compact time-bucketed summary of events for specific tickers.
