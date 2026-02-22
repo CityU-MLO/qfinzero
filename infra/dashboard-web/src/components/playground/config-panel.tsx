@@ -16,7 +16,7 @@ export interface PlaygroundConfig {
 
 const STORAGE_KEY = "playground_config";
 
-const DEFAULT_CONFIG: PlaygroundConfig = {
+export const DEFAULT_CONFIG: PlaygroundConfig = {
   model: "gpt-4o-mini",
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
