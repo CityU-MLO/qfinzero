@@ -2,16 +2,17 @@
 # test-env.sh — Manage feat/data-platform-frontend test services on the remote qlib server
 #
 # Usage:
-#   ./scripts/test-env.sh start   [pmb|npp|upq|web]   — git pull, build if needed, then start
-#   ./scripts/test-env.sh stop    [pmb|npp|upq|web]   — stop service(s)
-#   ./scripts/test-env.sh restart [pmb|npp|upq|web]   — stop then start
-#   ./scripts/test-env.sh status                      — show all services status
+#   ./scripts/test-env.sh start   [pmb|npp|upq|web|playground]   — git pull, build if needed, then start
+#   ./scripts/test-env.sh stop    [pmb|npp|upq|web|playground]   — stop service(s)
+#   ./scripts/test-env.sh restart [pmb|npp|upq|web|playground]   — stop then start
+#   ./scripts/test-env.sh status                                  — show all services status
 #
 # Services run on the remote host accessible via `ssh qlib`.
-#   PMB  19701  /home/qlib/qfinzero/infra/pmb          (Python)
-#   NPP  19702  /home/qlib/qfinzero/infra/npp          (Python)
-#   UPQ  19703  /home/qlib/qfinzero/infra/upq          (Rust binary)
-#   WEB  19700  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
+#   PMB         19701  /home/qlib/qfinzero/infra/pmb          (Python)
+#   NPP         19702  /home/qlib/qfinzero/infra/npp          (Python)
+#   UPQ         19703  /home/qlib/qfinzero/infra/upq          (Rust binary)
+#   PLAYGROUND  19704  /home/qlib/qfinzero/infra/playground   (Python / LangGraph)
+#   WEB         19700  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
 
 set -euo pipefail
 
@@ -27,6 +28,7 @@ PID_DIR="/tmp/efan"
 PMB_PORT=19701
 NPP_PORT=19702
 UPQ_PORT=19703
+PLAYGROUND_PORT=19704
 WEB_PORT=19700
 
 PYTHON="/home/qlib/miniconda3/bin/python3.13"
@@ -35,10 +37,12 @@ WEB_DIR="$REMOTE_ROOT/infra/dashboard-web"
 PMB_DIR="$REMOTE_ROOT/infra/pmb"
 NPP_DIR="$REMOTE_ROOT/infra/npp"
 UPQ_DIR="$REMOTE_ROOT/infra/upq"
+PLAYGROUND_DIR="$REMOTE_ROOT/infra/playground"
 
 PMB_HEALTH="http://127.0.0.1:${PMB_PORT}/v1/health"
 NPP_HEALTH="http://127.0.0.1:${NPP_PORT}/npp/health"
 UPQ_HEALTH="http://127.0.0.1:${UPQ_PORT}/health"
+PLAYGROUND_HEALTH="http://127.0.0.1:${PLAYGROUND_PORT}/health"
 WEB_HEALTH="http://127.0.0.1:${WEB_PORT}"
 
 # ── Color helpers ─────────────────────────────────────────────────────────────
@@ -235,9 +239,24 @@ nohup env PORT=${WEB_PORT} \
     PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
     NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
     UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
+    PLAYGROUND_SERVICE_URL=http://127.0.0.1:${PLAYGROUND_PORT} \
     node_modules/.bin/next start -p ${WEB_PORT} > '${log_file}' 2>&1 &
 echo \$! > '${pid_file}'
 echo "WEB started with PID \$(cat '${pid_file}')"
+EOF
+            ;;
+        playground)
+            remote_run <<EOF
+set -e
+mkdir -p '${LOG_DIR}'
+cd '${PLAYGROUND_DIR}'
+nohup env PLAYGROUND_PORT=${PLAYGROUND_PORT} \
+    QFINZERO_UPQ_URL=http://127.0.0.1:${UPQ_PORT} \
+    QFINZERO_NPP_URL=http://127.0.0.1:${NPP_PORT} \
+    QFINZERO_PMB_URL=http://127.0.0.1:${PMB_PORT} \
+    ${PYTHON} main.py > '${log_file}' 2>&1 &
+echo \$! > '${pid_file}'
+echo "PLAYGROUND started with PID \$(cat '${pid_file}')"
 EOF
             ;;
         *)
@@ -249,10 +268,11 @@ EOF
     # Poll health endpoint
     local health_url
     case "$svc" in
-        pmb) health_url="$PMB_HEALTH" ;;
-        npp) health_url="$NPP_HEALTH" ;;
-        upq) health_url="$UPQ_HEALTH" ;;
-        web) health_url="$WEB_HEALTH" ;;
+        pmb)        health_url="$PMB_HEALTH" ;;
+        npp)        health_url="$NPP_HEALTH" ;;
+        upq)        health_url="$UPQ_HEALTH" ;;
+        playground) health_url="$PLAYGROUND_HEALTH" ;;
+        web)        health_url="$WEB_HEALTH" ;;
     esac
 
     echo -n "  Waiting for $(uc "$svc") to become ready"
@@ -331,15 +351,16 @@ EOF
 show_status() {
     section "Service Status"
 
-    for svc in pmb npp upq web; do
+    for svc in pmb npp upq playground web; do
         local port health_url log_file pid_file
         pid_file="${PID_DIR}/${svc}.pid"
         log_file="${LOG_DIR}/${svc}.log"
         case "$svc" in
-            pmb) port=$PMB_PORT; health_url="$PMB_HEALTH" ;;
-            npp) port=$NPP_PORT; health_url="$NPP_HEALTH" ;;
-            upq) port=$UPQ_PORT; health_url="$UPQ_HEALTH" ;;
-            web) port=$WEB_PORT; health_url="$WEB_HEALTH" ;;
+            pmb)        port=$PMB_PORT;        health_url="$PMB_HEALTH" ;;
+            npp)        port=$NPP_PORT;        health_url="$NPP_HEALTH" ;;
+            upq)        port=$UPQ_PORT;        health_url="$UPQ_HEALTH" ;;
+            playground) port=$PLAYGROUND_PORT; health_url="$PLAYGROUND_HEALTH" ;;
+            web)        port=$WEB_PORT;        health_url="$WEB_HEALTH" ;;
         esac
 
         echo ""
@@ -412,20 +433,20 @@ usage() {
     echo "Usage: $0 <command> [service]"
     echo ""
     echo "Commands:"
-    echo "  start   [pmb|npp|upq|web]   — git pull, build if needed, then start"
-    echo "  stop    [pmb|npp|upq|web]   — stop service(s)"
-    echo "  restart [pmb|npp|upq|web]   — stop then start (with git pull + rebuild)"
-    echo "  status                      — show all services status"
+    echo "  start   [pmb|npp|upq|playground|web]   — git pull, build if needed, then start"
+    echo "  stop    [pmb|npp|upq|playground|web]   — stop service(s)"
+    echo "  restart [pmb|npp|upq|playground|web]   — stop then start (with git pull + rebuild)"
+    echo "  status                                  — show all services status"
     echo ""
-    echo "Omit [service] to target all four services."
+    echo "Omit [service] to target all five services."
     echo ""
 }
 
 resolve_services() {
     case "${1:-}" in
-        pmb|npp|upq|web) echo "$1" ;;
-        "")              echo "pmb npp upq web" ;;
-        *)               error "Unknown service: '${1}'. Valid: pmb, npp, upq, web"; exit 1 ;;
+        pmb|npp|upq|playground|web) echo "$1" ;;
+        "")              echo "pmb npp upq playground web" ;;
+        *)               error "Unknown service: '${1}'. Valid: pmb, npp, upq, playground, web"; exit 1 ;;
     esac
 }
 
