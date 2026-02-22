@@ -29,7 +29,8 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: list[Message]
+    thread_id: str
+    messages: list[Message]  # only the latest user message is used; kept for API compat
     model: str
     base_url: str
     api_key: str
@@ -44,9 +45,13 @@ async def health():
 @app.post("/chat")
 async def chat(req: ChatRequest):
     async def event_generator() -> AsyncIterator[dict]:
-        raw_messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        # Only the last user message is passed; full history is in the checkpointer
+        user_message = next(
+            (m.content for m in reversed(req.messages) if m.role == "user"), ""
+        )
         async for event in run_agent_stream(
-            messages=raw_messages,
+            thread_id=req.thread_id,
+            user_message=user_message,
             model=req.model,
             base_url=req.base_url,
             api_key=req.api_key,
