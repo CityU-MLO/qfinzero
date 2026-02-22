@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/news", label: "News Browser" },
   { href: "/calendar", label: "Calendar Browser" },
   { href: "/sanity", label: "Sanity Checks" },
+  { href: "/playground", label: "Playground" },
 ];
 
 export function Navbar() {
