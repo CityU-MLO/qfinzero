@@ -59,6 +59,17 @@ def upq_health() -> str:
 
 
 @mcp.tool()
+def upq_freshness() -> str:
+    """Check data freshness of the UPQ market data service.
+
+    Returns:
+        JSON with latest timestamps, record counts, and partition info per data source.
+    """
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.freshness())
+
+
+@mcp.tool()
 def upq_stock_daily(
     tickers: list[str],
     start: str,
@@ -478,6 +489,44 @@ def npp_news_body(news_id: str) -> str:
     """
     with NPPClient(NPP_URL) as client:
         return json.dumps(client.news_body(news_id))
+
+
+@mcp.tool()
+def npp_search_news(
+    tickers: Optional[list[str]] = None,
+    start_utc: Optional[str] = None,
+    end_utc: Optional[str] = None,
+    keyword: Optional[str] = None,
+    publisher: Optional[str] = None,
+    limit: Optional[int] = None,
+    cursor: Optional[str] = None,
+) -> str:
+    """Search news articles with keyword and publisher filtering.
+
+    Args:
+        tickers: Filter by stock symbols, e.g. ["AAPL", "NVDA"]
+        start_utc: Window start ISO datetime (default: now - 7 days)
+        end_utc: Window end ISO datetime (default: now)
+        keyword: Case-insensitive substring search in article title
+        publisher: Case-insensitive substring search in publisher name
+        limit: Max articles per page (1-500, default 50)
+        cursor: Pagination cursor from previous response's next_cursor field
+
+    Returns:
+        JSON with: server_time_utc, events[], next_cursor
+    """
+    with NPPClient(NPP_URL) as client:
+        return json.dumps(
+            client.search_news(
+                tickers=tickers,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                keyword=keyword,
+                publisher=publisher,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
 
 
 @mcp.tool()

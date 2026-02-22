@@ -218,8 +218,17 @@ class PMBClient:
     def get_summary(self, session_id: str) -> dict:
         return self._get(f"/sessions/{session_id}/summary")
 
-    def export(self, session_id: str, fmt: str = "json") -> dict:
-        return self._get(f"/sessions/{session_id}/export", params={"format": fmt})
+    def export(self, session_id: str, fmt: str = "json") -> any:
+        resp = self._session.get(
+            self._url(f"/sessions/{session_id}/export"),
+            params={"format": fmt},
+            timeout=self.timeout,
+        )
+        if resp.status_code >= 400:
+            return self._handle(resp)
+        if fmt == "csv":
+            return resp.text
+        return resp.json()
 
     def get_market(self, session_id: str) -> dict:
         return self._get(f"/sessions/{session_id}/market")
