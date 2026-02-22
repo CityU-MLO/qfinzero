@@ -26,11 +26,33 @@ def safe_serialize(obj: Any) -> Any:
 
 
 def build_system_prompt(as_of_date: str) -> str:
+    """
+    as_of_date: UTC ISO string, e.g. "2025-02-26T14:00:00.000Z"
+    """
+    from datetime import datetime, timezone, timedelta
+
+    # Parse UTC time and compute ET equivalent for human-readable display
+    try:
+        utc_dt = datetime.fromisoformat(as_of_date.replace("Z", "+00:00"))
+        # Approximate ET offset (no pytz dependency): EST=UTC-5, EDT=UTC-4
+        # Use the same Jan/Jul heuristic: if month is in [3..11] approximate EDT
+        month = utc_dt.month
+        et_offset = timedelta(hours=-4) if 3 <= month <= 11 else timedelta(hours=-5)
+        et_dt = utc_dt + et_offset
+        tz_label = "EDT" if et_offset.total_seconds() == -4 * 3600 else "EST"
+        et_str = et_dt.strftime(f"%Y-%m-%d %H:%M {tz_label}")
+        utc_str = utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        utc_str = as_of_date
+        et_str = as_of_date
+
     return (
         f"You are a financial analysis assistant for QFinZero. "
-        f"Today's date is {as_of_date}. "
-        f"When querying market data, news, or events, do not use dates beyond {as_of_date}. "
-        f"Use the available tools to answer questions about stocks, options, news, economic events, "
+        f"The current simulation time is {utc_str} UTC ({et_str}). "
+        f"Do not use data beyond this timestamp. "
+        f"When calling tools that accept a 'now_utc' parameter, always pass '{utc_str}' "
+        f"to ensure backtesting data boundaries are respected. "
+        f"Use the available tools to answer questions about stocks, news, economic events, "
         f"and paper trading. Always cite the data you retrieved."
     )
 

@@ -20,8 +20,54 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   model: "gpt-4o-mini",
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
-  asOfDate: new Date().toISOString().slice(0, 10),
+  // Default: today at 09:00 ET stored as UTC ISO string
+  asOfDate: getDefaultAsOfDate(),
 };
+
+/** Returns today at 09:00 US/Eastern as a UTC ISO string "YYYY-MM-DDTHH:MM:SSZ" */
+function getDefaultAsOfDate(): string {
+  const now = new Date();
+  // Detect whether ET is currently on EST (UTC-5) or EDT (UTC-4)
+  const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
+  const etOffsetHours = Math.max(jan, jul) === 300 ? -5 : -4; // EST=-5, EDT=-4
+  // 09:00 ET = (9 - etOffsetHours) UTC
+  const utcHour = 9 - etOffsetHours; // 14 (EST) or 13 (EDT)
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), utcHour, 0, 0));
+  return d.toISOString(); // "2025-02-26T14:00:00.000Z"
+}
+
+/** Convert a UTC ISO string to the value format used by datetime-local input ("YYYY-MM-DDTHH:MM") */
+function utcToDatetimeLocal(utcIso: string): string {
+  // Display in ET: compute ET offset for the given date
+  const d = new Date(utcIso);
+  const jan = new Date(d.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(d.getFullYear(), 6, 1).getTimezoneOffset();
+  const etOffsetMin = Math.max(jan, jul); // 300 (EST) or 240 (EDT)
+  const etMs = d.getTime() - etOffsetMin * 60 * 1000;
+  const et = new Date(etMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${et.getUTCFullYear()}-${pad(et.getUTCMonth() + 1)}-${pad(et.getUTCDate())}` +
+    `T${pad(et.getUTCHours())}:${pad(et.getUTCMinutes())}`
+  );
+}
+
+/** Convert a datetime-local string ("YYYY-MM-DDTHH:MM") interpreted as ET back to UTC ISO string */
+function datetimeLocalToUtc(local: string): string {
+  // Parse as a naive date then apply ET offset
+  const [datePart, timePart] = local.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = (timePart ?? "00:00").split(":").map(Number);
+  // Determine ET offset for this date (approximate: use Jan/Jul heuristic)
+  const probe = new Date(year, month - 1, day);
+  const jan = new Date(year, 0, 1).getTimezoneOffset();
+  const jul = new Date(year, 6, 1).getTimezoneOffset();
+  const etOffsetMin = Math.max(jan, jul); // 300 = EST, 240 = EDT
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute) + etOffsetMin * 60 * 1000;
+  void probe;
+  return new Date(utcMs).toISOString();
+}
 
 export function loadConfig(): PlaygroundConfig {
   if (typeof window === "undefined") return DEFAULT_CONFIG;
@@ -54,7 +100,9 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
     // Reset indicators when config changes
     setSaved(false);
     setTestStatus("idle");
-    onChange({ ...config, [key]: value });
+    // asOfDate is stored as UTC ISO; convert from datetime-local (ET) on input
+    const stored = key === "asOfDate" ? datetimeLocalToUtc(value) : value;
+    onChange({ ...config, [key]: stored });
   }
 
   function handleSave() {
@@ -177,11 +225,11 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
           Context
         </h2>
         <div className="flex flex-col gap-1">
-          <Label htmlFor="asOfDate" className="text-xs">As of Date</Label>
+          <Label htmlFor="asOfDate" className="text-xs">As of Date <span className="text-muted-foreground font-normal">(ET)</span></Label>
           <Input
             id="asOfDate"
-            type="date"
-            value={config.asOfDate}
+            type="datetime-local"
+            value={utcToDatetimeLocal(config.asOfDate)}
             onChange={(e) => set("asOfDate", e.target.value)}
             disabled={disabled}
             className="text-sm h-8"
