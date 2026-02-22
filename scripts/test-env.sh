@@ -2,19 +2,20 @@
 # test-env.sh — Manage feat/data-platform-frontend test services on the remote qlib server
 #
 # Usage:
-#   ./scripts/test-env.sh start   [pmb|npp|upq]   — git pull, (re)build if needed, then start
-#   ./scripts/test-env.sh stop    [pmb|npp|upq]   — stop service(s)
-#   ./scripts/test-env.sh restart [pmb|npp|upq]   — stop then start
-#   ./scripts/test-env.sh status                  — show all services status
+#   ./scripts/test-env.sh start   [pmb|npp|upq|web]   — git pull, build if needed, then start
+#   ./scripts/test-env.sh stop    [pmb|npp|upq|web]   — stop service(s)
+#   ./scripts/test-env.sh restart [pmb|npp|upq|web]   — stop then start
+#   ./scripts/test-env.sh status                      — show all services status
 #
 # Services run on the remote host accessible via `ssh qlib`.
-#   PMB  19701  /home/qlib/qfinzero/infra/pmb  (Python)
-#   NPP  19702  /home/qlib/qfinzero/infra/npp  (Python)
-#   UPQ  19703  /home/qlib/qfinzero/infra/upq  (Rust binary)
+#   PMB  19701  /home/qlib/qfinzero/infra/pmb          (Python)
+#   NPP  19702  /home/qlib/qfinzero/infra/npp          (Python)
+#   UPQ  19703  /home/qlib/qfinzero/infra/upq          (Rust binary)
+#   WEB  19700  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
 
 set -euo pipefail
 
-# ── Constants ────────────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 SSH_HOST="qlib"
 REMOTE_ROOT="/home/qlib/qfinzero"
@@ -26,8 +27,10 @@ PID_DIR="/tmp/efan"
 PMB_PORT=19701
 NPP_PORT=19702
 UPQ_PORT=19703
+WEB_PORT=19700
 
 PYTHON="/home/qlib/miniconda3/bin/python3.13"
+WEB_DIR="$REMOTE_ROOT/infra/dashboard-web"
 
 PMB_DIR="$REMOTE_ROOT/infra/pmb"
 NPP_DIR="$REMOTE_ROOT/infra/npp"
@@ -36,6 +39,7 @@ UPQ_DIR="$REMOTE_ROOT/infra/upq"
 PMB_HEALTH="http://127.0.0.1:${PMB_PORT}/v1/health"
 NPP_HEALTH="http://127.0.0.1:${NPP_PORT}/npp/health"
 UPQ_HEALTH="http://127.0.0.1:${UPQ_PORT}/health"
+WEB_HEALTH="http://127.0.0.1:${WEB_PORT}"
 
 # ── Color helpers ─────────────────────────────────────────────────────────────
 
@@ -52,10 +56,7 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 section() { echo -e "\n${BOLD}${CYAN}=== $* ===${NC}"; }
 uc()      { echo "$1" | tr 'a-z' 'A-Z'; }
 
-# ── SSH helper — pipe a heredoc to remote bash ────────────────────────────────
-# Usage:  remote_run <<'EOF'
-#           set -e; echo hello
-#         EOF
+# ── SSH helper — pipe script to remote bash via stdin ─────────────────────────
 remote_run() {
     ssh "$SSH_HOST" bash
 }
@@ -70,7 +71,6 @@ cd '${REMOTE_ROOT}'
 current_branch=\$(git rev-parse --abbrev-ref HEAD)
 if [ "\$current_branch" != '${REMOTE_BRANCH}' ]; then
     echo "WARNING: remote HEAD is on '\$current_branch', not '${REMOTE_BRANCH}'."
-    echo "Checking out '${REMOTE_BRANCH}'..."
     git checkout '${REMOTE_BRANCH}'
 fi
 echo 'Pulling latest from origin/${REMOTE_BRANCH}...'
@@ -112,6 +112,65 @@ fi
 ENDSSH
 }
 
+# ── Web (Next.js) build ───────────────────────────────────────────────────────
+
+remote_build_web_if_needed() {
+    section "Building Next.js frontend"
+    remote_run <<EOF
+set -e
+export NVM_DIR="\$HOME/.nvm"
+source "\$NVM_DIR/nvm.sh"
+
+WEB_DIR='${WEB_DIR}'
+BUILD_MARKER="\$WEB_DIR/.next/BUILD_ID"
+
+cd "\$WEB_DIR"
+
+# Install deps if node_modules missing or package.json is newer
+if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then
+    echo 'Installing dependencies...'
+    pnpm install --frozen-lockfile
+fi
+
+# Build if .next missing or any src file is newer than BUILD_ID
+NEEDS_BUILD=0
+if [ ! -f "\$BUILD_MARKER" ]; then
+    echo '.next/BUILD_ID not found — building from scratch...'
+    NEEDS_BUILD=1
+else
+    NEWER=\$(find src -newer "\$BUILD_MARKER" 2>/dev/null | head -1)
+    if [ -n "\$NEWER" ]; then
+        echo "Source newer than last build: \$NEWER"
+        NEEDS_BUILD=1
+    else
+        echo 'Build is up-to-date, skipping rebuild.'
+    fi
+fi
+
+if [ "\$NEEDS_BUILD" = '1' ]; then
+    echo 'Running: pnpm build ...'
+    PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
+    NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
+    UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
+    pnpm build
+    echo 'Next.js build complete.'
+fi
+EOF
+}
+
+# ── PID / process helper ──────────────────────────────────────────────────────
+
+remote_get_pid() {
+    local svc="$1"
+    local pid_file="${PID_DIR}/${svc}.pid"
+    remote_run <<EOF 2>/dev/null || true
+if [ -f '${pid_file}' ]; then
+    PID=\$(cat '${pid_file}')
+    if kill -0 "\$PID" 2>/dev/null; then echo "\$PID"; fi
+fi
+EOF
+}
+
 # ── Start individual service ──────────────────────────────────────────────────
 
 start_service() {
@@ -119,15 +178,8 @@ start_service() {
     local log_file="${LOG_DIR}/${svc}.log"
     local pid_file="${PID_DIR}/${svc}.pid"
 
-    # Check if already running
     local running_pid
-    running_pid=$(remote_run <<EOF 2>/dev/null || true
-if [ -f '${pid_file}' ]; then
-    PID=\$(cat '${pid_file}')
-    if kill -0 "\$PID" 2>/dev/null; then echo "\$PID"; fi
-fi
-EOF
-)
+    running_pid=$(remote_get_pid "$svc")
     if [ -n "$running_pid" ]; then
         warn "$(uc "$svc") is already running (PID $running_pid). Skipping start."
         return 0
@@ -172,6 +224,22 @@ echo \$! > '${pid_file}'
 echo "UPQ started with PID \$(cat '${pid_file}')"
 EOF
             ;;
+        web)
+            remote_run <<EOF
+set -e
+export NVM_DIR="\$HOME/.nvm"
+source "\$NVM_DIR/nvm.sh"
+mkdir -p '${LOG_DIR}'
+cd '${WEB_DIR}'
+nohup env PORT=${WEB_PORT} \
+    PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
+    NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
+    UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
+    pnpm start > '${log_file}' 2>&1 &
+echo \$! > '${pid_file}'
+echo "WEB started with PID \$(cat '${pid_file}')"
+EOF
+            ;;
         *)
             error "Unknown service: $svc"
             return 1
@@ -184,11 +252,12 @@ EOF
         pmb) health_url="$PMB_HEALTH" ;;
         npp) health_url="$NPP_HEALTH" ;;
         upq) health_url="$UPQ_HEALTH" ;;
+        web) health_url="$WEB_HEALTH" ;;
     esac
 
     echo -n "  Waiting for $(uc "$svc") to become ready"
     local ok=0
-    for _ in $(seq 1 8); do
+    for _ in $(seq 1 15); do
         sleep 2
         echo -n "."
         if remote_run <<EOF 2>/dev/null
@@ -204,7 +273,7 @@ EOF
     if [ "$ok" = "1" ]; then
         info "$(uc "$svc") is healthy at ${health_url}"
     else
-        warn "$(uc "$svc") did not pass health check after 16 s — check logs: ${log_file}"
+        warn "$(uc "$svc") did not pass health check after 30 s — check logs: ${log_file}"
     fi
 }
 
@@ -262,7 +331,7 @@ EOF
 show_status() {
     section "Service Status"
 
-    for svc in pmb npp upq; do
+    for svc in pmb npp upq web; do
         local port health_url log_file pid_file
         pid_file="${PID_DIR}/${svc}.pid"
         log_file="${LOG_DIR}/${svc}.log"
@@ -270,12 +339,12 @@ show_status() {
             pmb) port=$PMB_PORT; health_url="$PMB_HEALTH" ;;
             npp) port=$NPP_PORT; health_url="$NPP_HEALTH" ;;
             upq) port=$UPQ_PORT; health_url="$UPQ_HEALTH" ;;
+            web) port=$WEB_PORT; health_url="$WEB_HEALTH" ;;
         esac
 
         echo ""
         echo -e "${BOLD}$(uc "$svc")${NC}  (port ${port})"
 
-        # Process state
         local pid_status
         pid_status=$(remote_run <<EOF 2>/dev/null || echo "ssh_error"
 PID_FILE='${pid_file}'
@@ -298,7 +367,6 @@ EOF
             *)         echo -e "  Process : ${RED}SSH error${NC}" ;;
         esac
 
-        # Port listening
         local port_status
         port_status=$(remote_run <<EOF 2>/dev/null || echo "ssh_error"
 if ss -tlnp 2>/dev/null | grep -q ':${port}[^0-9]'; then
@@ -314,7 +382,6 @@ EOF
             *)             echo -e "  Port    : ${YELLOW}unknown${NC}" ;;
         esac
 
-        # Health check
         local health_status
         health_status=$(remote_run <<EOF 2>/dev/null || echo "fail"
 if curl -sf '${health_url}' -o /dev/null 2>/dev/null; then echo 'ok'; else echo 'fail'; fi
@@ -326,7 +393,6 @@ EOF
             *)    echo -e "  Health  : ${YELLOW}unknown${NC}" ;;
         esac
 
-        # Last 5 lines of log
         echo "  Log (${log_file}) — last 5 lines:"
         remote_run <<EOF 2>/dev/null || echo "    (ssh error reading log)"
 if [ -f '${log_file}' ]; then
@@ -346,20 +412,20 @@ usage() {
     echo "Usage: $0 <command> [service]"
     echo ""
     echo "Commands:"
-    echo "  start   [pmb|npp|upq]   — git pull, rebuild UPQ if needed, then start"
-    echo "  stop    [pmb|npp|upq]   — stop service(s)"
-    echo "  restart [pmb|npp|upq]   — stop then start (with git pull + rebuild)"
-    echo "  status                  — show all services status"
+    echo "  start   [pmb|npp|upq|web]   — git pull, build if needed, then start"
+    echo "  stop    [pmb|npp|upq|web]   — stop service(s)"
+    echo "  restart [pmb|npp|upq|web]   — stop then start (with git pull + rebuild)"
+    echo "  status                      — show all services status"
     echo ""
-    echo "Omit [service] to target all three services."
+    echo "Omit [service] to target all four services."
     echo ""
 }
 
 resolve_services() {
     case "${1:-}" in
-        pmb|npp|upq) echo "$1" ;;
-        "")          echo "pmb npp upq" ;;
-        *)           error "Unknown service: '${1}'. Valid: pmb, npp, upq"; exit 1 ;;
+        pmb|npp|upq|web) echo "$1" ;;
+        "")              echo "pmb npp upq web" ;;
+        *)               error "Unknown service: '${1}'. Valid: pmb, npp, upq, web"; exit 1 ;;
     esac
 }
 
@@ -371,6 +437,7 @@ case "$CMD" in
         SVCS=$(resolve_services "$SVC_ARG")
         remote_git_pull
         if echo "$SVCS" | grep -qw upq; then remote_build_upq_if_needed; fi
+        if echo "$SVCS" | grep -qw web; then remote_build_web_if_needed; fi
         for svc in $SVCS; do start_service "$svc"; done
         ;;
     stop)
@@ -382,6 +449,7 @@ case "$CMD" in
         for svc in $SVCS; do stop_service "$svc"; done
         remote_git_pull
         if echo "$SVCS" | grep -qw upq; then remote_build_upq_if_needed; fi
+        if echo "$SVCS" | grep -qw web; then remote_build_web_if_needed; fi
         for svc in $SVCS; do start_service "$svc"; done
         ;;
     status)

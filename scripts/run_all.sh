@@ -6,9 +6,10 @@
 #   ./scripts/run_all.sh pmb npp  # start specific services
 #
 # Ports (defaults; override via config/qfinzero.env):
-#   PMB  19320   Paper Money Broker
-#   NPP  19330   News Pushing Pipeline
-#   UPQ  19350   Unified Price Query
+#   PMB        19320   Paper Money Broker
+#   NPP        19330   News Pushing Pipeline
+#   UPQ        19350   Unified Price Query
+#   DASHBOARD  19380   Next.js Dashboard (production)
 
 set -e
 
@@ -78,13 +79,20 @@ start_upq() {
 }
 
 start_dashboard() {
-    info "Starting Dashboard on port $DASHBOARD_PORT..."
-    cd "$ROOT_DIR/infra/dashboard"
-    DASHBOARD_HOST="$QFZ_HOST" DASHBOARD_PORT="$DASHBOARD_PORT" \
-        DASHBOARD_PMB_URL="http://$QFZ_HOST:$PMB_PORT" \
-        DASHBOARD_NPP_URL="http://$QFZ_HOST:$NPP_PORT" \
-        DASHBOARD_UPQ_URL="http://$QFZ_HOST:$UPQ_PORT" \
-        python main.py > "$LOG_DIR/dashboard.log" 2>&1 &
+    info "Starting Dashboard (Next.js) on port $DASHBOARD_PORT..."
+    cd "$ROOT_DIR/infra/dashboard-web"
+    if [ ! -d ".next" ]; then
+        warn "Next.js build not found. Running pnpm build first..."
+        PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
+        NPP_BASE_URL="http://$QFZ_HOST:$NPP_PORT" \
+        UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
+        pnpm build
+    fi
+    PORT="$DASHBOARD_PORT" \
+    PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
+    NPP_BASE_URL="http://$QFZ_HOST:$NPP_PORT" \
+    UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
+    pnpm start > "$LOG_DIR/dashboard.log" 2>&1 &
     echo $! > "$LOG_DIR/dashboard.pid"
     info "Dashboard started (PID: $(cat "$LOG_DIR/dashboard.pid"))"
     info "Open http://$QFZ_HOST:$DASHBOARD_PORT"
