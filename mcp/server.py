@@ -331,7 +331,7 @@ def npp_get_event(event_id: str) -> str:
 
 @mcp.tool()
 def npp_stream_events(
-    cursor: str,
+    cursor: Optional[str] = None,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
     limit: Optional[int] = None,
@@ -404,7 +404,7 @@ def npp_earnings_calendar(
     start_date: str,
     end_date: str,
     tickers: Optional[list[str]] = None,
-    min_importance: Optional[int] = None,
+    min_importance: int = 0,
     limit: Optional[int] = None,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
@@ -424,18 +424,15 @@ def npp_earnings_calendar(
         JSON with: server_time_utc, events[], next_cursor
     """
     with NPPClient(NPP_URL) as client:
-        kwargs = {}
-        if min_importance is not None:
-            kwargs["min_importance"] = min_importance
         return json.dumps(
             client.earnings_calendar(
                 start_date=start_date,
                 end_date=end_date,
                 tickers=tickers,
+                min_importance=min_importance,
                 limit=limit,
                 cursor=cursor,
                 now_utc=now_utc,
-                **kwargs,
             )
         )
 
@@ -531,9 +528,9 @@ def npp_search_news(
 
 @mcp.tool()
 def npp_timeline(
-    tickers: Optional[list[str]],
-    start_utc: str,
-    end_utc: str,
+    tickers: Optional[list[str]] = None,
+    start_utc: str = None,
+    end_utc: str = None,
     bucket_minutes: Optional[int] = None,
     now_utc: Optional[str] = None,
 ) -> str:
