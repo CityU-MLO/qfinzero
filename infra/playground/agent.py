@@ -87,19 +87,31 @@ async def run_agent_stream(
                 kind = event.get("event")
 
                 if kind == "on_tool_start":
+                    raw_input = event.get("data", {}).get("input", {})
+                    # Filter out LangGraph internal runtime context (not user-facing)
+                    clean_input = {k: v for k, v in raw_input.items() if k != "runtime"} if isinstance(raw_input, dict) else raw_input
                     yield {
                         "type": "tool_start",
                         "tool": event["name"],
-                        "input": safe_serialize(event.get("data", {}).get("input", {})),
+                        "input": safe_serialize(clean_input),
                     }
 
                 elif kind == "on_tool_end":
                     raw_output = event.get("data", {}).get("output", "")
-                    # Tool output is JSON string from mcp/server.py
+                    # Extract text from MCP ToolMessage content blocks
                     try:
-                        output = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+                        if hasattr(raw_output, "content"):
+                            # ToolMessage object — extract text from content blocks
+                            blocks = raw_output.content
+                            texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+                            text = texts[0] if texts else str(raw_output)
+                            output = json.loads(text)
+                        elif isinstance(raw_output, str):
+                            output = json.loads(raw_output)
+                        else:
+                            output = raw_output
                     except Exception:
-                        output = raw_output
+                        output = str(raw_output)[:2000]
                     yield {
                         "type": "tool_end",
                         "tool": event["name"],
