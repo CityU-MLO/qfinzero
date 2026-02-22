@@ -223,6 +223,20 @@ def upq_make_opra(
     return UPQClient.make_opra(underlying=underlying, expiry=expiry, right=right, strike=strike)
 
 
+@mcp.tool()
+def upq_ns_to_iso(ns: int) -> str:
+    """Convert a nanosecond Unix timestamp to an ISO 8601 UTC datetime string.
+
+    Args:
+        ns: Nanosecond timestamp (as returned in window_start from upq_stock_minute)
+
+    Returns:
+        ISO 8601 datetime string in UTC, e.g. "2024-01-15T09:30:00+00:00"
+    """
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # NPP TOOLS — News & Events
 # ════════════════════════════════════════════════════════════════════════════
@@ -240,13 +254,13 @@ def npp_query_events(
     mode: str,
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
-    horizon_minutes: Optional[int] = None,
+    horizon_minutes: int = 60,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
     min_importance: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 50,
     cursor: Optional[str] = None,
-    view: Optional[str] = "full",
+    view: str = "full",
     now_utc: Optional[str] = None,
 ) -> str:
     """Query unified events from all sources (news, earnings, economic calendar).
@@ -258,14 +272,14 @@ def npp_query_events(
               "window"        — events in a specific range (set start_utc + end_utc)
         start_utc: Window start ISO datetime (required for "window" mode)
         end_utc: Window end ISO datetime (required for "window" mode)
-        horizon_minutes: Lookahead/lookback in minutes (for upcoming/just_happened)
+        horizon_minutes: Lookahead/lookback in minutes for upcoming/just_happened (default 60)
         event_types: Filter by type — any subset of:
                      ["macro_calendar", "earnings", "breaking_news", "daily_news"]
         tickers: Filter to events related to these stock symbols, e.g. ["AAPL", "NVDA"]
         min_importance: "low", "medium", or "high"
         limit: Max events to return per page (default 50)
         cursor: Pagination cursor from a previous response's next_cursor field
-        view: "compact" (no payload, faster) or "full" (includes event payload)
+        view: "compact" (no payload, faster) or "full" (includes event payload, default "full")
         now_utc: Override current time for backtesting replay (ISO datetime)
 
     Returns:
@@ -517,15 +531,15 @@ def pmb_health() -> str:
 @mcp.tool()
 def pmb_create_account(
     initial_cash: float,
+    start_date: str,
     account_type: str = "MARGIN",
-    start_date: Optional[str] = None,
 ) -> str:
     """Create a new paper trading account.
 
     Args:
         initial_cash: Starting cash balance, e.g. 100000.0
+        start_date: Account start date "YYYY-MM-DD" (required — use the earliest date you will trade)
         account_type: "MARGIN" (default) or "CASH"
-        start_date: Optional start date "YYYY-MM-DD"
 
     Returns:
         JSON with: account_id, created_at, account_state
