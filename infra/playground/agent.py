@@ -1,6 +1,6 @@
 """LangGraph ReAct agent with dynamic LLM and MCP tools."""
 
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 import json
 
 from langchain.chat_models import init_chat_model
@@ -8,6 +8,19 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Base
 from langgraph.prebuilt import create_react_agent
 
 from mcp_tools import get_tools
+
+
+def safe_serialize(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects to strings."""
+    if isinstance(obj, dict):
+        return {k: safe_serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [safe_serialize(i) for i in obj]
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
 
 
 def build_system_prompt(as_of_date: str) -> str:
@@ -77,7 +90,7 @@ async def run_agent_stream(
                     yield {
                         "type": "tool_start",
                         "tool": event["name"],
-                        "input": event.get("data", {}).get("input", {}),
+                        "input": safe_serialize(event.get("data", {}).get("input", {})),
                     }
 
                 elif kind == "on_tool_end":
@@ -90,7 +103,7 @@ async def run_agent_stream(
                     yield {
                         "type": "tool_end",
                         "tool": event["name"],
-                        "output": output,
+                        "output": safe_serialize(output),
                     }
 
                 elif kind == "on_chat_model_stream":
