@@ -55,7 +55,7 @@ function formatJson(obj: any) {
       return (
         <div key={i} className="min-h-[1.2em]">
           {indent}
-          <span className="text-sky-400">"{key}"</span>:
+          <span className="text-sky-400">&quot;{key}&quot;</span>:
           {formatValue(rest)}
         </div>
       );
