@@ -5,8 +5,9 @@ import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from langchain_mcp_adapters.tools import MCPToolkit
-from mcp import StdioServerParameters
+from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from config import MCP_SERVER_PATH, UPQ_URL, NPP_URL, PMB_URL
 
 
@@ -28,9 +29,8 @@ def get_mcp_server_params() -> StdioServerParameters:
 async def get_tools() -> AsyncIterator[list]:
     """Connect to mcp/server.py, yield tools, then close the session."""
     params = get_mcp_server_params()
-    toolkit = MCPToolkit(server_params=params)
-    await toolkit.initialize()
-    try:
-        yield toolkit.get_tools()
-    finally:
-        await toolkit.aclose()
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            tools = await load_mcp_tools(session)
+            yield tools
