@@ -2,6 +2,7 @@
 
 from typing import AsyncIterator, Any
 import json
+import traceback
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
@@ -43,6 +44,8 @@ def convert_messages(raw_messages: list[dict]) -> list[BaseMessage]:
             result.append(HumanMessage(content=content))
         elif role == "assistant":
             result.append(AIMessage(content=content))
+        elif role == "system":
+            result.append(SystemMessage(content=content))
     return result
 
 
@@ -126,4 +129,11 @@ async def run_agent_stream(
             yield {"type": "done"}
 
     except Exception as e:
-        yield {"type": "error", "message": str(e)}
+        # Recursively unwrap ExceptionGroup to surface real leaf exceptions
+        def unwrap(exc, depth=0):
+            if hasattr(exc, "exceptions") and depth < 10:
+                return [msg for sub in exc.exceptions for msg in unwrap(sub, depth + 1)]
+            return [f"{type(exc).__name__}: {exc}"]
+        leaves = unwrap(e)
+        detail = " | ".join(leaves)
+        yield {"type": "error", "message": detail}
