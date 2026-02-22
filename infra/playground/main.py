@@ -64,6 +64,7 @@ async def test_connection(req: TestConnectionRequest):
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/chat")
 async def chat(req: ChatRequest):
     async def event_generator() -> AsyncIterator[dict]:
         # Only the last user message is passed; full history is in the checkpointer
