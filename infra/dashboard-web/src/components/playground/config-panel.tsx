@@ -1,7 +1,11 @@
 "use client";
 
+import { useState } from "react";
+import { Check, Loader2, Wifi, WifiOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 export interface PlaygroundConfig {
   model: string;
@@ -33,6 +37,8 @@ export function saveConfig(config: PlaygroundConfig) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
 
+type TestStatus = "idle" | "loading" | "ok" | "error";
+
 interface ConfigPanelProps {
   config: PlaygroundConfig;
   onChange: (config: PlaygroundConfig) => void;
@@ -40,10 +46,44 @@ interface ConfigPanelProps {
 }
 
 export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
+  const [saved, setSaved] = useState(false);
+  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
+  const [testError, setTestError] = useState<string>("");
+
   function set(key: keyof PlaygroundConfig, value: string) {
-    const next = { ...config, [key]: value };
-    onChange(next);
-    saveConfig(next);
+    // Reset indicators when config changes
+    setSaved(false);
+    setTestStatus("idle");
+    onChange({ ...config, [key]: value });
+  }
+
+  function handleSave() {
+    saveConfig(config);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function handleTest() {
+    setTestStatus("loading");
+    setTestError("");
+    try {
+      const res = await fetch("/api/playground/test-connection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ base_url: config.baseUrl, api_key: config.apiKey }),
+      });
+      const data = (await res.json()) as { ok: boolean; error?: string };
+      if (data.ok) {
+        setTestStatus("ok");
+        setTimeout(() => setTestStatus("idle"), 3000);
+      } else {
+        setTestStatus("error");
+        setTestError(data.error ?? "Connection failed");
+      }
+    } catch (e) {
+      setTestStatus("error");
+      setTestError((e as Error).message);
+    }
   }
 
   return (
@@ -87,6 +127,48 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
               className="text-sm h-8"
             />
           </div>
+
+          {/* Save + Test buttons */}
+          <div className="flex gap-2 pt-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 h-8 text-xs gap-1.5"
+              onClick={handleSave}
+              disabled={disabled}
+            >
+              {saved ? (
+                <>
+                  <Check className="h-3 w-3 text-green-500" />
+                  Saved
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className={cn(
+                "flex-1 h-8 text-xs gap-1.5",
+                testStatus === "ok" && "border-green-500 text-green-600",
+                testStatus === "error" && "border-red-400 text-red-600"
+              )}
+              onClick={() => void handleTest()}
+              disabled={disabled || testStatus === "loading" || !config.baseUrl || !config.apiKey}
+            >
+              {testStatus === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
+              {testStatus === "ok" && <Wifi className="h-3 w-3" />}
+              {testStatus === "error" && <WifiOff className="h-3 w-3" />}
+              {testStatus === "idle" && <Wifi className="h-3 w-3" />}
+              {testStatus === "loading" ? "Testing..." : testStatus === "ok" ? "Connected" : testStatus === "error" ? "Failed" : "Test"}
+            </Button>
+          </div>
+
+          {/* Test error message */}
+          {testStatus === "error" && testError && (
+            <p className="text-xs text-red-500 leading-snug break-all">{testError}</p>
+          )}
         </div>
       </div>
 
