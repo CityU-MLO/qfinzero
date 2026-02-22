@@ -13,7 +13,7 @@ Run:
 import json
 import sys
 import os
-from typing import Optional
+from typing import Literal, Optional
 
 # Add project root to path so we can import qfinzero clients without modifying the package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -155,7 +155,7 @@ def upq_option_contract(
     contract: str,
     start: str,
     end: str,
-    resolution: str = "day",
+    resolution: Literal["day", "minute"] = "day",
     fields: Optional[str] = None,
 ) -> str:
     """Query price history for a specific option contract.
@@ -260,7 +260,7 @@ def npp_query_events(
     min_importance: Optional[str] = None,
     limit: int = 50,
     cursor: Optional[str] = None,
-    view: str = "full",
+    view: Literal["compact", "full"] = "full",
     now_utc: Optional[str] = None,
 ) -> str:
     """Query unified events from all sources (news, earnings, economic calendar).
@@ -532,7 +532,7 @@ def pmb_health() -> str:
 def pmb_create_account(
     initial_cash: float,
     start_date: str,
-    account_type: str = "MARGIN",
+    account_type: Literal["MARGIN", "CASH"] = "MARGIN",
 ) -> str:
     """Create a new paper trading account.
 
@@ -625,7 +625,7 @@ def pmb_get_trades(
 @mcp.tool()
 def pmb_create_session(
     account_id: str,
-    frequency: str,
+    frequency: Literal["1m", "1d"],
     start_ts: str,
     end_ts: str,
     stock_universe: Optional[list[str]] = None,
@@ -766,10 +766,10 @@ def pmb_buy_stock(
     account_id: str,
     symbol: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Literal["DAY", "GTC"] = "DAY",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a BUY order for a stock.
@@ -810,10 +810,10 @@ def pmb_sell_stock(
     account_id: str,
     symbol: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Literal["DAY", "GTC"] = "DAY",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a SELL order for a stock.
@@ -854,9 +854,9 @@ def pmb_buy_option(
     account_id: str,
     contract: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
-    time_in_force: str = "GTC",
+    time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a BUY order for an option contract.
@@ -896,9 +896,9 @@ def pmb_sell_option(
     account_id: str,
     contract: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
-    time_in_force: str = "GTC",
+    time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a SELL order for an option contract.
