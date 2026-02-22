@@ -1,6 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { ToolCallCard, ToolCallData } from "./tool-call-card";
 
 export interface ChatMessage {
@@ -38,7 +40,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               : "bg-white border text-foreground rounded-bl-sm"
           )}
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <Streamdown>{message.content}</Streamdown>
+          )}
         </div>
       )}
     </div>
