@@ -23,6 +23,8 @@ export function ChatPanel({ config }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pendingByTool = useRef<Record<string, string[]>>({});
+  // One thread_id per browser session — stable across messages in this conversation
+  const threadId = useRef<string>(Math.random().toString(36).slice(2));
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -50,12 +52,6 @@ export function ChatPanel({ config }: ChatPanelProps) {
     };
     setMessages((prev) => [...prev, assistantMsg]);
 
-    // Build history for request (all prior messages except the new placeholder)
-    const history = [...messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -64,7 +60,8 @@ export function ChatPanel({ config }: ChatPanelProps) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          messages: history,
+          thread_id: threadId.current,
+          messages: [{ role: "user", content: text }],
           model: config.model,
           base_url: config.baseUrl,
           api_key: config.apiKey,
