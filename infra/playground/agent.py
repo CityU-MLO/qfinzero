@@ -5,7 +5,8 @@ import json
 import traceback
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
 from mcp_tools import get_tools
@@ -34,30 +35,22 @@ def build_system_prompt(as_of_date: str) -> str:
     )
 
 
-def convert_messages(raw_messages: list[dict]) -> list[BaseMessage]:
-    """Convert plain dicts to LangChain message objects."""
-    result = []
-    for m in raw_messages:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        if role == "user":
-            result.append(HumanMessage(content=content))
-        elif role == "assistant":
-            result.append(AIMessage(content=content))
-        elif role == "system":
-            result.append(SystemMessage(content=content))
-    return result
+# Module-level checkpointer — persists across requests for the lifetime of the process
+_checkpointer = MemorySaver()
 
 
 async def run_agent_stream(
-    messages: list[dict],
+    thread_id: str,
+    user_message: str,
     model: str,
     base_url: str,
     api_key: str,
     as_of_date: str,
 ) -> AsyncIterator[dict]:
     """
-    Run the ReAct agent and yield SSE-ready event dicts.
+    Run the ReAct agent for one user turn and yield SSE-ready event dicts.
+    Conversation state (including tool call history) is persisted in-process
+    via MemorySaver, keyed by thread_id.
 
     Yields dicts with keys:
         {"type": "tool_start", "tool": str, "input": dict}
@@ -68,30 +61,27 @@ async def run_agent_stream(
     """
     try:
         async with get_tools() as tools:
-            # Init LLM with user-provided config
             llm = init_chat_model(
                 model=model,
-                model_provider="openai",  # openai-compatible
+                model_provider="openai",
                 base_url=base_url,
                 api_key=api_key,
                 streaming=True,
             )
 
-            # Build agent
             system_msg = build_system_prompt(as_of_date)
-            agent = create_react_agent(llm, tools, prompt=system_msg)
+            agent = create_react_agent(
+                llm, tools, prompt=system_msg, checkpointer=_checkpointer
+            )
 
-            # Convert messages
-            lc_messages = convert_messages(messages)
-            input_state = {"messages": lc_messages}
+            config = {"configurable": {"thread_id": thread_id}}
+            input_state = {"messages": [HumanMessage(content=user_message)]}
 
-            # Stream events
-            async for event in agent.astream_events(input_state, version="v2"):
+            async for event in agent.astream_events(input_state, config=config, version="v2"):
                 kind = event.get("event")
 
                 if kind == "on_tool_start":
                     raw_input = event.get("data", {}).get("input", {})
-                    # Filter out LangGraph internal runtime context (not user-facing)
                     clean_input = {k: v for k, v in raw_input.items() if k != "runtime"} if isinstance(raw_input, dict) else raw_input
                     yield {
                         "type": "tool_start",
@@ -101,10 +91,8 @@ async def run_agent_stream(
 
                 elif kind == "on_tool_end":
                     raw_output = event.get("data", {}).get("output", "")
-                    # Extract text from MCP ToolMessage content blocks
                     try:
                         if hasattr(raw_output, "content"):
-                            # ToolMessage object — extract text from content blocks
                             blocks = raw_output.content
                             texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
                             text = texts[0] if texts else str(raw_output)
@@ -129,11 +117,9 @@ async def run_agent_stream(
             yield {"type": "done"}
 
     except Exception as e:
-        # Recursively unwrap ExceptionGroup to surface real leaf exceptions
         def unwrap(exc, depth=0):
             if hasattr(exc, "exceptions") and depth < 10:
                 return [msg for sub in exc.exceptions for msg in unwrap(sub, depth + 1)]
             return [f"{type(exc).__name__}: {exc}"]
         leaves = unwrap(e)
-        detail = " | ".join(leaves)
-        yield {"type": "error", "message": detail}
+        yield {"type": "error", "message": " | ".join(leaves)}
