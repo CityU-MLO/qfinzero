@@ -42,6 +42,11 @@ coverage/
 .agents/
 .claude/
 .cursor/
+.gemini/
+
+# Local env overrides (machine-specific)
+.env.local
+.env.*.local
 
 # Git worktrees
 .worktrees/

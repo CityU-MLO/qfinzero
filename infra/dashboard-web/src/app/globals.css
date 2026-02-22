@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --background: 186 30% 98%;
+  --foreground: 200 38% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 200 38% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 200 38% 16%;
+  --primary: 191 78% 36%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 183 32% 94%;
+  --secondary-foreground: 190 35% 22%;
+  --muted: 183 28% 93%;
+  --muted-foreground: 194 18% 40%;
+  --accent: 37 100% 88%;
+  --accent-foreground: 24 55% 25%;
+  --destructive: 356 72% 52%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 186 20% 84%;
+  --input: 186 20% 84%;
+  --ring: 191 78% 36%;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground;
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(circle at 8% 8%, rgba(56, 189, 248, 0.25), transparent 28%),
+    radial-gradient(circle at 90% 4%, rgba(251, 191, 36, 0.2), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(240, 250, 252, 0.98));
+  min-height: 100vh;
+}
+
+pre {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
