@@ -371,7 +371,7 @@ async fn option() -> axum::response::Response {
 }
 
 async fn health() -> axum::response::Response {
-    (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
+    (StatusCode::OK, Json(json!({ "status": "ok", "version": "0.1.0" }))).into_response()
 }
 
 async fn health_freshness(State(state): State<AppState>) -> axum::response::Response {
