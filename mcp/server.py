@@ -262,9 +262,11 @@ def npp_health() -> str:
 
 @mcp.tool()
 def npp_query_events(
-    mode: str,
+    mode: str = "window",
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     horizon_minutes: int = 60,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
@@ -277,12 +279,14 @@ def npp_query_events(
     """Query unified events from all sources (news, earnings, economic calendar).
 
     Args:
-        mode: Query mode:
+        mode: Query mode (default "window"):
               "upcoming"      — events after now (set horizon_minutes)
               "just_happened" — events that recently occurred (set horizon_minutes)
               "window"        — events in a specific range (set start_utc + end_utc)
         start_utc: Window start ISO datetime (required for "window" mode)
         end_utc: Window end ISO datetime (required for "window" mode)
+        start_date: Alternative to start_utc — date string "YYYY-MM-DD"
+        end_date: Alternative to end_utc — date string "YYYY-MM-DD"
         horizon_minutes: Lookahead/lookback in minutes for upcoming/just_happened (default 60)
         event_types: Filter by type — any subset of:
                      ["macro_calendar", "earnings", "breaking_news", "daily_news"]
@@ -297,6 +301,12 @@ def npp_query_events(
         JSON with: server_time_utc, events[], next_cursor
         Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet
     """
+    # Convert start_date/end_date to start_utc/end_utc if provided
+    if start_date and not start_utc:
+        start_utc = f"{start_date}T00:00:00+00:00"
+    if end_date and not end_utc:
+        end_utc = f"{end_date}T23:59:59+00:00"
+
     with NPPClient(NPP_URL) as client:
         return json.dumps(
             client.query_events(
