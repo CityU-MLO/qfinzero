@@ -531,6 +531,7 @@ components:
       properties:
         cursor:
           type: string
+          description: "Cursor for pagination. Special value 'HEAD' means start from the latest position (may return empty if no new events buffered). Pass the 'next_cursor' from a previous response to continue from where you left off."
         event_types:
           type: array
           items:
