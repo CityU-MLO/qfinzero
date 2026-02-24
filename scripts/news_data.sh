@@ -133,21 +133,23 @@ cmd_deploy_cron() {
 
     mkdir -p "$LOG_DIR"
 
-    # Check if already installed
-    if crontab -l 2>/dev/null | grep -qF "$SCRIPT_PATH"; then
+    # Check if already installed (crontab -l exits 1 when empty — use || true to avoid pipefail)
+    local existing
+    existing=$(crontab -l 2>/dev/null || true)
+    if echo "$existing" | grep -qF "$SCRIPT_PATH"; then
         warn "Cron entry already exists. No changes made."
         echo ""
-        crontab -l
+        echo "$existing"
         return 0
     fi
 
     # Backup existing crontab
     local backup="$LOG_DIR/crontab.backup.$(date -u +%Y%m%d_%H%M%S)"
-    crontab -l 2>/dev/null > "$backup" || true
+    echo "$existing" > "$backup"
     info "Existing crontab backed up to: $backup"
 
     # Install new entry
-    (crontab -l 2>/dev/null; echo "$CRON_ENTRY") | crontab -
+    (echo "$existing"; echo "$CRON_ENTRY") | crontab -
 
     info "Cron entry installed successfully."
     echo ""
