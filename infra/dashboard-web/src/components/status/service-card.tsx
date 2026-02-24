@@ -74,10 +74,10 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
           <div className="min-w-0">
             <CardTitle className="truncate text-lg">{card.name}</CardTitle>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span title={card.baseUrl + (card.port ? `:${card.port}` : "")}>{displayUrl}</span>
-              <CopyButton text={card.baseUrl + (card.port ? `:${card.port}` : "")} />
+              <span title={card.baseUrl}>{displayUrl}</span>
+              <CopyButton text={card.baseUrl} />
               <a
-                href={card.baseUrl + (card.port ? `:${card.port}` : "")}
+                href={card.baseUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground"
