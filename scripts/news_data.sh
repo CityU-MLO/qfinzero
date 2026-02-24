@@ -18,6 +18,7 @@ NEWS_DIR="/home/qlib/news"
 LOG_DIR="$NEWS_DIR/logs"
 CONDA="/home/qlib/miniconda3/bin/conda"
 PYTHON="$CONDA run -n base python"
+SQLITE3="$CONDA run -n base python -c"
 
 # API key used by all Massive.com scrapers
 MASSIVE_API_KEY="ngkWLCluaLo4xfda5htLqYc5mNQ9j6Uk"
@@ -179,22 +180,22 @@ cmd_status() {
     local econ_db="$NEWS_DIR/nasdaq_econ_events.sqlite3"
     if [ -f "$econ_db" ]; then
         local econ_count econ_latest
-        econ_count=$(sqlite3 "$econ_db" "SELECT COUNT(*) FROM econ_events;" 2>/dev/null || echo "N/A")
-        econ_latest=$(sqlite3 "$econ_db" "SELECT MAX(date) FROM econ_events;" 2>/dev/null || echo "N/A")
+        econ_count=$($SQLITE3 "import sqlite3; c=sqlite3.connect('$econ_db'); print(c.execute('SELECT COUNT(*) FROM econ_events').fetchone()[0])" 2>/dev/null || echo "N/A")
+        econ_latest=$($SQLITE3 "import sqlite3; c=sqlite3.connect('$econ_db'); print(c.execute('SELECT MAX(date) FROM econ_events').fetchone()[0])" 2>/dev/null || echo "N/A")
         echo -e "  ${BOLD}NASDAQ Econ Events${NC} : $econ_count rows, latest date = $econ_latest"
     else
-        echo -e "  ${BOLD}NASDAQ Econ Events${NC} : ${YELLOW}sqlite3 not found${NC}"
+        echo -e "  ${BOLD}NASDAQ Econ Events${NC} : ${YELLOW}db not found${NC}"
     fi
 
     # Benzinga earnings sqlite3
     local benz_db="$NEWS_DIR/benzinga_earnings.sqlite3"
     if [ -f "$benz_db" ]; then
         local benz_count benz_latest
-        benz_count=$(sqlite3 "$benz_db" "SELECT COUNT(*) FROM earnings;" 2>/dev/null || echo "N/A")
-        benz_latest=$(sqlite3 "$benz_db" "SELECT MAX(date) FROM earnings;" 2>/dev/null || echo "N/A")
+        benz_count=$($SQLITE3 "import sqlite3; c=sqlite3.connect('$benz_db'); print(c.execute('SELECT COUNT(*) FROM earnings').fetchone()[0])" 2>/dev/null || echo "N/A")
+        benz_latest=$($SQLITE3 "import sqlite3; c=sqlite3.connect('$benz_db'); print(c.execute('SELECT MAX(date) FROM earnings').fetchone()[0])" 2>/dev/null || echo "N/A")
         echo -e "  ${BOLD}Benzinga Earnings${NC}  : $benz_count rows, latest date = $benz_latest"
     else
-        echo -e "  ${BOLD}Benzinga Earnings${NC}  : ${YELLOW}sqlite3 not found${NC}"
+        echo -e "  ${BOLD}Benzinga Earnings${NC}  : ${YELLOW}db not found${NC}"
     fi
 
     echo ""
