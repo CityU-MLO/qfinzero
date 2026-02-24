@@ -56,7 +56,7 @@ check_server() {
 run_scraper() {
     local label="$1"
     local script="$2"
-    local log_file="$LOG_DIR/${script%.py}_$(date -u +%Y%m%d_%H%M%S).log"
+    local log_file="$LOG_DIR/$(basename "${script%.py}")_$(date -u +%Y%m%d_%H%M%S).log"
 
     section "$label"
     info "Script : $NEWS_DIR/$script"
@@ -64,13 +64,20 @@ run_scraper() {
 
     mkdir -p "$LOG_DIR"
 
-    # Run from NEWS_DIR so relative paths (output_news_by_day/, *.sqlite3) work correctly
-    if cd "$NEWS_DIR" && \
-       MASSIVE_API_KEY="$MASSIVE_API_KEY" \
-       $PYTHON "$script" 2>&1 | tee "$log_file"; then
+    # Run in a subshell so cd does not mutate caller's working directory.
+    # PIPESTATUS[0] captures the Python exit code; tee's exit code is ignored.
+    local py_exit
+    (
+        cd "$NEWS_DIR"
+        MASSIVE_API_KEY="$MASSIVE_API_KEY" \
+        $PYTHON "$script" 2>&1 | tee "$log_file"
+        exit "${PIPESTATUS[0]}"
+    ) && py_exit=0 || py_exit=$?
+
+    if [ "$py_exit" -eq 0 ]; then
         info "$label — DONE"
     else
-        error "$label — FAILED (see $log_file)"
+        error "$label — FAILED (exit $py_exit; see $log_file)"
         return 1
     fi
 }
@@ -149,7 +156,6 @@ cmd_deploy_cron() {
 
 cmd_status() {
     section "News Data — Status"
-    check_server
 
     # Market news JSON files
     local json_dir="$NEWS_DIR/output_news_by_day"
