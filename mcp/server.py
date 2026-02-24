@@ -376,8 +376,8 @@ def npp_stream_events(
 
 @mcp.tool()
 def npp_econ_calendar(
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     min_importance: Optional[str] = None,
     limit: int = 100,
     cursor: Optional[str] = None,
@@ -411,8 +411,8 @@ def npp_econ_calendar(
 
 @mcp.tool()
 def npp_earnings_calendar(
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     tickers: Optional[list[str]] = None,
     min_importance: int = 0,
     limit: int = 100,
@@ -539,8 +539,8 @@ def npp_search_news(
 @mcp.tool()
 def npp_timeline(
     tickers: Optional[list[str]] = None,
-    start_utc: str = None,
-    end_utc: str = None,
+    start_utc: Optional[str] = None,
+    end_utc: Optional[str] = None,
     bucket_minutes: int = 60,
     now_utc: Optional[str] = None,
 ) -> str:
