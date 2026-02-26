@@ -231,7 +231,7 @@ def upq_make_opra(
         OPRA contract string, e.g. "O:NVDA250117C00136000"
         Pass this to upq_option_contract or pmb_buy_option / pmb_sell_option.
     """
-    return UPQClient.make_opra(underlying=underlying, expiry=expiry, right=right, strike=strike)
+    return json.dumps(UPQClient.make_opra(underlying=underlying, expiry=expiry, right=right, strike=strike))
 
 
 @mcp.tool()
