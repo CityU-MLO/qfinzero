@@ -116,6 +116,15 @@ python main.py
 # curl http://127.0.0.1:19320/v1/health
 ```
 
+### Start Monitoring Frontend (Next.js)
+
+```bash
+cd infra/dashboard-web
+pnpm install --no-frozen-lockfile
+pnpm dev
+# open http://127.0.0.1:19400
+```
+
 ### Use the Clients
 
 ```python

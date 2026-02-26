@@ -33,3 +33,20 @@ build/
 data/
 runs/
 logs/
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Agent configurations
+.agents/
+.claude/
+.cursor/
+.gemini/
+
+# Local env overrides (machine-specific)
+.env.local
+.env.*.local
+
+# Git worktrees
+.worktrees/

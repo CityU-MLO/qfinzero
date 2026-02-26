@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -108,6 +108,17 @@ class EarningsCalendarRequest(BaseModel):
     tickers: Optional[list[str]] = None
     min_importance: int = 0
     limit: int = 100
+    cursor: Optional[str] = None
+    now_utc: Optional[str] = None
+
+
+class NewsSearchRequest(BaseModel):
+    tickers: Optional[list[str]] = None
+    start_utc: Optional[str] = None
+    end_utc: Optional[str] = None
+    keyword: Optional[str] = Field(default=None, max_length=200)
+    publisher: Optional[str] = Field(default=None, max_length=200)
+    limit: int = Field(default=50, ge=1, le=500)
     cursor: Optional[str] = None
     now_utc: Optional[str] = None
 

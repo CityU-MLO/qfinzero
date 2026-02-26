@@ -183,7 +183,12 @@ class EventService:
 
     async def stream(self, req: StreamRequest) -> PaginatedResponse:
         now = _parse_now(req.now_utc)
-        cursor = _decode_cursor(req.cursor)
+
+        # Handle special "HEAD" cursor - means stream from latest position
+        if req.cursor == "HEAD":
+            cursor = None
+        else:
+            cursor = _decode_cursor(req.cursor)
 
         # Stream from cursor position to now
         if cursor:

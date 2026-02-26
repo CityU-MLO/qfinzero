@@ -2,9 +2,20 @@ openapi: 3.0.0
 info:
   title: NPP - News Pushing Pipeline API
   description: |
-    News ingestion, cleaning, tagging, and push pipeline for downstream
-    trading systems and AI agents. Collects from multiple sources (RSS, APIs,
-    scrapers) and provides structured, deduplicated news data.
+    Unified event query API over three data sources:
+    - MongoDB (market news from Polygon.io)
+    - SQLite (Benzinga earnings calendar)
+    - SQLite (Nasdaq economic events calendar)
+
+    ## Event Types
+    - `macro_calendar` — Economic calendar events (FOMC, CPI, NFP, etc.)
+    - `earnings` — Earnings announcements
+    - `breaking_news` — Breaking market news (< 2h old)
+    - `daily_news` — General market news
+
+    ## Pagination
+    POST endpoints use cursor-based pagination. Pass `next_cursor` from a response
+    as `cursor` in the next request to fetch the next page.
   version: 0.1.0
   contact:
     name: QFinZero
@@ -14,61 +25,320 @@ servers:
     description: Local development server
 
 paths:
-  /health:
+  # ── Health ────────────────────────────────────────────────────
+  /npp/health:
     get:
       operationId: healthCheck
       summary: Health check
+      tags: [health]
       responses:
         '200':
-          description: Service is healthy
+          description: Service health status
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: "ok"
+                $ref: '#/components/schemas/HealthResponse'
 
-  /news/push:
-    post:
-      operationId: pushNews
-      summary: Push a news item
+  /npp/health/freshness:
+    get:
+      operationId: healthFreshness
+      summary: Data freshness
       description: |
-        Push a news item into the pipeline. The item will be cleaned,
-        tagged, scored, and forwarded to registered downstream consumers.
+        Returns freshness information for all NPP data sources (news, earnings, econ_events).
+        Reports latest timestamps, record counts, and unique key counts per source.
+      tags: [health]
+      responses:
+        '200':
+          description: Freshness information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FreshnessResponse'
+
+  # ── Events ────────────────────────────────────────────────────
+  /npp/events/query:
+    post:
+      operationId: queryEvents
+      summary: Unified event query
+      description: |
+        Query events across all data sources with mode-based filtering.
+        Modes: `upcoming` (future events), `just_happened` (recent events), `window` (time range).
+      tags: [events]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/NewsItem'
+              $ref: '#/components/schemas/EventQueryRequest'
       responses:
         '200':
-          description: News item accepted
+          description: Paginated event results
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  status:
-                    type: string
-                    example: "accepted"
+                $ref: '#/components/schemas/PaginatedResponse'
 
-  /news/query:
+  /npp/events/{event_id}:
     get:
-      operationId: queryNews
-      summary: Query stored news
+      operationId: getEvent
+      summary: Get single event
+      tags: [events]
       parameters:
-        - name: ticker
-          in: query
-          required: false
-          description: Filter by ticker symbol
+        - name: event_id
+          in: path
+          required: true
           schema:
             type: string
-            example: "AAPL"
+      responses:
+        '200':
+          description: Event details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '404':
+          description: Event not found
+
+  /npp/events/stream:
+    post:
+      operationId: streamEvents
+      summary: Incremental event polling
+      description: Returns events since the cursor position for incremental polling.
+      tags: [events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamRequest'
+      responses:
+        '200':
+          description: Paginated event results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  # ── Triggers ──────────────────────────────────────────────────
+  /npp/triggers/next:
+    post:
+      operationId: nextTriggers
+      summary: Get upcoming trigger events
+      description: Returns high-importance upcoming events for agent wakeup decisions.
+      tags: [triggers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerNextRequest'
+      responses:
+        '200':
+          description: Trigger events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerResponse'
+
+  # ── Calendar ──────────────────────────────────────────────────
+  /npp/calendar/econ:
+    post:
+      operationId: econCalendar
+      summary: Economic calendar
+      tags: [calendar]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EconCalendarRequest'
+      responses:
+        '200':
+          description: Economic events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  /npp/calendar/earnings:
+    post:
+      operationId: earningsCalendar
+      summary: Earnings calendar
+      tags: [calendar]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EarningsCalendarRequest'
+      responses:
+        '200':
+          description: Earnings events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  /npp/calendar/coverage:
+    get:
+      operationId: calendarCoverage
+      summary: Calendar data coverage statistics
+      description: |
+        Returns coverage statistics for earnings and economic events data,
+        including daily counts, missing dates, and breakdowns.
+      tags: [calendar]
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: Lookback window in days
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        '200':
+          description: Coverage statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoverageResponse'
+
+  # ── News ──────────────────────────────────────────────────────
+  /npp/news/{news_id}/body:
+    get:
+      operationId: newsBody
+      summary: Get full news article
+      tags: [news]
+      parameters:
+        - name: news_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full news article
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsBodyResponse'
+        '404':
+          description: Article not found
+
+  /npp/news/search:
+    post:
+      operationId: searchNews
+      summary: Search news with filtering
+      description: |
+        Search news articles with keyword and publisher filtering.
+        Supports cursor-based pagination.
+      tags: [news]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewsSearchRequest'
+      responses:
+        '200':
+          description: Paginated search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  /npp/news/stats:
+    get:
+      operationId: newsStats
+      summary: News statistics
+      description: |
+        Returns news statistics including daily counts, top tickers,
+        top publishers, and duplicate detection rates.
+      tags: [news]
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: Lookback window in days
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 7
+      responses:
+        '200':
+          description: News statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewsStatsResponse'
+        '503':
+          description: MongoDB unavailable
+
+  /npp/news/export:
+    get:
+      operationId: exportNews
+      summary: Export news articles
+      description: Export news articles as JSONL or CSV. Limited to 10,000 rows.
+      tags: [export]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [jsonl, csv]
+            default: jsonl
+        - name: tickers
+          in: query
+          required: false
+          description: Comma-separated ticker filter
+          schema:
+            type: string
+        - name: start
+          in: query
+          required: false
+          description: Start datetime (ISO format)
+          schema:
+            type: string
+        - name: end
+          in: query
+          required: false
+          description: End datetime (ISO format)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Exported data
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+            text/csv:
+              schema:
+                type: string
+        '400':
+          description: Result set exceeds export limit
+        '503':
+          description: MongoDB unavailable
+
+  # ── Export (Calendar) ─────────────────────────────────────────
+  /npp/calendar/earnings/export:
+    get:
+      operationId: exportEarnings
+      summary: Export earnings data
+      description: Export earnings calendar data as JSONL or CSV. Limited to 10,000 rows.
+      tags: [export]
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [jsonl, csv]
+            default: csv
         - name: start
           in: query
           required: false
@@ -83,187 +353,631 @@ paths:
           schema:
             type: string
             format: date
-        - name: source
-          in: query
-          required: false
-          description: Filter by news source
-          schema:
-            type: string
-        - name: limit
-          in: query
-          required: false
-          description: Maximum items to return
-          schema:
-            type: integer
-            default: 100
-      responses:
-        '200':
-          description: Matching news items
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/NewsItem'
-
-  /news/sources:
-    get:
-      operationId: listSources
-      summary: List available news sources
-      responses:
-        '200':
-          description: Available sources
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                    type:
-                      type: string
-                      enum: [rss, api, scraper]
-                    status:
-                      type: string
-                      enum: [active, inactive]
-
-  /news/earnings:
-    get:
-      operationId: queryEarnings
-      summary: Query earnings announcements
-      parameters:
         - name: ticker
           in: query
           required: false
+          description: Comma-separated ticker filter
           schema:
             type: string
-        - name: start
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date
-        - name: end
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date
       responses:
         '200':
-          description: Earnings data
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/EarningsEvent'
+          description: Exported data
+        '400':
+          description: Result set exceeds export limit
 
-  /news/economic_events:
+  /npp/calendar/economic/export:
     get:
-      operationId: queryEconomicEvents
-      summary: Query economic calendar events
+      operationId: exportEconomic
+      summary: Export economic events data
+      description: Export economic calendar data as JSONL or CSV. Limited to 10,000 rows.
+      tags: [export]
       parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [jsonl, csv]
+            default: csv
         - name: start
           in: query
           required: false
+          description: Start date (YYYY-MM-DD)
           schema:
             type: string
             format: date
         - name: end
           in: query
           required: false
+          description: End date (YYYY-MM-DD)
           schema:
             type: string
             format: date
-        - name: type
+        - name: country
           in: query
           required: false
-          description: Event type filter (e.g., FOMC, CPI, NFP)
+          description: Country filter (default United States)
           schema:
             type: string
       responses:
         '200':
-          description: Economic events
+          description: Exported data
+        '400':
+          description: Result set exceeds export limit
+
+  # ── Timeline ──────────────────────────────────────────────────
+  /npp/timeline:
+    post:
+      operationId: timeline
+      summary: Event timeline
+      description: Builds a compact timeline of events bucketed by time intervals.
+      tags: [timeline]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimelineRequest'
+      responses:
+        '200':
+          description: Timeline buckets
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/EconomicEvent'
+                $ref: '#/components/schemas/TimelineResponse'
+
+  # ── Admin ─────────────────────────────────────────────────────
+  /npp/admin/sanity:
+    get:
+      operationId: sanityCheck
+      summary: Data quality sanity checks
+      description: |
+        Runs data quality checks across all data sources:
+        - Future timestamps in news
+        - Duplicate article URLs
+        - Invalid/missing tickers
+        - Missing trading days in earnings
+      tags: [admin]
+      responses:
+        '200':
+          description: Sanity check results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanityResponse'
 
 components:
   schemas:
-    NewsItem:
+    # ── Event ─────────────────────────────────────────────────────
+    Event:
       type: object
       properties:
-        id:
+        event_id:
           type: string
-        headline:
+        event_type:
           type: string
-          example: "Apple Reports Record Q4 Earnings"
-        body:
+          enum: [macro_calendar, earnings, breaking_news, daily_news]
+        title:
           type: string
-        source:
-          type: string
-          example: "Bloomberg"
-        timestamp:
+        time_utc:
           type: string
           format: date-time
+        importance:
+          type: string
+          enum: [low, medium, high]
+        status:
+          type: string
+          enum: [scheduled, occurred, updated]
         tickers:
           type: array
           items:
             type: string
-          example: ["AAPL"]
-        tags:
+        country:
+          type: string
+          default: "US"
+        snippet:
+          type: string
+        payload:
+          type: object
+        source:
+          type: string
+        source_id:
+          type: string
+
+    # ── Request Models ────────────────────────────────────────────
+    EventQueryRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [upcoming, just_happened, window]
+          default: upcoming
+        start_utc:
+          type: string
+          format: date-time
+        end_utc:
+          type: string
+          format: date-time
+        horizon_minutes:
+          type: integer
+          default: 60
+        event_types:
           type: array
           items:
             type: string
-          example: ["earnings", "tech"]
-        priority:
-          type: number
-          format: double
-          description: Priority score (0-1)
+            enum: [macro_calendar, earnings, breaking_news, daily_news]
+        tickers:
+          type: array
+          items:
+            type: string
+        min_importance:
+          type: string
+          enum: [low, medium, high]
+        limit:
+          type: integer
+          default: 50
+        cursor:
+          type: string
+        view:
+          type: string
+          enum: [compact, full]
+          default: compact
+        now_utc:
+          type: string
+          format: date-time
 
-    EarningsEvent:
+    StreamRequest:
       type: object
       properties:
-        ticker:
+        cursor:
           type: string
-        report_date:
+          description: "Cursor for pagination. Special value 'HEAD' means start from the latest position (may return empty if no new events buffered). Pass the 'next_cursor' from a previous response to continue from where you left off."
+        event_types:
+          type: array
+          items:
+            type: string
+        tickers:
+          type: array
+          items:
+            type: string
+        limit:
+          type: integer
+          default: 50
+        now_utc:
           type: string
-          format: date
-        fiscal_quarter:
-          type: string
-        eps_estimate:
-          type: number
-          format: double
-        eps_actual:
-          type: number
-          format: double
-        revenue_estimate:
-          type: number
-          format: double
-        revenue_actual:
-          type: number
-          format: double
 
-    EconomicEvent:
+    TriggerNextRequest:
       type: object
       properties:
-        event_type:
+        tickers:
+          type: array
+          items:
+            type: string
+        min_importance:
           type: string
-          example: "FOMC"
-        date:
+          enum: [low, medium, high]
+          default: medium
+        horizon_minutes:
+          type: integer
+          default: 1440
+        limit:
+          type: integer
+          default: 5
+        now_utc:
+          type: string
+
+    EconCalendarRequest:
+      type: object
+      properties:
+        start_date:
           type: string
           format: date
+        end_date:
+          type: string
+          format: date
+        min_importance:
+          type: string
+          enum: [low, medium, high]
+        limit:
+          type: integer
+          default: 100
+        cursor:
+          type: string
+        now_utc:
+          type: string
+
+    EarningsCalendarRequest:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        tickers:
+          type: array
+          items:
+            type: string
+        min_importance:
+          type: integer
+          minimum: 0
+          maximum: 5
+          default: 0
+        limit:
+          type: integer
+          default: 100
+        cursor:
+          type: string
+        now_utc:
+          type: string
+
+    NewsSearchRequest:
+      type: object
+      properties:
+        tickers:
+          type: array
+          items:
+            type: string
+        start_utc:
+          type: string
+          format: date-time
+        end_utc:
+          type: string
+          format: date-time
+        keyword:
+          type: string
+          description: Case-insensitive substring search in title
+        publisher:
+          type: string
+          description: Case-insensitive substring search in publisher name
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+        cursor:
+          type: string
+        now_utc:
+          type: string
+
+    TimelineRequest:
+      type: object
+      properties:
+        tickers:
+          type: array
+          items:
+            type: string
+        start_utc:
+          type: string
+        end_utc:
+          type: string
+        bucket_minutes:
+          type: integer
+          default: 60
+        now_utc:
+          type: string
+
+    # ── Response Models ───────────────────────────────────────────
+    PaginatedResponse:
+      type: object
+      properties:
+        server_time_utc:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        next_cursor:
+          type: string
+          nullable: true
+
+    TriggerResponse:
+      type: object
+      properties:
+        server_time_utc:
+          type: string
+        triggers:
+          type: array
+          items:
+            type: object
+            properties:
+              trigger_time_utc:
+                type: string
+              event_id:
+                type: string
+              event:
+                $ref: '#/components/schemas/Event'
+              reason_codes:
+                type: array
+                items:
+                  type: string
+
+    TimelineResponse:
+      type: object
+      properties:
+        server_time_utc:
+          type: string
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              bucket_start_utc:
+                type: string
+              bucket_end_utc:
+                type: string
+              count:
+                type: integer
+              events:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        service:
+          type: string
+          example: "npp"
+        version:
+          type: string
+          example: "0.1.0"
+        data_freshness:
+          type: object
+
+    FreshnessResponse:
+      type: object
+      properties:
+        service:
+          type: string
+          example: "npp"
+        checked_at:
+          type: string
+          format: date-time
+        sources:
+          type: object
+          properties:
+            news:
+              type: object
+              properties:
+                latest_timestamp:
+                  type: string
+                  nullable: true
+                record_count:
+                  type: integer
+                unique_keys:
+                  type: integer
+                unique_key_label:
+                  type: string
+                  example: "tickers"
+            earnings:
+              type: object
+              properties:
+                latest_date:
+                  type: string
+                  nullable: true
+                latest_timestamp:
+                  type: string
+                  nullable: true
+                record_count:
+                  type: integer
+                unique_keys:
+                  type: integer
+                unique_key_label:
+                  type: string
+                  example: "tickers"
+            econ_events:
+              type: object
+              properties:
+                latest_timestamp:
+                  type: string
+                  nullable: true
+                record_count:
+                  type: integer
+                unique_keys:
+                  type: integer
+                unique_key_label:
+                  type: string
+                  example: "event_types"
+
+    NewsBodyResponse:
+      type: object
+      properties:
+        news_id:
+          type: string
+        title:
+          type: string
         description:
           type: string
-        actual:
+        article_url:
           type: string
-        forecast:
+        published_utc:
           type: string
-        previous:
+        tickers:
+          type: array
+          items:
+            type: string
+        author:
           type: string
+        keywords:
+          type: array
+          items:
+            type: string
+        image_url:
+          type: string
+        publisher:
+          type: object
+        insights:
+          type: object
+
+    NewsStatsResponse:
+      type: object
+      properties:
+        total_count:
+          type: integer
+        date_range:
+          type: object
+          properties:
+            earliest:
+              type: string
+              nullable: true
+            latest:
+              type: string
+              nullable: true
+        daily_counts:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+              count:
+                type: integer
+        top_tickers:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker:
+                type: string
+              count:
+                type: integer
+        top_publishers:
+          type: array
+          items:
+            type: object
+            properties:
+              publisher:
+                type: string
+              count:
+                type: integer
+        duplicate_stats:
+          type: object
+          properties:
+            by_url:
+              $ref: '#/components/schemas/DuplicateStats'
+            by_title:
+              $ref: '#/components/schemas/DuplicateStats'
+
+    DuplicateStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        unique:
+          type: integer
+        duplicate_rate:
+          type: number
+          format: double
+
+    CoverageResponse:
+      type: object
+      properties:
+        earnings:
+          type: object
+          properties:
+            date_range:
+              type: object
+              properties:
+                start:
+                  type: string
+                end:
+                  type: string
+            total_records:
+              type: integer
+            daily_counts:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  count:
+                    type: integer
+            missing_dates:
+              type: array
+              items:
+                type: string
+            by_importance:
+              type: object
+              additionalProperties:
+                type: integer
+        econ_events:
+          type: object
+          properties:
+            date_range:
+              type: object
+              properties:
+                start:
+                  type: string
+                end:
+                  type: string
+            total_records:
+              type: integer
+            daily_counts:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  count:
+                    type: integer
+            missing_dates:
+              type: array
+              items:
+                type: string
+            by_country:
+              type: object
+              additionalProperties:
+                type: integer
+            by_type_top10:
+              type: array
+              items:
+                type: object
+                properties:
+                  event_type:
+                    type: string
+                  count:
+                    type: integer
+
+    SanityResponse:
+      type: object
+      properties:
+        checked_at:
+          type: string
+          format: date-time
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            pass:
+              type: integer
+            warn:
+              type: integer
+            fail:
+              type: integer
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              status:
+                type: string
+                enum: [pass, warn, fail]
+              count:
+                type: integer
+              samples:
+                type: array
+                items:
+                  type: object

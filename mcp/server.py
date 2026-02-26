@@ -13,7 +13,7 @@ Run:
 import json
 import sys
 import os
-from typing import Optional
+from typing import Literal, Optional
 
 # Add project root to path so we can import qfinzero clients without modifying the package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -59,6 +59,17 @@ def upq_health() -> str:
 
 
 @mcp.tool()
+def upq_freshness() -> str:
+    """Check data freshness of the UPQ market data service.
+
+    Returns:
+        JSON with latest timestamps, record counts, and partition info per data source.
+    """
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.freshness())
+
+
+@mcp.tool()
 def upq_stock_daily(
     tickers: list[str],
     start: str,
@@ -87,7 +98,7 @@ def upq_stock_minute(
     start: str,
     end: str,
     fields: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 10000,
 ) -> str:
     """Query minute-level OHLCV bars for one or more stocks.
 
@@ -155,7 +166,7 @@ def upq_option_contract(
     contract: str,
     start: str,
     end: str,
-    resolution: str = "day",
+    resolution: Literal["day", "minute"] = "day",
     fields: Optional[str] = None,
 ) -> str:
     """Query price history for a specific option contract.
@@ -223,6 +234,20 @@ def upq_make_opra(
     return UPQClient.make_opra(underlying=underlying, expiry=expiry, right=right, strike=strike)
 
 
+@mcp.tool()
+def upq_ns_to_iso(ns: int) -> str:
+    """Convert a nanosecond Unix timestamp to an ISO 8601 UTC datetime string.
+
+    Args:
+        ns: Nanosecond timestamp (as returned in window_start from upq_stock_minute)
+
+    Returns:
+        ISO 8601 datetime string in UTC, e.g. "2024-01-15T09:30:00+00:00"
+    """
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ns / 1_000_000_000, tz=timezone.utc).isoformat()
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # NPP TOOLS — News & Events
 # ════════════════════════════════════════════════════════════════════════════
@@ -237,41 +262,51 @@ def npp_health() -> str:
 
 @mcp.tool()
 def npp_query_events(
-    mode: str,
+    mode: str = "window",
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
-    horizon_minutes: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    horizon_minutes: int = 60,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
     min_importance: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 50,
     cursor: Optional[str] = None,
-    view: Optional[str] = None,
+    view: Literal["compact", "full"] = "full",
     now_utc: Optional[str] = None,
 ) -> str:
     """Query unified events from all sources (news, earnings, economic calendar).
 
     Args:
-        mode: Query mode:
+        mode: Query mode (default "window"):
               "upcoming"      — events after now (set horizon_minutes)
               "just_happened" — events that recently occurred (set horizon_minutes)
               "window"        — events in a specific range (set start_utc + end_utc)
         start_utc: Window start ISO datetime (required for "window" mode)
         end_utc: Window end ISO datetime (required for "window" mode)
-        horizon_minutes: Lookahead/lookback in minutes (for upcoming/just_happened)
+        start_date: Alternative to start_utc — date string "YYYY-MM-DD"
+        end_date: Alternative to end_utc — date string "YYYY-MM-DD"
+        horizon_minutes: Lookahead/lookback in minutes for upcoming/just_happened (default 60)
         event_types: Filter by type — any subset of:
                      ["macro_calendar", "earnings", "breaking_news", "daily_news"]
         tickers: Filter to events related to these stock symbols, e.g. ["AAPL", "NVDA"]
         min_importance: "low", "medium", or "high"
         limit: Max events to return per page (default 50)
         cursor: Pagination cursor from a previous response's next_cursor field
-        view: "compact" (no payload, faster) or "full" (includes event payload)
+        view: "compact" (no payload, faster) or "full" (includes event payload, default "full")
         now_utc: Override current time for backtesting replay (ISO datetime)
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
         Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet
     """
+    # Convert start_date/end_date to start_utc/end_utc if provided
+    if start_date and not start_utc:
+        start_utc = f"{start_date}T00:00:00+00:00"
+    if end_date and not end_utc:
+        end_utc = f"{end_date}T23:59:59+00:00"
+
     with NPPClient(NPP_URL) as client:
         return json.dumps(
             client.query_events(
@@ -306,10 +341,10 @@ def npp_get_event(event_id: str) -> str:
 
 @mcp.tool()
 def npp_stream_events(
-    cursor: str,
+    cursor: Optional[str] = None,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
-    limit: Optional[int] = None,
+    limit: int = 50,
     now_utc: Optional[str] = None,
 ) -> str:
     """Incrementally poll for new events since a cursor position.
@@ -341,10 +376,10 @@ def npp_stream_events(
 
 @mcp.tool()
 def npp_econ_calendar(
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     min_importance: Optional[str] = None,
-    limit: Optional[int] = None,
+    limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
 ) -> str:
@@ -376,11 +411,11 @@ def npp_econ_calendar(
 
 @mcp.tool()
 def npp_earnings_calendar(
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     tickers: Optional[list[str]] = None,
-    min_importance: Optional[int] = None,
-    limit: Optional[int] = None,
+    min_importance: int = 0,
+    limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
 ) -> str:
@@ -399,18 +434,15 @@ def npp_earnings_calendar(
         JSON with: server_time_utc, events[], next_cursor
     """
     with NPPClient(NPP_URL) as client:
-        kwargs = {}
-        if min_importance is not None:
-            kwargs["min_importance"] = min_importance
         return json.dumps(
             client.earnings_calendar(
                 start_date=start_date,
                 end_date=end_date,
                 tickers=tickers,
+                min_importance=min_importance,
                 limit=limit,
                 cursor=cursor,
                 now_utc=now_utc,
-                **kwargs,
             )
         )
 
@@ -419,8 +451,8 @@ def npp_earnings_calendar(
 def npp_next_triggers(
     tickers: Optional[list[str]] = None,
     min_importance: Optional[str] = None,
-    horizon_minutes: Optional[int] = None,
-    limit: Optional[int] = None,
+    horizon_minutes: int = 1440,
+    limit: int = 5,
     now_utc: Optional[str] = None,
 ) -> str:
     """Get the next high-importance events to use as agent wakeup triggers.
@@ -467,11 +499,49 @@ def npp_news_body(news_id: str) -> str:
 
 
 @mcp.tool()
+def npp_search_news(
+    tickers: Optional[list[str]] = None,
+    start_utc: Optional[str] = None,
+    end_utc: Optional[str] = None,
+    keyword: Optional[str] = None,
+    publisher: Optional[str] = None,
+    limit: int = 20,
+    cursor: Optional[str] = None,
+) -> str:
+    """Search news articles with keyword and publisher filtering.
+
+    Args:
+        tickers: Filter by stock symbols, e.g. ["AAPL", "NVDA"]
+        start_utc: Window start ISO datetime (default: now - 7 days)
+        end_utc: Window end ISO datetime (default: now)
+        keyword: Case-insensitive substring search in article title
+        publisher: Case-insensitive substring search in publisher name
+        limit: Max articles per page (1-500, default 50)
+        cursor: Pagination cursor from previous response's next_cursor field
+
+    Returns:
+        JSON with: server_time_utc, events[], next_cursor
+    """
+    with NPPClient(NPP_URL) as client:
+        return json.dumps(
+            client.search_news(
+                tickers=tickers,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                keyword=keyword,
+                publisher=publisher,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+
+
+@mcp.tool()
 def npp_timeline(
-    tickers: list[str],
-    start_utc: str,
-    end_utc: str,
-    bucket_minutes: Optional[int] = None,
+    tickers: Optional[list[str]] = None,
+    start_utc: Optional[str] = None,
+    end_utc: Optional[str] = None,
+    bucket_minutes: int = 60,
     now_utc: Optional[str] = None,
 ) -> str:
     """Get a compact time-bucketed summary of events for specific tickers.
@@ -517,15 +587,15 @@ def pmb_health() -> str:
 @mcp.tool()
 def pmb_create_account(
     initial_cash: float,
-    account_type: str = "MARGIN",
-    start_date: Optional[str] = None,
+    start_date: str,
+    account_type: Literal["MARGIN", "CASH"] = "MARGIN",
 ) -> str:
     """Create a new paper trading account.
 
     Args:
         initial_cash: Starting cash balance, e.g. 100000.0
+        start_date: Account start date "YYYY-MM-DD" (required — use the earliest date you will trade)
         account_type: "MARGIN" (default) or "CASH"
-        start_date: Optional start date "YYYY-MM-DD"
 
     Returns:
         JSON with: account_id, created_at, account_state
@@ -611,7 +681,7 @@ def pmb_get_trades(
 @mcp.tool()
 def pmb_create_session(
     account_id: str,
-    frequency: str,
+    frequency: Literal["1m", "1d"],
     start_ts: str,
     end_ts: str,
     stock_universe: Optional[list[str]] = None,
@@ -752,10 +822,10 @@ def pmb_buy_stock(
     account_id: str,
     symbol: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Literal["DAY", "GTC"] = "DAY",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a BUY order for a stock.
@@ -796,10 +866,10 @@ def pmb_sell_stock(
     account_id: str,
     symbol: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Literal["DAY", "GTC"] = "DAY",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a SELL order for a stock.
@@ -840,9 +910,9 @@ def pmb_buy_option(
     account_id: str,
     contract: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
-    time_in_force: str = "GTC",
+    time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a BUY order for an option contract.
@@ -882,9 +952,9 @@ def pmb_sell_option(
     account_id: str,
     contract: str,
     qty: int,
-    order_type: str = "MARKET",
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
-    time_in_force: str = "GTC",
+    time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
 ) -> str:
     """Place a SELL order for an option contract.
