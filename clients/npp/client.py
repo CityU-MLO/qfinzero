@@ -77,6 +77,10 @@ class NPPClient:
         """Health check — returns version, status, data freshness."""
         return self._get("/npp/health")
 
+    def freshness(self) -> dict:
+        """Data freshness — latest timestamps, record counts per data source."""
+        return self._get("/npp/health/freshness")
+
     # ── Events ────────────────────────────────────────────────────
 
     def query_events(
@@ -276,6 +280,181 @@ class NPPClient:
             tickers, author, keywords, image_url, publisher, insights
         """
         return self._get(f"/npp/news/{news_id}/body")
+
+    def search_news(
+        self,
+        tickers: list[str] = None,
+        start_utc: str = None,
+        end_utc: str = None,
+        keyword: str = None,
+        publisher: str = None,
+        limit: int = 50,
+        cursor: str = None,
+    ) -> dict:
+        """Search news with keyword and publisher filtering.
+
+        Args:
+            tickers: Filter by ticker symbols
+            start_utc: Window start (default: now - 7 days)
+            end_utc: Window end (default: now)
+            keyword: Case-insensitive substring search in title
+            publisher: Case-insensitive substring search in publisher name
+            limit: Max events per page (1-500)
+            cursor: Pagination cursor from previous response
+
+        Returns:
+            dict with server_time_utc, events, next_cursor
+        """
+        body = {"limit": limit}
+        if tickers:
+            body["tickers"] = tickers
+        if start_utc:
+            body["start_utc"] = start_utc
+        if end_utc:
+            body["end_utc"] = end_utc
+        if keyword:
+            body["keyword"] = keyword
+        if publisher:
+            body["publisher"] = publisher
+        if cursor:
+            body["cursor"] = cursor
+        return self._post("/npp/news/search", body)
+
+    def news_stats(self, days: int = 7) -> dict:
+        """News statistics — daily counts, top tickers/publishers, duplicate rates.
+
+        Args:
+            days: Lookback window in days (1-90, default 7)
+
+        Returns:
+            dict with total_count, date_range, daily_counts, top_tickers,
+            top_publishers, duplicate_stats
+        """
+        return self._get("/npp/news/stats", {"days": days})
+
+    def news_export(
+        self,
+        format: str = "jsonl",
+        tickers: str = None,
+        start: str = None,
+        end: str = None,
+    ) -> requests.Response:
+        """Export news articles as JSONL or CSV.
+
+        Args:
+            format: "jsonl" or "csv"
+            tickers: Comma-separated ticker filter
+            start: Start datetime
+            end: End datetime
+
+        Returns:
+            Raw Response object (use .text or .iter_lines() for content)
+        """
+        params = {"format": format}
+        if tickers:
+            params["tickers"] = tickers
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        resp = self._session.get(
+            f"{self.base_url}/npp/news/export",
+            params=params,
+            timeout=self.timeout,
+            stream=True,
+        )
+        if resp.status_code >= 400:
+            self._handle(resp)
+        return resp
+
+    def earnings_export(
+        self,
+        format: str = "csv",
+        start: str = None,
+        end: str = None,
+        ticker: str = None,
+    ) -> requests.Response:
+        """Export earnings data as JSONL or CSV.
+
+        Args:
+            format: "jsonl" or "csv"
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
+            ticker: Comma-separated ticker filter
+
+        Returns:
+            Raw Response object (use .text or .iter_lines() for content)
+        """
+        params = {"format": format}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        if ticker:
+            params["ticker"] = ticker
+        resp = self._session.get(
+            f"{self.base_url}/npp/calendar/earnings/export",
+            params=params,
+            timeout=self.timeout,
+            stream=True,
+        )
+        if resp.status_code >= 400:
+            self._handle(resp)
+        return resp
+
+    def economic_export(
+        self,
+        format: str = "csv",
+        start: str = None,
+        end: str = None,
+        country: str = None,
+    ) -> requests.Response:
+        """Export economic events as JSONL or CSV.
+
+        Args:
+            format: "jsonl" or "csv"
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
+            country: Country filter
+
+        Returns:
+            Raw Response object (use .text or .iter_lines() for content)
+        """
+        params = {"format": format}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        if country:
+            params["country"] = country
+        resp = self._session.get(
+            f"{self.base_url}/npp/calendar/economic/export",
+            params=params,
+            timeout=self.timeout,
+            stream=True,
+        )
+        if resp.status_code >= 400:
+            self._handle(resp)
+        return resp
+
+    def calendar_coverage(self, days: int = 30) -> dict:
+        """Calendar data coverage — daily counts, missing dates, breakdowns.
+
+        Args:
+            days: Lookback window in days (1-365, default 30)
+
+        Returns:
+            dict with earnings and econ_events coverage info
+        """
+        return self._get("/npp/calendar/coverage", {"days": days})
+
+    def sanity_check(self) -> dict:
+        """Run data quality sanity checks.
+
+        Returns:
+            dict with checked_at, summary (pass/warn/fail counts), checks list
+        """
+        return self._get("/npp/admin/sanity")
 
     # ── Timeline ──────────────────────────────────────────────────
 

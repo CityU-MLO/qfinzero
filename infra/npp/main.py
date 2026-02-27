@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import settings
 from services.data_sources import DataSourceManager
 from services.event_service import EventService
-from routes import health, events, triggers, calendar, news, timeline
+from routes import health, events, triggers, calendar, news, timeline, stats, export, admin
 
 logging.basicConfig(
     level=settings.log_level,
@@ -80,7 +80,7 @@ async def generic_error_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error")
     return JSONResponse(
         status_code=500,
-        content={"code": "internal_error", "message": str(exc)},
+        content={"code": "internal_error", "message": "Internal server error"},
     )
 
 
@@ -94,6 +94,9 @@ app.include_router(triggers.router)
 app.include_router(calendar.router)
 app.include_router(news.router)
 app.include_router(timeline.router)
+app.include_router(stats.router)
+app.include_router(export.router)
+app.include_router(admin.router)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,22 @@ paths:
                     type: string
                     example: "ok"
 
+  /health/freshness:
+    get:
+      summary: Data Freshness
+      description: |
+        Returns data freshness information for all UPQ data sources.
+        Reports latest timestamps, record counts, unique key counts, and partition info
+        for each Parquet-partitioned dataset and the rates CSV.
+      operationId: healthFreshness
+      responses:
+        '200':
+          description: Freshness information for all data sources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FreshnessResponse'
+
   /stock:
     get:
       summary: Stock Minute Data
@@ -555,3 +571,52 @@ components:
           type: string
           description: Human-readable error message
           example: "start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS"
+
+    FreshnessResponse:
+      type: object
+      properties:
+        service:
+          type: string
+          example: "upq"
+        checked_at:
+          type: string
+          format: date-time
+          description: ISO timestamp when freshness was checked
+        sources:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FreshnessSource'
+          description: Map of data source name to freshness info
+          example:
+            stock_minute:
+              latest_date: "2025-01-31"
+              latest_timestamp: 1738339200000000000
+              record_count: 50000
+              unique_keys: 150
+              unique_key_label: "tickers"
+              partition_count: 22
+
+    FreshnessSource:
+      type: object
+      properties:
+        latest_date:
+          type: string
+          format: date
+          nullable: true
+          description: Latest partition date (YYYY-MM-DD)
+        latest_timestamp:
+          type: integer
+          nullable: true
+          description: Latest window_start in nanoseconds (for minute-resolution datasets)
+        record_count:
+          type: integer
+          description: Number of records in the latest partition
+        unique_keys:
+          type: integer
+          description: Number of unique tickers (or tenors for rates)
+        unique_key_label:
+          type: string
+          description: Label for unique_keys (e.g., "tickers" or "tenors")
+        partition_count:
+          type: integer
+          description: Total number of date partitions

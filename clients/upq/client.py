@@ -72,6 +72,10 @@ class UPQClient:
     def health(self) -> dict:
         return self._get("/health")
 
+    def freshness(self) -> dict:
+        """Data freshness — latest timestamps, record counts, and partition info per data source."""
+        return self._get("/health/freshness")
+
     # ── Stock ─────────────────────────────────────────────────────
 
     def stock_minute(
