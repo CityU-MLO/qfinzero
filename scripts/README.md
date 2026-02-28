@@ -134,6 +134,9 @@ Syncs stock/options flat files from Massive/Polygon S3 (`https://files.polygon.i
 
 # 6) Install daily cron (weekday 17:30 UTC by default)
 ./scripts/upq_flatfiles.sh deploy-cron --prod
+
+# 7) Stock-only daily incremental update (recommended for current permissions)
+./scripts/upq_flatfiles.sh daily-stock-update --prod
 ```
 
 Required env vars before `update`:
@@ -157,3 +160,10 @@ Notes:
   - `stock/us_stocks_sip_minute_aggs_v1_YYYY_MM_YYYY-MM-DD.csv.gz`
   - `us_options_opra/day_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz`
   - `us_options_opra/minute_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz`
+
+Incremental ingest design:
+
+- Use `daily-stock-update --prod` for daily operations.
+- It computes range from `upq_storage/stock_daily` latest partition + 1 day to today (UTC).
+- It syncs only stock files from S3 into `/home/qlib/data/stock`.
+- It runs `ingest-stock-range` with a temporary raw root containing only date-range stock files, avoiding full 3000+ file re-scan.

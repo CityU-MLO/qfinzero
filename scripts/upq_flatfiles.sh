@@ -60,6 +60,7 @@ DRY_RUN=0
 SCHEDULE="$DEFAULT_SCHEDULE"
 FROM_DATE="$DEFAULT_FROM_DATE"
 TO_DATE="$DEFAULT_TO_DATE"
+ONLY_STOCK=0
 
 select_mode() {
   local mode="$1"
@@ -88,6 +89,8 @@ Usage: $0 <command> [options]
 Commands:
   update               Sync full flat files to stage/raw layout and run upq-ingest
   sync-data-range      Sync date range into /home/qlib/data-compatible hierarchy
+  ingest-stock-range   Ingest stock files from data layout for a date range (incremental)
+  daily-stock-update   Daily stock-only sync + incremental ingest
   status               Show status for raw/storage/data roots
   deploy-cron          Install a cron entry for daily update
   help                 Show this help message
@@ -100,6 +103,7 @@ Options:
   --schedule "<cron>"   Override cron schedule (deploy-cron only)
   --from YYYY-MM-DD     Start date for sync-data-range (default: $DEFAULT_FROM_DATE)
   --to YYYY-MM-DD       End date for sync-data-range (default: today UTC)
+  --only-stock          For sync-data-range, sync stock datasets only (skip options/rates)
 
 Environment (required for non-dry-run sync):
   POLYGON_S3_ACCESS_KEY_ID
@@ -177,6 +181,38 @@ while cur <= end:
     else:
         cur = cur.replace(month=cur.month + 1)
 PY
+}
+
+iso_today_utc() {
+  python3 - <<'PY'
+import datetime
+print(datetime.datetime.now(datetime.timezone.utc).date().isoformat())
+PY
+}
+
+iso_add_days() {
+  local d="$1"
+  local n="$2"
+  python3 - "$d" "$n" <<'PY'
+import datetime, sys
+base = datetime.date.fromisoformat(sys.argv[1])
+delta = int(sys.argv[2])
+print((base + datetime.timedelta(days=delta)).isoformat())
+PY
+}
+
+latest_stock_daily_partition_date() {
+  if [[ ! -d "$STORAGE_ROOT/stock_daily" ]]; then
+    echo ""
+    return
+  fi
+  local latest
+  latest="$(ls -1 "$STORAGE_ROOT/stock_daily" 2>/dev/null | grep '^trade_date=' | sort | tail -n 1 || true)"
+  if [[ -z "$latest" ]]; then
+    echo ""
+    return
+  fi
+  echo "${latest#trade_date=}"
 }
 
 aws_copy_key_to_file() {
@@ -505,13 +541,123 @@ cmd_sync_data_range() {
 
   sync_dataset_range "stock_day" "us_stocks_sip/day_aggs_v1"
   sync_dataset_range "stock_minute" "us_stocks_sip/minute_aggs_v1"
-  sync_dataset_range "option_day" "us_options_opra/day_aggs_v1"
-  sync_dataset_range "option_minute" "us_options_opra/minute_aggs_v1"
-  refresh_rates_data
+
+  if [[ "$ONLY_STOCK" -eq 0 ]]; then
+    sync_dataset_range "option_day" "us_options_opra/day_aggs_v1"
+    sync_dataset_range "option_minute" "us_options_opra/minute_aggs_v1"
+    refresh_rates_data
+  else
+    warn "only-stock mode: skip options and rates in sync-data-range"
+  fi
 
   section "Data layout sync done"
   info "mode      : $MODE"
   info "data_root : $DATA_ROOT"
+}
+
+cmd_ingest_stock_range() {
+  if ! validate_date "$FROM_DATE" || ! validate_date "$TO_DATE"; then
+    error "--from/--to must be valid YYYY-MM-DD"
+    return 2
+  fi
+  if [[ "$FROM_DATE" > "$TO_DATE" ]]; then
+    error "--from cannot be later than --to"
+    return 2
+  fi
+  if [[ ! -x "$UPQ_INGEST_BIN" ]]; then
+    error "upq-ingest binary not found or not executable: $UPQ_INGEST_BIN"
+    return 1
+  fi
+
+  local tmp_root
+  tmp_root="$(mktemp -d /tmp/upq_stock_raw_XXXXXX)"
+  trap "rm -rf '$tmp_root'" EXIT
+  mkdir -p "$tmp_root/stock/day" "$tmp_root/stock/minute"
+
+  local copied_day=0
+  local copied_minute=0
+  while IFS= read -r d; do
+    local yyyy="${d:0:4}"
+    local mm="${d:5:2}"
+    local day_file="$DATA_ROOT/stock/us_stocks_sip_day_aggs_v1_${yyyy}_${mm}_${d}.csv.gz"
+    local minute_file="$DATA_ROOT/stock/us_stocks_sip_minute_aggs_v1_${yyyy}_${mm}_${d}.csv.gz"
+    if [[ -f "$day_file" ]]; then
+      cp -n "$day_file" "$tmp_root/stock/day/" || true
+      copied_day=$((copied_day + 1))
+    fi
+    if [[ -f "$minute_file" ]]; then
+      cp -n "$minute_file" "$tmp_root/stock/minute/" || true
+      copied_minute=$((copied_minute + 1))
+    fi
+  done < <(python3 - "$FROM_DATE" "$TO_DATE" <<'PY'
+import datetime, sys
+start = datetime.date.fromisoformat(sys.argv[1])
+end = datetime.date.fromisoformat(sys.argv[2])
+cur = start
+while cur <= end:
+    print(cur.isoformat())
+    cur += datetime.timedelta(days=1)
+PY
+)
+
+  if [[ "$copied_day" -eq 0 && "$copied_minute" -eq 0 ]]; then
+    warn "No stock files found for range $FROM_DATE..$TO_DATE under $DATA_ROOT/stock"
+    trap - EXIT
+    rm -rf "$tmp_root"
+    return 0
+  fi
+
+  section "Run stock-only incremental ingest"
+  info "range=$FROM_DATE..$TO_DATE day_files=$copied_day minute_files=$copied_minute"
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[DRY-RUN] $UPQ_INGEST_BIN ingest --raw-root $tmp_root --storage-root $STORAGE_ROOT --manifest $MANIFEST_PATH"
+    return 0
+  fi
+
+  "$UPQ_INGEST_BIN" ingest \
+    --raw-root "$tmp_root" \
+    --storage-root "$STORAGE_ROOT" \
+    --manifest "$MANIFEST_PATH"
+
+  trap - EXIT
+  rm -rf "$tmp_root"
+}
+
+cmd_daily_stock_update() {
+  section "Daily stock-only update (mode=$MODE)"
+  ensure_data_dirs
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    require_aws_cli
+    require_s3_creds
+  else
+    warn "dry-run mode: skip aws/credentials runtime checks"
+  fi
+
+  local latest
+  latest="$(latest_stock_daily_partition_date)"
+  local from_date
+  if [[ -n "$latest" ]]; then
+    from_date="$(iso_add_days "$latest" 1)"
+  else
+    from_date="$DEFAULT_FROM_DATE"
+  fi
+  local to_date
+  to_date="$(iso_today_utc)"
+
+  if [[ "$from_date" > "$to_date" ]]; then
+    info "No new stock dates to process (latest=$latest, today=$to_date)"
+    return 0
+  fi
+
+  FROM_DATE="$from_date"
+  TO_DATE="$to_date"
+  ONLY_STOCK=1
+  SYNC_RATES=0
+
+  info "computed range=$FROM_DATE..$TO_DATE (latest_partition=$latest)"
+  cmd_sync_data_range
+  cmd_ingest_stock_range
 }
 
 cmd_status() {
@@ -609,6 +755,10 @@ parse_common_flags() {
         TO_DATE="$2"
         shift 2
         ;;
+      --only-stock)
+        ONLY_STOCK=1
+        shift
+        ;;
       *)
         error "Unknown option: $1"
         usage
@@ -628,6 +778,8 @@ main() {
   case "$cmd" in
     update) cmd_update ;;
     sync-data-range) cmd_sync_data_range ;;
+    ingest-stock-range) cmd_ingest_stock_range ;;
+    daily-stock-update) cmd_daily_stock_update ;;
     status) cmd_status ;;
     deploy-cron) cmd_deploy_cron ;;
     help|-h|--help) usage ;;

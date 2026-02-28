@@ -24,6 +24,8 @@ help_out="$("$SCRIPT" help 2>&1)" || fail "help command failed"
 assert_contains "$help_out" "update"
 assert_contains "$help_out" "deploy-cron"
 assert_contains "$help_out" "sync-data-range"
+assert_contains "$help_out" "daily-stock-update"
+assert_contains "$help_out" "ingest-stock-range"
 assert_contains "$help_out" "--from YYYY-MM-DD"
 
 status_out="$("$SCRIPT" status 2>&1)" || fail "status command failed"
