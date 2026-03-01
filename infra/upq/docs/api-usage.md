@@ -220,6 +220,7 @@ Query the full option chain for an underlying on a given date.
 - Stage 2: if stage 1 is empty, search nearest available expiry inside the same calendar month as `target_expiry`.
 - Selection: choose smallest absolute day difference; if tied, choose earlier expiry.
 - If neither stage finds candidates, response remains `[]` (HTTP 200).
+- When `include_greeks=true`, Greeks are computed using the actual returned expiry, not the requested date. Always check the `expiry` field in response rows.
 
 **Example:**
 

@@ -238,6 +238,31 @@ paths:
           description: Comma-separated fields to return
           schema:
             type: string
+        - name: include_greeks
+          in: query
+          required: false
+          description: |
+            When true, compute and append BSM-European Greeks fields to each row.
+            Warning: Greeks use European-style BSM approximation even for American-style options.
+          schema:
+            type: boolean
+            default: false
+        - name: greek_model
+          in: query
+          required: false
+          description: Pricing model for Greeks computation (only "bsm" supported in V1)
+          schema:
+            type: string
+            enum: [bsm]
+            default: bsm
+        - name: greek_price_field
+          in: query
+          required: false
+          description: Which price field to use for IV inversion (only "close" supported in V1)
+          schema:
+            type: string
+            enum: [close]
+            default: close
       responses:
         '200':
           description: Successful query
@@ -329,6 +354,32 @@ paths:
           description: Comma-separated fields to return
           schema:
             type: string
+        - name: include_greeks
+          in: query
+          required: false
+          description: |
+            When true, compute and append BSM-European Greeks fields to each row.
+            Warning: Greeks use European-style BSM approximation even for American-style options.
+            When expiry fallback occurs, Greeks are computed using the actual returned expiry.
+          schema:
+            type: boolean
+            default: false
+        - name: greek_model
+          in: query
+          required: false
+          description: Pricing model for Greeks computation (only "bsm" supported in V1)
+          schema:
+            type: string
+            enum: [bsm]
+            default: bsm
+        - name: greek_price_field
+          in: query
+          required: false
+          description: Which price field to use for IV inversion (only "close" supported in V1)
+          schema:
+            type: string
+            enum: [close]
+            default: close
       responses:
         '200':
           description: Successful query
@@ -464,71 +515,95 @@ components:
           type: integer
 
     OptionRecord:
-      type: object
-      properties:
-        ticker:
-          type: string
-          description: Option contract OPRA symbol
-          example: "O:NVDA250117C00136000"
-        window_start:
-          type: integer
-          description: Timestamp in nanoseconds
-        open:
-          type: number
-          format: double
-        high:
-          type: number
-          format: double
-        low:
-          type: number
-          format: double
-        close:
-          type: number
-          format: double
-        volume:
-          type: integer
-        transactions:
-          type: integer
+      description: |
+        Option ticker query row. Day resolution includes underlying/expiry/strike/type
+        fields; minute resolution omits them. When include_greeks=true, Greek fields are appended.
+      allOf:
+        - type: object
+          properties:
+            ticker:
+              type: string
+              description: Option contract OPRA symbol
+              example: "O:NVDA250117C00136000"
+            underlying:
+              type: string
+              description: Underlying asset ticker (day resolution only)
+            expiry:
+              type: string
+              format: date
+              description: Option expiration date (day resolution only)
+            strike:
+              type: number
+              format: double
+              description: Strike price (day resolution only)
+            type:
+              type: string
+              enum: [C, P]
+              description: Option type, aliased from "right" column (day resolution only)
+            window_start:
+              type: integer
+              description: Timestamp in nanoseconds
+            open:
+              type: number
+              format: double
+            high:
+              type: number
+              format: double
+            low:
+              type: number
+              format: double
+            close:
+              type: number
+              format: double
+            volume:
+              type: integer
+            transactions:
+              type: integer
+        - $ref: '#/components/schemas/GreekFields'
 
     OptionChainRecord:
-      type: object
-      properties:
-        contract:
-          type: string
-          description: Option contract symbol
-        underlying:
-          type: string
-          description: Underlying asset ticker
-        expiry:
-          type: string
-          format: date
-          description: Option expiration date
-        strike:
-          type: number
-          format: double
-          description: Strike price
-        right:
-          type: string
-          enum: [C, P]
-          description: Option type (Call or Put)
-        window_start:
-          type: integer
-        open:
-          type: number
-          format: double
-        high:
-          type: number
-          format: double
-        low:
-          type: number
-          format: double
-        close:
-          type: number
-          format: double
-        volume:
-          type: integer
-        transactions:
-          type: integer
+      description: |
+        Option chain query row. When include_greeks=true, Greek fields are appended.
+      allOf:
+        - type: object
+          properties:
+            contract:
+              type: string
+              description: Option contract symbol
+            underlying:
+              type: string
+              description: Underlying asset ticker
+            expiry:
+              type: string
+              format: date
+              description: Option expiration date
+            strike:
+              type: number
+              format: double
+              description: Strike price
+            type:
+              type: string
+              enum: [C, P]
+              description: Option type (Call or Put), aliased from "right" column
+            window_start:
+              type: integer
+            open:
+              type: number
+              format: double
+            high:
+              type: number
+              format: double
+            low:
+              type: number
+              format: double
+            close:
+              type: number
+              format: double
+            volume:
+              type: integer
+            transactions:
+              type: integer
+        - $ref: '#/components/schemas/GreekFields'
 
     RateRecord:
       type: object
@@ -631,3 +706,81 @@ components:
         partition_count:
           type: integer
           description: Total number of date partitions
+
+    GreekFields:
+      type: object
+      description: |
+        BSM-European Greeks fields. Appended to option rows when include_greeks=true.
+        Warning: Uses European-style BSM approximation. May not be accurate for American-style options.
+      properties:
+        iv:
+          type: number
+          format: double
+          nullable: true
+          description: Implied volatility (annualized)
+        delta:
+          type: number
+          format: double
+          nullable: true
+          description: Option delta
+        gamma:
+          type: number
+          format: double
+          nullable: true
+          description: Option gamma
+        theta:
+          type: number
+          format: double
+          nullable: true
+          description: Option theta (per day)
+        vega:
+          type: number
+          format: double
+          nullable: true
+          description: Option vega (per 1% vol change)
+        rho:
+          type: number
+          format: double
+          nullable: true
+          description: Option rho (per 1% rate change)
+        greek_status:
+          type: string
+          enum: [ok, below_intrinsic, no_bracket, no_convergence, non_finite_input, near_expiry_approx, missing_spot, missing_rate, model_error]
+          description: Status of Greeks computation for this row
+        greek_meta:
+          $ref: '#/components/schemas/GreekMeta'
+
+    GreekMeta:
+      type: object
+      description: Metadata about the Greeks computation model and conventions
+      properties:
+        model:
+          type: string
+          example: "bsm_european"
+        style_assumption:
+          type: string
+          example: "European"
+        dividend_assumption:
+          type: string
+          example: "q0"
+        theta_unit:
+          type: string
+          example: "per_day"
+        vega_unit:
+          type: string
+          example: "per_1pct_vol"
+        rho_unit:
+          type: string
+          example: "per_1pct_rate"
+        spot_source:
+          type: string
+          example: "stock_daily"
+        rate_source:
+          type: string
+          example: "rates_parquet"
+        t_convention:
+          type: string
+          example: "calendar_days_over_365"
+        expiry_anchor:
+          type: string
+          example: "expiry_date_16_00_ET"
