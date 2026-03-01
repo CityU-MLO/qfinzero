@@ -149,6 +149,7 @@ Each option row is enriched with: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`
 - `ok` — Computation succeeded
 - `below_intrinsic` — Option price is below intrinsic value, IV cannot be computed
 - `no_bracket` — IV solver could not bracket a solution
+- `no_convergence` — IV solver did not converge within iteration limit
 - `non_finite_input` — Input values contain NaN or infinity
 - `near_expiry_approx` — Near-expiry approximation used (may be less accurate)
 - `missing_spot` — Spot price not available for this row

@@ -745,7 +745,7 @@ components:
           description: Option rho (per 1% rate change)
         greek_status:
           type: string
-          enum: [ok, below_intrinsic, no_bracket, non_finite_input, near_expiry_approx, missing_spot, missing_rate, model_error]
+          enum: [ok, below_intrinsic, no_bracket, no_convergence, non_finite_input, near_expiry_approx, missing_spot, missing_rate, model_error]
           description: Status of Greeks computation for this row
         greek_meta:
           $ref: '#/components/schemas/GreekMeta'

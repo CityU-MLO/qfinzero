@@ -127,6 +127,7 @@ pub enum IvStatus {
     Ok,
     BelowIntrinsic,
     NoBracket,
+    NoConvergence,
     NonFiniteInput,
     NearExpiryApprox,
 }
@@ -313,7 +314,7 @@ pub fn implied_volatility(
     // Failed to converge within max_iter iterations.
     IvResult {
         iv: None,
-        status: IvStatus::NoBracket,
+        status: IvStatus::NoConvergence,
     }
 }
 

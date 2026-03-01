@@ -100,6 +100,7 @@ pub enum GreekStatus {
     Ok,
     BelowIntrinsic,
     NoBracket,
+    NoConvergence,
     NonFiniteInput,
     NearExpiryApprox,
     MissingSpot,
@@ -1655,6 +1656,7 @@ fn iv_status_to_greek_status(status: &IvStatus) -> GreekStatus {
         IvStatus::Ok => GreekStatus::Ok,
         IvStatus::BelowIntrinsic => GreekStatus::BelowIntrinsic,
         IvStatus::NoBracket => GreekStatus::NoBracket,
+        IvStatus::NoConvergence => GreekStatus::NoConvergence,
         IvStatus::NonFiniteInput => GreekStatus::NonFiniteInput,
         IvStatus::NearExpiryApprox => GreekStatus::NearExpiryApprox,
     }
