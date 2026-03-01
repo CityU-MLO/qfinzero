@@ -70,7 +70,7 @@ Service URLs can be set via environment variables:
 | `upq_health` | Check service health |
 | `upq_stock_daily` | Daily OHLCV bars for stocks |
 | `upq_stock_minute` | Minute-level OHLCV bars |
-| `upq_option_chain` | Full option chain for an underlying |
+| `upq_option_chain` | Full option chain for an underlying (exact-expiry miss auto-fallbacks to nearest expiry) |
 | `upq_option_contract` | Price history for a specific option contract |
 | `upq_rates` | US Treasury yield rates |
 | `upq_make_opra` | Build an OPRA contract identifier string |

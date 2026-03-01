@@ -33,8 +33,8 @@ async fn freshness_endpoint_returns_sources_for_empty_storage(
 }
 
 #[tokio::test]
-async fn freshness_endpoint_detects_latest_partition_date(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn freshness_endpoint_detects_latest_partition_date() -> Result<(), Box<dyn std::error::Error>>
+{
     let tmp = TempDir::new()?;
 
     // Create two stock_minute partitions with parquet files
@@ -797,6 +797,180 @@ async fn option_chain_query_rejects_non_finite_strike_filters(
     let app = upq_service::app::build_router();
     let request = Request::builder()
         .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&strike_min=NaN")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_query_falls_back_to_nearest_expiry_when_exact_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let partition_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&partition_dir)?;
+    let parquet_path = partition_dir.join("sample.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250214C00136000', 'NVDA', DATE '2025-02-14', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.6::DOUBLE, 115::BIGINT)\
+            ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&expiry_min=2025-02-10&expiry_max=2025-02-10&type=C&fields=ticker,expiry,strike,type,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("payload should be array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0].get("expiry"),
+        Some(&Value::String("2025-02-07".to_string()))
+    );
+    assert_eq!(array[0].get("type"), Some(&Value::String("C".to_string())));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_query_falls_back_to_month_window_when_week_window_empty(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let partition_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&partition_dir)?;
+    let parquet_path = partition_dir.join("sample.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT),\
+                ('O:NVDA250307C00136000', 'NVDA', DATE '2025-03-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.9::DOUBLE, 100::BIGINT)\
+            ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&expiry_min=2025-02-10&expiry_max=2025-02-10&type=C&fields=ticker,expiry,strike,type,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("payload should be array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0].get("expiry"),
+        Some(&Value::String("2025-02-28".to_string()))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_query_fallback_tie_prefers_earlier_expiry(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let partition_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&partition_dir)?;
+    let parquet_path = partition_dir.join("sample.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250213C00136000', 'NVDA', DATE '2025-02-13', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.3::DOUBLE, 100::BIGINT)\
+            ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&expiry_min=2025-02-10&expiry_max=2025-02-10&type=C&fields=ticker,expiry,strike,type,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("payload should be array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0].get("expiry"),
+        Some(&Value::String("2025-02-07".to_string()))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_query_range_filters_do_not_trigger_nearest_fallback(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let partition_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&partition_dir)?;
+    let parquet_path = partition_dir.join("sample.parquet");
+
+    let conn = Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT)\
+            ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
+         ) TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&expiry_min=2025-02-10&expiry_max=2025-02-20&type=C&fields=ticker,expiry,strike,type,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("payload should be array"))?;
+    assert!(array.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_query_rejects_invalid_exact_expiry_date(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&expiry_min=2025-02-30&expiry_max=2025-02-30")
         .body(Body::empty())?;
     let response = unwrap_infallible(app.oneshot(request).await);
 

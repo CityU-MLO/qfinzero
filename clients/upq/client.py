@@ -195,6 +195,8 @@ class UPQClient:
 
         Returns:
             List of dicts with ticker, underlying, expiry, strike, type, close, volume, etc.
+            If expiry_min == expiry_max and exact expiry has no rows, server may
+            fallback to the nearest available expiry (±7 days, then same month).
         """
         params = {"underlying": underlying, "date": date}
         if expiry_min:

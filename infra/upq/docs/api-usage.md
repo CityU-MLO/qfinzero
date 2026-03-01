@@ -212,6 +212,15 @@ Query the full option chain for an underlying on a given date.
 
 `contract` is an alias for `ticker`. `type` is an alias for `right`.
 
+**Exact-expiry fallback behavior:**
+
+- Trigger: `expiry_min` and `expiry_max` are both provided and equal, and the exact query returns no rows.
+- Scope: fallback lookup is constrained by the same `underlying`, `type`, and strike filters from the request.
+- Stage 1: search nearest available expiry within `target_expiry ± 7` calendar days.
+- Stage 2: if stage 1 is empty, search nearest available expiry inside the same calendar month as `target_expiry`.
+- Selection: choose smallest absolute day difference; if tied, choose earlier expiry.
+- If neither stage finds candidates, response remains `[]` (HTTP 200).
+
 **Example:**
 
 ```bash

@@ -144,7 +144,12 @@ def upq_option_chain(
         fields: Comma-separated fields to return
 
     Returns:
-        JSON list of option contract objects with pricing and Greeks.
+        JSON list of option contract objects.
+
+    Notes:
+        If `expiry_min` equals `expiry_max` (exact expiry) and no exact rows exist,
+        UPQ automatically falls back to nearest available expiry (±7 days first,
+        then same calendar month) within the same underlying/type/strike filter context.
     """
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
