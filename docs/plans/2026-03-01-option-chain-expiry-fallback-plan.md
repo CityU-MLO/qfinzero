@@ -1,6 +1,6 @@
 # Option Chain Expiry Fallback Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Contributor note:** Implement this plan task-by-task, validating each step with the specified tests and documentation updates.
 
 **Goal:** When `/option/chain_query` receives an exact expiry filter with no rows, automatically fallback to the nearest available expiry and return that chain.
 
