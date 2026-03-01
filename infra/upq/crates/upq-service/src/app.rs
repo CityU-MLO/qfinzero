@@ -10,9 +10,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use tower_http::trace::{self, TraceLayer};
-use tracing::Level;
-use chrono::{Duration, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
 use serde::Deserialize;
@@ -20,6 +18,8 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
+use tower_http::trace::{self, TraceLayer};
+use tracing::Level;
 use upq_core::rates::map_tenor_aliases;
 use upq_core::rates::split_by_month;
 use upq_core::sql_builder::build_tenor_projection;
@@ -371,7 +371,11 @@ async fn option() -> axum::response::Response {
 }
 
 async fn health() -> axum::response::Response {
-    (StatusCode::OK, Json(json!({ "status": "ok", "version": "0.1.0" }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "version": "0.1.0" })),
+    )
+        .into_response()
 }
 
 async fn health_freshness(State(state): State<AppState>) -> axum::response::Response {
@@ -451,18 +455,14 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 if *has_window_start {
                     if let Some(latest_ts) = row.get("latest_timestamp") {
                         if !latest_ts.is_null() {
-                            source_info
-                                .insert("latest_timestamp".to_string(), latest_ts.clone());
+                            source_info.insert("latest_timestamp".to_string(), latest_ts.clone());
                         }
                     }
                 }
             }
         }
 
-        source_info.insert(
-            "unique_key_label".to_string(),
-            json!(unique_key_label),
-        );
+        source_info.insert("unique_key_label".to_string(), json!(unique_key_label));
         source_info.insert("partition_count".to_string(), json!(partition_count));
 
         sources.insert(dataset_name.to_string(), Value::Object(source_info));
@@ -484,10 +484,7 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 }
                 // 7 standard tenors: 1M, 3M, 1Y, 2Y, 5Y, 10Y, 30Y
                 rates_info.insert("unique_keys".to_string(), json!(7));
-                rates_info.insert(
-                    "unique_key_label".to_string(),
-                    json!("tenors"),
-                );
+                rates_info.insert("unique_key_label".to_string(), json!("tenors"));
                 sources.insert("rates".to_string(), Value::Object(rates_info));
             }
         }
@@ -584,42 +581,213 @@ async fn option_chain_query(
         .to_string_lossy()
         .to_string();
 
-    let mut filters = vec![format!("underlying = {}", sql_quote(&params.underlying))];
-    if let Some(expiry_min) = params.expiry_min.as_deref() {
-        filters.push(format!(
-            "expiry >= DATE '{}'",
-            sql_escape_literal(expiry_min)
-        ));
-    }
-    if let Some(expiry_max) = params.expiry_max.as_deref() {
-        filters.push(format!(
-            "expiry <= DATE '{}'",
-            sql_escape_literal(expiry_max)
-        ));
-    }
+    let mut base_filters = vec![format!("underlying = {}", sql_quote(&params.underlying))];
     if let Some(strike_min) = params.strike_min {
-        filters.push(format!("strike >= {strike_min}"));
+        base_filters.push(format!("strike >= {strike_min}"));
     }
     if let Some(strike_max) = params.strike_max {
-        filters.push(format!("strike <= {strike_max}"));
+        base_filters.push(format!("strike <= {strike_max}"));
     }
     if let Some(option_type) = params.r#type.as_deref() {
-        filters.push(format!(
+        base_filters.push(format!(
             "\"right\" = '{}'",
             sql_escape_literal(&option_type.trim().to_ascii_uppercase())
         ));
     }
 
-    let sql = format!(
-        "SELECT {projection} FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry, strike",
-        path = sql_escape_literal(&path_pattern),
-        filters = filters.join(" AND "),
-    );
+    let mut exact_filters = base_filters.clone();
+    if let Some(expiry_min) = params.expiry_min.as_deref() {
+        exact_filters.push(format!(
+            "expiry >= DATE '{}'",
+            sql_escape_literal(expiry_min)
+        ));
+    }
+    if let Some(expiry_max) = params.expiry_max.as_deref() {
+        exact_filters.push(format!(
+            "expiry <= DATE '{}'",
+            sql_escape_literal(expiry_max)
+        ));
+    }
 
-    match run_sql_json_async(sql).await {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+    match run_option_chain_rows(&path_pattern, &projection, &exact_filters).await {
+        Ok(rows) if !rows.is_empty() => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Ok(_) => {
+            // Fallback only applies to exact-expiry requests. Range filters keep legacy behavior.
+            let Some(exact_expiry) =
+                exact_expiry_target(params.expiry_min.as_deref(), params.expiry_max.as_deref())
+            else {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            };
+
+            // If base filters have no rows at all (same underlying/type/strike context),
+            // fallback cannot produce meaningful results and should exit early.
+            let base_has_rows = match option_chain_base_has_rows(&path_pattern, &base_filters).await
+            {
+                Ok(value) => value,
+                Err(error) => return internal_error(error),
+            };
+            if !base_has_rows {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            }
+
+            let target_expiry = match NaiveDate::parse_from_str(exact_expiry, "%Y-%m-%d") {
+                Ok(value) => value,
+                Err(_) => return invalid_argument("expiry_min/expiry_max must be YYYY-MM-DD"),
+            };
+
+            // Two-stage fallback:
+            // 1) nearest expiry within ±7 days of requested expiry
+            // 2) if still empty, nearest expiry within requested expiry's calendar month
+            let fallback_expiry =
+                match find_nearest_fallback_expiry(&path_pattern, &base_filters, target_expiry)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(error) => return internal_error(error),
+                };
+
+            let Some(selected_expiry) = fallback_expiry else {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            };
+
+            let mut fallback_filters = base_filters;
+            let selected_expiry_str = selected_expiry.format("%Y-%m-%d").to_string();
+            fallback_filters.push(format!(
+                "expiry >= DATE '{}'",
+                sql_escape_literal(&selected_expiry_str)
+            ));
+            fallback_filters.push(format!(
+                "expiry <= DATE '{}'",
+                sql_escape_literal(&selected_expiry_str)
+            ));
+
+            match run_option_chain_rows(&path_pattern, &projection, &fallback_filters).await {
+                Ok(fallback_rows) => {
+                    (StatusCode::OK, Json(Value::Array(fallback_rows))).into_response()
+                }
+                Err(error) => internal_error(error),
+            }
+        }
         Err(error) => internal_error(error),
     }
+}
+
+fn exact_expiry_target<'a>(
+    expiry_min: Option<&'a str>,
+    expiry_max: Option<&'a str>,
+) -> Option<&'a str> {
+    match (expiry_min, expiry_max) {
+        (Some(min), Some(max)) if min == max => Some(min),
+        _ => None,
+    }
+}
+
+fn build_option_chain_sql(path_pattern: &str, projection: &str, filters: &[String]) -> String {
+    format!(
+        "SELECT {projection} FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry, strike",
+        path = sql_escape_literal(path_pattern),
+        filters = filters.join(" AND "),
+    )
+}
+
+async fn run_option_chain_rows(
+    path_pattern: &str,
+    projection: &str,
+    filters: &[String],
+) -> Result<Vec<Value>, ServiceError> {
+    let sql = build_option_chain_sql(path_pattern, projection, filters);
+    run_sql_json_async(sql).await
+}
+
+async fn option_chain_base_has_rows(
+    path_pattern: &str,
+    base_filters: &[String],
+) -> Result<bool, ServiceError> {
+    let sql = format!(
+        "SELECT 1 AS has_row FROM read_parquet('{path}') WHERE {filters} LIMIT 1",
+        path = sql_escape_literal(path_pattern),
+        filters = base_filters.join(" AND "),
+    );
+    let rows = run_sql_json_async(sql).await?;
+    Ok(!rows.is_empty())
+}
+
+async fn find_nearest_fallback_expiry(
+    path_pattern: &str,
+    base_filters: &[String],
+    target_expiry: NaiveDate,
+) -> Result<Option<NaiveDate>, ServiceError> {
+    let week_start = target_expiry - Duration::days(7);
+    let week_end = target_expiry + Duration::days(7);
+
+    let weekly_candidates =
+        query_distinct_expiries_in_window(path_pattern, base_filters, week_start, week_end).await?;
+    if let Some(expiry) = select_nearest_expiry(target_expiry, &weekly_candidates) {
+        return Ok(Some(expiry));
+    }
+
+    let month_start = match NaiveDate::from_ymd_opt(target_expiry.year(), target_expiry.month(), 1)
+    {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let (next_year, next_month) = if target_expiry.month() == 12 {
+        (target_expiry.year() + 1, 1)
+    } else {
+        (target_expiry.year(), target_expiry.month() + 1)
+    };
+    let month_end = match NaiveDate::from_ymd_opt(next_year, next_month, 1) {
+        Some(next_month_start) => next_month_start - Duration::days(1),
+        None => return Ok(None),
+    };
+
+    let monthly_candidates =
+        query_distinct_expiries_in_window(path_pattern, base_filters, month_start, month_end)
+            .await?;
+    Ok(select_nearest_expiry(target_expiry, &monthly_candidates))
+}
+
+async fn query_distinct_expiries_in_window(
+    path_pattern: &str,
+    base_filters: &[String],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+) -> Result<Vec<NaiveDate>, ServiceError> {
+    let mut filters = base_filters.to_vec();
+    filters.push(format!(
+        "expiry >= DATE '{}'",
+        sql_escape_literal(&window_start.format("%Y-%m-%d").to_string())
+    ));
+    filters.push(format!(
+        "expiry <= DATE '{}'",
+        sql_escape_literal(&window_end.format("%Y-%m-%d").to_string())
+    ));
+
+    let sql = format!(
+        "SELECT DISTINCT expiry FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry",
+        path = sql_escape_literal(path_pattern),
+        filters = filters.join(" AND "),
+    );
+    let rows = run_sql_json_async(sql).await?;
+
+    let expiries = rows
+        .iter()
+        .filter_map(|row| row.get("expiry").and_then(Value::as_str))
+        .filter_map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+        .collect::<Vec<NaiveDate>>();
+
+    Ok(expiries)
+}
+
+fn select_nearest_expiry(target_expiry: NaiveDate, candidates: &[NaiveDate]) -> Option<NaiveDate> {
+    candidates
+        .iter()
+        .min_by_key(|candidate| {
+            // Tie-break by earlier expiry when distances are equal.
+            let distance = (**candidate - target_expiry).num_days().abs();
+            (distance, **candidate)
+        })
+        .copied()
 }
 
 async fn rates_query(
