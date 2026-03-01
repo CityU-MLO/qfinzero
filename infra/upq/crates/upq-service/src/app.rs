@@ -1462,7 +1462,7 @@ fn enrich_ticker_rows_minute(
             }
         };
 
-        // T in years = (expiry_ns - window_start_ns) / (365.25 * 24 * 60 * 60 * 1e9)
+        // T in years = (expiry_ns - window_start_ns) / (365 * 24 * 3600 * 1e9)
         let ns_diff = expiry_ns - window_start_ns;
         let t_years = if ns_diff <= 0 {
             1.0 / (365.0 * 24.0 * 60.0) // floor at ~1 minute

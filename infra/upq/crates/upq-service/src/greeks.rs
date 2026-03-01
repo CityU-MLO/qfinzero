@@ -208,9 +208,6 @@ pub fn implied_volatility(
         };
     }
 
-    // Brenner-Subrahmanyam initial guess: sigma ≈ sqrt(2π/T) * C/S
-    let _sigma_init = ((2.0 * PI / t).sqrt() * market_price / s).clamp(0.01, 5.0);
-
     let sigma_lo = 0.001_f64;
     let sigma_hi = 10.0_f64;
     let max_iter = 100_usize;
