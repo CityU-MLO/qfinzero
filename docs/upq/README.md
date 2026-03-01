@@ -131,6 +131,39 @@ except UPQError as e:
     print(f"Error: {e}, code={e.code}, status={e.status_code}")
 ```
 
+### Greeks Computation (Optional)
+
+Both `/option/chain_query` and `/option/ticker_query` support optional realtime BSM-European Greeks computation via `include_greeks=true`.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `include_greeks` | bool | `false` | Enable Greeks computation |
+| `greek_model` | string | `bsm` | Pricing model (only `bsm` in V1) |
+| `greek_price_field` | string | `close` | Price field for IV inversion (only `close` in V1) |
+
+**Response Fields (when `include_greeks=true`):**
+Each option row is enriched with: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`, `greek_status`, `greek_meta`.
+
+**Greek Status Values:**
+- `ok` — Computation succeeded
+- `below_intrinsic` — Option price is below intrinsic value, IV cannot be computed
+- `no_bracket` — IV solver could not bracket a solution
+- `non_finite_input` — Input values contain NaN or infinity
+- `near_expiry_approx` — Near-expiry approximation used (may be less accurate)
+- `missing_spot` — Spot price not available for this row
+- `missing_rate` — Risk-free rate not available for this date
+- `model_error` — General model computation error
+
+**Important:** Greeks use European-style BSM approximation. This is an approximation for American-style options. The `greek_meta` field in each response row documents the exact model, conventions, and data sources used.
+
+**Conventions:**
+- `theta_unit`: per_day
+- `vega_unit`: per_1pct_vol (per 1 percentage point of volatility)
+- `rho_unit`: per_1pct_rate (per 1 percentage point of rate)
+- `t_convention`: calendar_days_over_365 (day-level), or minute-precise for minute resolution
+- `expiry_anchor`: expiry_date_16_00_ET (4:00 PM Eastern Time on expiry date)
+
 ## Configuration
 
 | Environment Variable | Required | Default | Description |

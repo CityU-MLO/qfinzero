@@ -15,7 +15,7 @@ use tracing::Level;
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -91,6 +91,45 @@ enum ServiceError {
     Connection(String),
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GreekStatus {
+    Ok,
+    BelowIntrinsic,
+    NoBracket,
+    NonFiniteInput,
+    NearExpiryApprox,
+    MissingSpot,
+    MissingRate,
+    ModelError,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GreekMeta {
+    pub model: &'static str,
+    pub style_assumption: &'static str,
+    pub dividend_assumption: &'static str,
+    pub theta_unit: &'static str,
+    pub vega_unit: &'static str,
+    pub rho_unit: &'static str,
+    pub spot_source: &'static str,
+    pub rate_source: &'static str,
+    pub t_convention: &'static str,
+    pub expiry_anchor: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GreekResult {
+    pub iv: Option<f64>,
+    pub delta: Option<f64>,
+    pub gamma: Option<f64>,
+    pub theta: Option<f64>,
+    pub vega: Option<f64>,
+    pub rho: Option<f64>,
+    pub greek_status: GreekStatus,
+    pub greek_meta: GreekMeta,
+}
+
 pub fn build_router() -> Router {
     let storage_root = env::var("STORAGE_ROOT").unwrap_or_else(|_| "./storage".to_string());
     eprintln!("upq-service storage_root={storage_root}");
@@ -136,6 +175,9 @@ struct OptionTickerQuery {
     end: String,
     resolution: Option<String>,
     fields: Option<String>,
+    include_greeks: Option<bool>,
+    greek_model: Option<String>,
+    greek_price_field: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +190,9 @@ struct OptionChainQuery {
     strike_max: Option<f64>,
     r#type: Option<String>,
     fields: Option<String>,
+    include_greeks: Option<bool>,
+    greek_model: Option<String>,
+    greek_price_field: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -302,6 +347,20 @@ async fn option_ticker_query(
         || validate_date_or_datetime(&params.end).is_err()
     {
         return invalid_argument("start/end must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS");
+    }
+
+    let include_greeks = params.include_greeks.unwrap_or(false);
+    if include_greeks {
+        if let Some(ref model) = params.greek_model {
+            if model != "bsm" {
+                return invalid_argument("greek_model must be bsm");
+            }
+        }
+        if let Some(ref price_field) = params.greek_price_field {
+            if price_field != "close" {
+                return invalid_argument("greek_price_field must be close");
+            }
+        }
     }
 
     let projection = match parse_option_ticker_projection(params.fields.as_deref(), &resolution) {
@@ -563,6 +622,20 @@ async fn option_chain_query(
     if let Some(strike_max) = params.strike_max {
         if !strike_max.is_finite() {
             return invalid_argument("strike_max must be finite");
+        }
+    }
+
+    let include_greeks = params.include_greeks.unwrap_or(false);
+    if include_greeks {
+        if let Some(ref model) = params.greek_model {
+            if model != "bsm" {
+                return invalid_argument("greek_model must be bsm");
+            }
+        }
+        if let Some(ref price_field) = params.greek_price_field {
+            if price_field != "close" {
+                return invalid_argument("greek_price_field must be close");
+            }
         }
     }
 
