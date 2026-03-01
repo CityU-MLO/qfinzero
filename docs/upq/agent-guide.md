@@ -310,6 +310,33 @@ with UPQClient() as upq:
         print(row["strike"], row.get("iv"), row.get("delta"), row.get("greek_status"))
 ```
 
+### Greek Status Handling Pattern
+
+When using Greeks, always check `greek_status` before using computed values:
+
+```python
+with UPQClient() as upq:
+    chain = upq.option_chain("NVDA", "2025-01-15", type="C",
+                              include_greeks=True)
+    for row in chain:
+        status = row.get("greek_status")
+        if status == "ok":
+            # Safe to use all Greek values
+            iv = row["iv"]
+            delta = row["delta"]
+            theta = row["theta"]
+        elif status in ("missing_spot", "missing_rate"):
+            # Data gap — Greeks unavailable for this row
+            print(f"Data gap: {status} for {row['ticker']}")
+        elif status == "below_intrinsic":
+            # Price below intrinsic — IV cannot be computed
+            print(f"Below intrinsic: {row['ticker']}")
+        else:
+            # Other statuses: no_bracket, non_finite_input,
+            # near_expiry_approx, model_error
+            print(f"Status={status} for {row['ticker']}")
+```
+
 ---
 
 ## Utility Functions

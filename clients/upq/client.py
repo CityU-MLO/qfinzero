@@ -146,6 +146,9 @@ class UPQClient:
         end: str,
         resolution: str = "day",
         fields: str = None,
+        include_greeks: bool = False,
+        greek_model: str = None,
+        greek_price_field: str = None,
     ) -> list[dict]:
         """Query price data for a specific option contract.
 
@@ -155,10 +158,16 @@ class UPQClient:
             end: Date or datetime string
             resolution: "day" or "minute"
             fields: Comma-separated fields to return
+            include_greeks: When True, append BSM-European Greeks (iv, delta,
+                gamma, theta, vega, rho, greek_status, greek_meta) to each row
+            greek_model: Pricing model — only "bsm" supported in V1
+            greek_price_field: Price field for IV inversion — only "close" in V1
 
         Returns:
             List of dicts with contract, window_start, open, high, low, close, volume, etc.
             Day resolution also includes underlying, expiry, strike, type.
+            When include_greeks=True, rows also include iv, delta, gamma, theta,
+            vega, rho, greek_status, and greek_meta.
         """
         params = {
             "contract": contract,
@@ -168,6 +177,12 @@ class UPQClient:
         }
         if fields:
             params["fields"] = fields
+        if include_greeks:
+            params["include_greeks"] = "true"
+        if greek_model:
+            params["greek_model"] = greek_model
+        if greek_price_field:
+            params["greek_price_field"] = greek_price_field
         return self._get("/option/ticker_query", params)
 
     def option_chain(
@@ -180,6 +195,9 @@ class UPQClient:
         strike_max: float = None,
         type: str = None,
         fields: str = None,
+        include_greeks: bool = False,
+        greek_model: str = None,
+        greek_price_field: str = None,
     ) -> list[dict]:
         """Query option chain for an underlying on a given date.
 
@@ -192,9 +210,15 @@ class UPQClient:
             strike_max: Max strike price filter
             type: "C" for calls, "P" for puts
             fields: Comma-separated fields to return
+            include_greeks: When True, append BSM-European Greeks (iv, delta,
+                gamma, theta, vega, rho, greek_status, greek_meta) to each row
+            greek_model: Pricing model — only "bsm" supported in V1
+            greek_price_field: Price field for IV inversion — only "close" in V1
 
         Returns:
             List of dicts with ticker, underlying, expiry, strike, type, close, volume, etc.
+            When include_greeks=True, rows also include iv, delta, gamma, theta,
+            vega, rho, greek_status, and greek_meta.
         """
         params = {"underlying": underlying, "date": date}
         if expiry_min:
@@ -209,6 +233,12 @@ class UPQClient:
             params["type"] = type
         if fields:
             params["fields"] = fields
+        if include_greeks:
+            params["include_greeks"] = "true"
+        if greek_model:
+            params["greek_model"] = greek_model
+        if greek_price_field:
+            params["greek_price_field"] = greek_price_field
         return self._get("/option/chain_query", params)
 
     # ── Rates ─────────────────────────────────────────────────────
