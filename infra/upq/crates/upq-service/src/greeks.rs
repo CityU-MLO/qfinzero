@@ -335,3 +335,479 @@ pub fn compute_greeks(
         None => (iv_result, None),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Shared test parameters.
+    // ATM: S=100, K=100, T=0.25, r=0.05, q=0.02, sigma=0.20
+    const ATM_S: f64 = 100.0;
+    const ATM_K: f64 = 100.0;
+    const ATM_T: f64 = 0.25;
+    const ATM_R: f64 = 0.05;
+    const ATM_Q: f64 = 0.02;
+    const ATM_SIGMA: f64 = 0.20;
+
+    // Deep ITM call: S=100, K=80, T=1.0, r=0.05, q=0.0, sigma=0.30
+    const DITM_S: f64 = 100.0;
+    const DITM_K: f64 = 80.0;
+    const DITM_T: f64 = 1.0;
+    const DITM_R: f64 = 0.05;
+    const DITM_Q: f64 = 0.0;
+    const DITM_SIGMA: f64 = 0.30;
+
+    fn assert_close(actual: f64, expected: f64, tol: f64, msg: &str) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= tol,
+            "{}: expected {:.12}, got {:.12}, diff {:.2e} exceeds tol {:.2e}",
+            msg,
+            expected,
+            actual,
+            diff,
+            tol,
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // 1. norm_cdf tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn norm_cdf_at_zero() {
+        assert_eq!(norm_cdf(0.0), 0.5, "norm_cdf(0) must be exactly 0.5");
+    }
+
+    #[test]
+    fn norm_cdf_monotone() {
+        let xs = [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0];
+        for pair in xs.windows(2) {
+            assert!(
+                norm_cdf(pair[1]) > norm_cdf(pair[0]),
+                "norm_cdf must be monotonically increasing: norm_cdf({}) = {} should be > norm_cdf({}) = {}",
+                pair[1], norm_cdf(pair[1]), pair[0], norm_cdf(pair[0]),
+            );
+        }
+    }
+
+    #[test]
+    fn norm_cdf_symmetry() {
+        // Phi(-x) = 1 - Phi(x) for every x.
+        for &x in &[0.5, 1.0, 1.5, 2.0, 2.5, 3.0] {
+            assert_close(
+                norm_cdf(-x),
+                1.0 - norm_cdf(x),
+                1e-12,
+                &format!("symmetry at x={}", x),
+            );
+        }
+    }
+
+    #[test]
+    fn norm_cdf_known_values() {
+        // Reference values from the standard normal table.
+        let cases = [
+            (-2.0, 0.022_750_131_948_179_2),
+            (-1.0, 0.158_655_253_931_457_1),
+            (1.0, 0.841_344_746_068_543_0),
+            (2.0, 0.977_249_868_051_820_8),
+        ];
+        for &(x, expected) in &cases {
+            assert_close(
+                norm_cdf(x),
+                expected,
+                1e-6,
+                &format!("norm_cdf({})", x),
+            );
+        }
+    }
+
+    #[test]
+    fn norm_cdf_extreme_tails() {
+        // Very large positive -> 1, very large negative -> 0.
+        assert!(norm_cdf(10.0) > 1.0 - 1e-15, "norm_cdf(10) ~ 1");
+        assert!(norm_cdf(-10.0) < 1e-15, "norm_cdf(-10) ~ 0");
+    }
+
+    // -----------------------------------------------------------------------
+    // 2. bsm_price tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bsm_price_atm_call_positive() {
+        let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        assert!(
+            price > 0.0,
+            "ATM call price must be positive, got {}",
+            price,
+        );
+    }
+
+    #[test]
+    fn bsm_price_atm_put_positive() {
+        let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert!(
+            price > 0.0,
+            "ATM put price must be positive, got {}",
+            price,
+        );
+    }
+
+    #[test]
+    fn bsm_price_put_call_parity() {
+        // C - P = S*exp(-qT) - K*exp(-rT)
+        let call = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let put = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        let forward_diff =
+            ATM_S * (-ATM_Q * ATM_T).exp() - ATM_K * (-ATM_R * ATM_T).exp();
+        assert_close(
+            call - put,
+            forward_diff,
+            1e-10,
+            "put-call parity (ATM)",
+        );
+    }
+
+    #[test]
+    fn bsm_price_put_call_parity_ditm() {
+        // Also verify parity with the deep ITM parameters.
+        let call = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
+        let put = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, false);
+        let forward_diff =
+            DITM_S * (-DITM_Q * DITM_T).exp() - DITM_K * (-DITM_R * DITM_T).exp();
+        assert_close(
+            call - put,
+            forward_diff,
+            1e-10,
+            "put-call parity (deep ITM)",
+        );
+    }
+
+    #[test]
+    fn bsm_price_deep_itm_call_near_intrinsic() {
+        // Deep ITM call price ≈ S - K*exp(-rT).
+        // The time value is O(S * sigma * sqrt(T)) for deep ITM, so use a
+        // generous tolerance proportional to that.
+        let call = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
+        let intrinsic = DITM_S - DITM_K * (-DITM_R * DITM_T).exp();
+        // The time-value overshoot should be small relative to spot.
+        let time_value = call - intrinsic;
+        assert!(
+            time_value >= 0.0,
+            "deep ITM call must be >= intrinsic, time_value = {}",
+            time_value,
+        );
+        // Generous bound: time value < 10% of spot for deep ITM.
+        assert!(
+            time_value < 0.10 * DITM_S,
+            "time value {} should be small relative to spot",
+            time_value,
+        );
+    }
+
+    #[test]
+    fn bsm_price_increases_with_vol() {
+        // Vega > 0: price should increase with volatility.
+        let price_lo = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, 0.15, true);
+        let price_mid = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, 0.20, true);
+        let price_hi = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, 0.30, true);
+        assert!(
+            price_lo < price_mid && price_mid < price_hi,
+            "call price must increase with vol: {:.6} < {:.6} < {:.6}",
+            price_lo,
+            price_mid,
+            price_hi,
+        );
+
+        // Also for puts.
+        let put_lo = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, 0.15, false);
+        let put_hi = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, 0.30, false);
+        assert!(
+            put_lo < put_hi,
+            "put price must increase with vol: {:.6} < {:.6}",
+            put_lo,
+            put_hi,
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // 3. implied_volatility tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn iv_round_trip_atm_call() {
+        let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let result = implied_volatility(price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        assert_eq!(result.status, IvStatus::Ok, "ATM call round-trip status");
+        assert_close(
+            result.iv.unwrap(),
+            ATM_SIGMA,
+            1e-8,
+            "ATM call round-trip IV",
+        );
+    }
+
+    #[test]
+    fn iv_round_trip_atm_put() {
+        let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        let result = implied_volatility(price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, false);
+        assert_eq!(result.status, IvStatus::Ok, "ATM put round-trip status");
+        assert_close(
+            result.iv.unwrap(),
+            ATM_SIGMA,
+            1e-8,
+            "ATM put round-trip IV",
+        );
+    }
+
+    #[test]
+    fn iv_round_trip_ditm_call() {
+        let price = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
+        let result = implied_volatility(price, DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, true);
+        assert_eq!(result.status, IvStatus::Ok, "deep ITM call round-trip status");
+        assert_close(
+            result.iv.unwrap(),
+            DITM_SIGMA,
+            1e-8,
+            "deep ITM call round-trip IV",
+        );
+    }
+
+    #[test]
+    fn iv_round_trip_various_sigmas() {
+        // Round-trip at several volatility levels.
+        for &sigma in &[0.05, 0.10, 0.50, 1.0, 2.0] {
+            let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, sigma, true);
+            let result = implied_volatility(price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+            assert_eq!(
+                result.status,
+                IvStatus::Ok,
+                "round-trip status for sigma={}",
+                sigma,
+            );
+            assert_close(
+                result.iv.unwrap(),
+                sigma,
+                1e-8,
+                &format!("round-trip IV for sigma={}", sigma),
+            );
+        }
+    }
+
+    #[test]
+    fn iv_below_intrinsic() {
+        // A call price below intrinsic should return BelowIntrinsic.
+        // Intrinsic = S*exp(-qT) - K*exp(-rT) for ATM with q < r is slightly negative,
+        // so use the deep ITM case where intrinsic is large and positive.
+        let intrinsic = DITM_S * (-DITM_Q * DITM_T).exp() - DITM_K * (-DITM_R * DITM_T).exp();
+        // Price well below intrinsic.
+        let price = intrinsic - 1.0;
+        assert!(price > 0.0, "test price must be positive");
+        let result = implied_volatility(price, DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, true);
+        assert_eq!(
+            result.status,
+            IvStatus::BelowIntrinsic,
+            "below-intrinsic status",
+        );
+        assert!(result.iv.is_none(), "below-intrinsic should have no IV");
+    }
+
+    #[test]
+    fn iv_zero_price_non_finite() {
+        // Zero price => NonFiniteInput (market_price <= 0.0 guard).
+        let result = implied_volatility(0.0, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        assert_eq!(result.status, IvStatus::NonFiniteInput, "zero price status");
+        assert!(result.iv.is_none());
+    }
+
+    #[test]
+    fn iv_negative_price_non_finite() {
+        let result = implied_volatility(-1.0, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        assert_eq!(
+            result.status,
+            IvStatus::NonFiniteInput,
+            "negative price status",
+        );
+    }
+
+    #[test]
+    fn iv_nan_input_non_finite() {
+        let result = implied_volatility(f64::NAN, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        assert_eq!(result.status, IvStatus::NonFiniteInput, "NaN price status");
+    }
+
+    #[test]
+    fn iv_very_high_price_no_bracket() {
+        // A call price far above any BSM price (even at sigma=10) should fail to bracket.
+        // Max BSM call at sigma=10 is bounded by S*exp(-qT), so use a price above that.
+        let absurd_price = ATM_S * 10.0;
+        let result =
+            implied_volatility(absurd_price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        assert_eq!(
+            result.status,
+            IvStatus::NoBracket,
+            "very high price should yield NoBracket",
+        );
+        assert!(result.iv.is_none());
+    }
+
+    #[test]
+    fn iv_convergence_small_t() {
+        // Small T = 1 day expressed in years.
+        let t_small = 1.0 / 365.0;
+        let sigma = 0.25;
+        let price = bsm_price(ATM_S, ATM_K, t_small, ATM_R, ATM_Q, sigma, true);
+        let result = implied_volatility(price, ATM_S, ATM_K, t_small, ATM_R, ATM_Q, true);
+        assert!(
+            result.status == IvStatus::Ok || result.status == IvStatus::NearExpiryApprox,
+            "small T status: {:?}",
+            result.status,
+        );
+        if result.status == IvStatus::Ok {
+            assert_close(
+                result.iv.unwrap(),
+                sigma,
+                1e-6,
+                "small T round-trip IV",
+            );
+        }
+    }
+
+    #[test]
+    fn iv_convergence_large_t() {
+        // Large T = 5 years.
+        let t_large = 5.0;
+        let sigma = 0.20;
+        let price = bsm_price(ATM_S, ATM_K, t_large, ATM_R, ATM_Q, sigma, true);
+        let result = implied_volatility(price, ATM_S, ATM_K, t_large, ATM_R, ATM_Q, true);
+        assert_eq!(result.status, IvStatus::Ok, "large T status");
+        assert_close(
+            result.iv.unwrap(),
+            sigma,
+            1e-8,
+            "large T round-trip IV",
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. bsm_greeks tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn greeks_call_delta_in_range() {
+        let g = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        assert!(
+            g.delta > 0.0 && g.delta < 1.0,
+            "call delta must be in (0,1), got {}",
+            g.delta,
+        );
+    }
+
+    #[test]
+    fn greeks_put_delta_in_range() {
+        let g = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert!(
+            g.delta > -1.0 && g.delta < 0.0,
+            "put delta must be in (-1,0), got {}",
+            g.delta,
+        );
+    }
+
+    #[test]
+    fn greeks_gamma_positive() {
+        let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert!(gc.gamma > 0.0, "call gamma must be positive, got {}", gc.gamma);
+        assert!(gp.gamma > 0.0, "put gamma must be positive, got {}", gp.gamma);
+    }
+
+    #[test]
+    fn greeks_gamma_equal_for_call_and_put() {
+        // Gamma is the same for call and put with the same parameters.
+        let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert_close(gc.gamma, gp.gamma, 1e-14, "call gamma == put gamma");
+    }
+
+    #[test]
+    fn greeks_call_theta_negative() {
+        // For a typical ATM call, theta should be negative (time decay).
+        let g = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        assert!(
+            g.theta < 0.0,
+            "call theta should be negative, got {}",
+            g.theta,
+        );
+    }
+
+    #[test]
+    fn greeks_vega_positive() {
+        let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert!(gc.vega > 0.0, "call vega must be positive, got {}", gc.vega);
+        assert!(gp.vega > 0.0, "put vega must be positive, got {}", gp.vega);
+    }
+
+    #[test]
+    fn greeks_vega_equal_for_call_and_put() {
+        // Vega is the same for call and put with the same parameters.
+        let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert_close(gc.vega, gp.vega, 1e-14, "call vega == put vega");
+    }
+
+    #[test]
+    fn greeks_put_call_delta_parity() {
+        // delta_call - delta_put = exp(-qT)
+        let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        let expected = (-ATM_Q * ATM_T).exp();
+        assert_close(
+            gc.delta - gp.delta,
+            expected,
+            1e-10,
+            "put-call delta parity",
+        );
+    }
+
+    #[test]
+    fn greeks_deep_itm_call_delta_near_one() {
+        let g = bsm_greeks(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
+        assert!(
+            g.delta > 0.85,
+            "deep ITM call delta should be near 1, got {}",
+            g.delta,
+        );
+    }
+
+    #[test]
+    fn greeks_deep_itm_call_gamma_small() {
+        // For deep ITM, gamma should be smaller than ATM gamma.
+        let g_atm = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        let g_ditm = bsm_greeks(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
+        assert!(
+            g_ditm.gamma < g_atm.gamma,
+            "deep ITM gamma ({}) should be < ATM gamma ({})",
+            g_ditm.gamma,
+            g_atm.gamma,
+        );
+    }
+
+    #[test]
+    fn greeks_call_rho_positive() {
+        // Call rho should be positive (call value increases with rates).
+        let g = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
+        assert!(g.rho > 0.0, "call rho must be positive, got {}", g.rho);
+    }
+
+    #[test]
+    fn greeks_put_rho_negative() {
+        // Put rho should be negative.
+        let g = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
+        assert!(g.rho < 0.0, "put rho must be negative, got {}", g.rho);
+    }
+}
