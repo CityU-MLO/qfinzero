@@ -219,6 +219,8 @@ class UPQClient:
             List of dicts with ticker, underlying, expiry, strike, type, close, volume, etc.
             When include_greeks=True, rows also include iv, delta, gamma, theta,
             vega, rho, greek_status, and greek_meta.
+            If expiry_min == expiry_max and exact expiry has no rows, server may
+            fallback to the nearest available expiry (±7 days, then same month).
         """
         params = {"underlying": underlying, "date": date}
         if expiry_min:

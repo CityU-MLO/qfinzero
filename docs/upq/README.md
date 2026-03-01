@@ -157,6 +157,8 @@ Each option row is enriched with: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`
 
 **Important:** Greeks use European-style BSM approximation. This is an approximation for American-style options. The `greek_meta` field in each response row documents the exact model, conventions, and data sources used.
 
+**Expiry Fallback & Greeks:** When an exact-expiry chain query triggers fallback (no rows for the requested expiry), Greeks are computed using the **actual returned expiry**, not the requested date. Always verify the `expiry` field in response rows to avoid misinterpreting which contract the Greeks belong to.
+
 **Conventions:**
 - `theta_unit`: per_day
 - `vega_unit`: per_1pct_vol (per 1 percentage point of volatility)

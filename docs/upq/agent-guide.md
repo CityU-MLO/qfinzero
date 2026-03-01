@@ -266,6 +266,8 @@ When set to `True`, each returned row is enriched with BSM-European Greeks field
 
 **Warning:** Greeks use European-style BSM approximation. This is an approximation for American-style options.
 
+**Expiry Fallback & Greeks:** When an exact-expiry chain query triggers fallback, Greeks are computed using the actual returned expiry, not the requested date. Always check the `expiry` field in response rows.
+
 ### `greek_model` — Pricing Model
 
 Selects the pricing model. Only `"bsm"` (Black-Scholes-Merton European) is supported in V1. Passing any other value returns a `400 invalid_argument` error.

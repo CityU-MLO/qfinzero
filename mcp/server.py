@@ -155,6 +155,11 @@ def upq_option_chain(
         JSON list of option contract objects. When include_greeks=True,
         each row includes iv, delta, gamma, theta, vega, rho, greek_status,
         and greek_meta fields. Check greek_status for computation outcome.
+
+    Notes:
+        If `expiry_min` equals `expiry_max` (exact expiry) and no exact rows exist,
+        UPQ automatically falls back to nearest available expiry (±7 days first,
+        then same calendar month) within the same underlying/type/strike filter context.
     """
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
