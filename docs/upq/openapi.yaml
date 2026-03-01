@@ -503,71 +503,79 @@ components:
           type: integer
 
     OptionRecord:
-      type: object
-      properties:
-        ticker:
-          type: string
-          description: Option contract OPRA symbol
-          example: "O:NVDA250117C00136000"
-        window_start:
-          type: integer
-          description: Timestamp in nanoseconds
-        open:
-          type: number
-          format: double
-        high:
-          type: number
-          format: double
-        low:
-          type: number
-          format: double
-        close:
-          type: number
-          format: double
-        volume:
-          type: integer
-        transactions:
-          type: integer
+      description: |
+        Option ticker query row. When include_greeks=true, Greek fields are appended.
+      allOf:
+        - type: object
+          properties:
+            ticker:
+              type: string
+              description: Option contract OPRA symbol
+              example: "O:NVDA250117C00136000"
+            window_start:
+              type: integer
+              description: Timestamp in nanoseconds
+            open:
+              type: number
+              format: double
+            high:
+              type: number
+              format: double
+            low:
+              type: number
+              format: double
+            close:
+              type: number
+              format: double
+            volume:
+              type: integer
+            transactions:
+              type: integer
+        - $ref: '#/components/schemas/GreekFields'
 
     OptionChainRecord:
-      type: object
-      properties:
-        contract:
-          type: string
-          description: Option contract symbol
-        underlying:
-          type: string
-          description: Underlying asset ticker
-        expiry:
-          type: string
-          format: date
-          description: Option expiration date
-        strike:
-          type: number
-          format: double
-          description: Strike price
-        right:
-          type: string
-          enum: [C, P]
-          description: Option type (Call or Put)
-        window_start:
-          type: integer
-        open:
-          type: number
-          format: double
-        high:
-          type: number
-          format: double
-        low:
-          type: number
-          format: double
-        close:
-          type: number
-          format: double
-        volume:
-          type: integer
-        transactions:
-          type: integer
+      description: |
+        Option chain query row. When include_greeks=true, Greek fields are appended.
+      allOf:
+        - type: object
+          properties:
+            contract:
+              type: string
+              description: Option contract symbol
+            underlying:
+              type: string
+              description: Underlying asset ticker
+            expiry:
+              type: string
+              format: date
+              description: Option expiration date
+            strike:
+              type: number
+              format: double
+              description: Strike price
+            right:
+              type: string
+              enum: [C, P]
+              description: Option type (Call or Put)
+            window_start:
+              type: integer
+            open:
+              type: number
+              format: double
+            high:
+              type: number
+              format: double
+            low:
+              type: number
+              format: double
+            close:
+              type: number
+              format: double
+            volume:
+              type: integer
+            transactions:
+              type: integer
+        - $ref: '#/components/schemas/GreekFields'
 
     RateRecord:
       type: object

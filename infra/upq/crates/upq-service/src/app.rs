@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::{Duration, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
@@ -887,6 +887,9 @@ fn ensure_greeks_columns_ticker_day(base_projection: &str) -> String {
     if !projection_has_column(&cols, "underlying") {
         cols.push("underlying".to_string());
     }
+    if !projection_has_column(&cols, "window_start") {
+        cols.push("window_start".to_string());
+    }
 
     cols.join(", ")
 }
@@ -1022,6 +1025,9 @@ fn ensure_greeks_columns_ticker_minute(base_projection: &str) -> String {
     if !projection_has_column(&cols, "close") {
         cols.push("close".to_string());
     }
+    if !projection_has_column(&cols, "window_start") {
+        cols.push("window_start".to_string());
+    }
 
     cols.join(", ")
 }
@@ -1032,7 +1038,7 @@ fn ensure_greeks_columns_ticker_minute(base_projection: &str) -> String {
 fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, rows: &mut [Value]) {
     // Parse the OPRA contract to extract underlying, expiry, and right
     let parsed = parse_opra_contract(contract);
-    let (underlying, expiry_date, is_call) = match parsed {
+    let opra = match parsed {
         Some(p) => p,
         None => {
             // Can't parse contract — mark all rows as model_error
@@ -1058,21 +1064,42 @@ fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, row
     };
 
     if resolution == "day" {
-        enrich_ticker_rows_day(storage_root, &underlying, &expiry_date, is_call, rows);
+        enrich_ticker_rows_day(
+            storage_root,
+            &opra.underlying,
+            &opra.expiry,
+            opra.is_call,
+            rows,
+        );
     } else {
-        enrich_ticker_rows_minute(storage_root, &underlying, &expiry_date, is_call, rows);
+        enrich_ticker_rows_minute(
+            storage_root,
+            &opra.underlying,
+            &opra.expiry,
+            opra.is_call,
+            opra.strike,
+            rows,
+        );
     }
 }
 
-/// Parse an OPRA contract string like "O:NVDA250117C00136000" into (underlying, expiry_date, is_call).
-fn parse_opra_contract(contract: &str) -> Option<(String, NaiveDate, bool)> {
+/// Parsed OPRA contract fields.
+struct OpraContract {
+    underlying: String,
+    expiry: NaiveDate,
+    is_call: bool,
+    strike: f64,
+}
+
+/// Parse an OPRA contract string like "O:NVDA250117C00136000" into its components.
+fn parse_opra_contract(contract: &str) -> Option<OpraContract> {
     let stripped = contract.strip_prefix("O:")?;
     // Find the date portion — it's 6 digits after the ticker letters
     let alpha_end = stripped.find(|c: char| c.is_ascii_digit())?;
     let underlying = stripped[..alpha_end].to_string();
     let remainder = &stripped[alpha_end..];
-    if remainder.len() < 7 {
-        return None; // Need at least 6 digits + C/P
+    if remainder.len() < 15 {
+        return None; // Need 6 date digits + C/P + 8 strike digits
     }
     let date_str = &remainder[..6];
     let right_char = remainder.as_bytes().get(6)?;
@@ -1082,7 +1109,15 @@ fn parse_opra_contract(contract: &str) -> Option<(String, NaiveDate, bool)> {
         _ => return None,
     };
     let expiry = NaiveDate::parse_from_str(date_str, "%y%m%d").ok()?;
-    Some((underlying, expiry, is_call))
+    let strike_str = &remainder[7..15];
+    let strike_millis: u64 = strike_str.parse().ok()?;
+    let strike = strike_millis as f64 / 1000.0;
+    Some(OpraContract {
+        underlying,
+        expiry,
+        is_call,
+        strike,
+    })
 }
 
 /// Enrich ticker query rows at day resolution.
@@ -1201,6 +1236,7 @@ fn enrich_ticker_rows_minute(
     underlying: &str,
     expiry_date: &NaiveDate,
     is_call: bool,
+    strike: f64,
     rows: &mut [Value],
 ) {
     // Per-request caches
@@ -1208,9 +1244,9 @@ fn enrich_ticker_rows_minute(
     let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
 
     // Expiry anchor: 16:00 ET = 21:00 UTC (EST) or 20:00 UTC (EDT)
-    // For simplicity in V1, use 21:00 UTC (EST assumption)
+    let utc_hour = if is_us_dst(expiry_date) { 20 } else { 21 };
     let expiry_dt = expiry_date
-        .and_hms_opt(21, 0, 0) // 4:00 PM ET in UTC (EST)
+        .and_hms_opt(utc_hour, 0, 0)
         .and_then(|dt| dt.and_utc().timestamp_nanos_opt());
 
     let expiry_ns = match expiry_dt {
@@ -1316,6 +1352,9 @@ fn enrich_ticker_rows_minute(
             }
         };
 
+        // Inject strike from OPRA contract (minute parquet doesn't have strike column)
+        row.insert("strike".to_string(), json!(strike));
+
         enrich_row_with_greeks(
             row,
             spot,
@@ -1341,6 +1380,43 @@ fn extract_trade_date_from_row(row: &Map<String, Value>) -> Option<String> {
         return ns_to_date_string(ns);
     }
     None
+}
+
+/// Check if a date falls within US Eastern Daylight Time.
+/// US DST: second Sunday of March 02:00 to first Sunday of November 02:00.
+fn is_us_dst(date: &NaiveDate) -> bool {
+    let year = date.year();
+    let month = date.month();
+
+    // Quick reject: Jan, Feb, Dec are always EST
+    if !(3..=11).contains(&month) {
+        return false;
+    }
+    // Quick accept: Apr-Oct are always EDT
+    if (4..=10).contains(&month) {
+        return true;
+    }
+
+    if month == 3 {
+        // Second Sunday of March: find day of first Sunday, add 7
+        let march_1 = NaiveDate::from_ymd_opt(year, 3, 1);
+        if let Some(m1) = march_1 {
+            let dow = m1.weekday().num_days_from_sunday(); // 0=Sun
+            let first_sunday = if dow == 0 { 1 } else { 8 - dow };
+            let second_sunday = first_sunday + 7;
+            return date.day() >= second_sunday;
+        }
+        false
+    } else {
+        // month == 11: first Sunday of November
+        let nov_1 = NaiveDate::from_ymd_opt(year, 11, 1);
+        if let Some(n1) = nov_1 {
+            let dow = n1.weekday().num_days_from_sunday();
+            let first_sunday = if dow == 0 { 1 } else { 8 - dow };
+            return date.day() < first_sunday;
+        }
+        false
+    }
 }
 
 /// Convert nanoseconds since epoch to a YYYY-MM-DD date string.

@@ -1286,3 +1286,217 @@ async fn option_ticker_query_greeks_invalid_price_field_returns_400(
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     Ok(())
 }
+
+/// Helper: create a test env with option_minute parquet for minute-level Greeks tests.
+fn create_greeks_minute_test_env() -> Result<TempDir, Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_minute partition (minute data has no underlying/expiry/strike/right columns)
+    let option_dir = tmp
+        .path()
+        .join("option_minute")
+        .join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    // window_start: 2025-01-15 14:30:00 UTC = 1736951400000000000 ns
+    // window_start: 2025-01-15 15:00:00 UTC = 1736953200000000000 ns
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250221C00140000', 1736951400000000000::BIGINT, 5.40::DOUBLE, 5.70::DOUBLE, 5.30::DOUBLE, 5.50::DOUBLE, 200::BIGINT, 50::BIGINT),\
+                ('O:NVDA250221C00140000', 1736953200000000000::BIGINT, 5.55::DOUBLE, 5.80::DOUBLE, 5.45::DOUBLE, 5.60::DOUBLE, 180::BIGINT, 40::BIGINT)\
+            ) AS t(ticker, window_start, open, high, low, close, volume, transactions)\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Create stock_daily partition (spot source for minute Greeks)
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'NVDA' AS ticker, \
+                DATE '2025-01-15' AS trade_date, \
+                135.0::DOUBLE AS open, \
+                137.0::DOUBLE AS high, \
+                133.0::DOUBLE AS low, \
+                136.0::DOUBLE AS close, \
+                5000::BIGINT AS volume, \
+                50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Create rates data
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    Ok(tmp)
+}
+
+#[tokio::test]
+async fn option_ticker_query_minute_greeks_enabled() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_minute_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-15T14:00:00&end=2025-01-15T16:00:00&resolution=minute&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2, "should return 2 minute bars");
+
+    for (i, row) in array.iter().enumerate() {
+        assert!(row.get("iv").is_some(), "row {i} should have iv field");
+        assert!(
+            row.get("delta").is_some(),
+            "row {i} should have delta field"
+        );
+        assert!(
+            row.get("gamma").is_some(),
+            "row {i} should have gamma field"
+        );
+        assert!(
+            row.get("greek_status").is_some(),
+            "row {i} should have greek_status"
+        );
+
+        let status = row["greek_status"]
+            .as_str()
+            .ok_or_else(|| std::io::Error::other("expected string"))?;
+        assert_eq!(status, "ok", "row {i} greek_status should be ok");
+
+        // Call delta should be positive
+        let delta = row["delta"]
+            .as_f64()
+            .ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+        assert!(
+            delta > 0.0 && delta < 1.0,
+            "row {i} call delta={delta} should be in (0,1)"
+        );
+
+        // IV should be reasonable
+        let iv = row["iv"]
+            .as_f64()
+            .ok_or_else(|| std::io::Error::other("iv should be a number"))?;
+        assert!(
+            iv > 0.0 && iv < 10.0,
+            "row {i} iv={iv} should be reasonable"
+        );
+
+        // Strike should have been injected from OPRA contract
+        assert!(
+            row.get("strike").is_some(),
+            "row {i} should have strike from OPRA injection"
+        );
+
+        // Meta should reflect minute_precise T convention
+        let meta = &row["greek_meta"];
+        assert_eq!(
+            meta["t_convention"], "minute_precise",
+            "row {i} should use minute_precise T convention"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_below_intrinsic_returns_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day with a close price below intrinsic value
+    // Deep ITM call: underlying=136, strike=100, so intrinsic ≈ 36
+    // Set close=0.01 (way below intrinsic) to trigger below_intrinsic status
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'O:NVDA250221C00100000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            100.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            0.01::DOUBLE AS open, 0.02::DOUBLE AS high, 0.005::DOUBLE AS low, 0.01::DOUBLE AS close, \
+            200::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Stock spot
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            135.0::DOUBLE AS open, 137.0::DOUBLE AS high, 133.0::DOUBLE AS low, \
+            136.0::DOUBLE AS close, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rates
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0]["greek_status"], "below_intrinsic",
+        "option priced below intrinsic should get below_intrinsic status"
+    );
+    assert!(
+        array[0]["iv"].is_null(),
+        "IV should be null for below_intrinsic"
+    );
+    assert!(
+        array[0]["delta"].is_null(),
+        "delta should be null for below_intrinsic"
+    );
+
+    Ok(())
+}
