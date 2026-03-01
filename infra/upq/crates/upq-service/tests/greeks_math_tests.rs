@@ -252,6 +252,66 @@ fn iv_convergence_within_100_iterations() {
     }
 }
 
+#[test]
+fn iv_impossible_market_price_returns_no_bracket() {
+    // Call price cannot exceed spot (q=0). Use impossible market price.
+    let result = implied_volatility(150.0, 100.0, 100.0, 0.5, 0.03, 0.0, true);
+    assert_eq!(result.status, IvStatus::NoBracket);
+    assert!(result.iv.is_none());
+}
+
+#[test]
+fn iv_near_expiry_zero_time_value_returns_floor_iv() {
+    // When T is below near-expiry threshold and price equals intrinsic,
+    // implementation should return approximate floor IV.
+    let t = 0.5 / (365.0 * 24.0 * 60.0); // 30s
+    let s = 120.0_f64;
+    let k = 100.0_f64;
+    let r = 0.01_f64;
+    let q = 0.0_f64;
+    let intrinsic = (s * (-q * t).exp() - k * (-r * t).exp()).max(0.0);
+
+    let result = implied_volatility(intrinsic, s, k, t, r, q, true);
+    assert_eq!(result.status, IvStatus::NearExpiryApprox);
+    let iv = result.iv.expect("near-expiry branch should return approximate IV");
+    assert_near(iv, 0.001, 1e-12, "near-expiry floor IV");
+}
+
+#[test]
+fn greeks_match_finite_difference_sensitivities() {
+    let s = 100.0;
+    let k = 95.0;
+    let t = 0.75;
+    let r = 0.03;
+    let q = 0.0;
+    let sigma = 0.22;
+
+    let analytic = bsm_greeks(s, k, t, r, q, sigma, true);
+
+    let ds = 0.05;
+    let dvol = 1e-4;
+
+    let price_up = bsm_price(s + ds, k, t, r, q, sigma, true);
+    let price_mid = bsm_price(s, k, t, r, q, sigma, true);
+    let price_dn = bsm_price(s - ds, k, t, r, q, sigma, true);
+
+    let delta_fd = (price_up - price_dn) / (2.0 * ds);
+    let gamma_fd = (price_up - 2.0 * price_mid + price_dn) / (ds * ds);
+
+    let vega_up = bsm_price(s, k, t, r, q, sigma + dvol, true);
+    let vega_dn = bsm_price(s, k, t, r, q, sigma - dvol, true);
+    let vega_fd_per_1pct = ((vega_up - vega_dn) / (2.0 * dvol)) * 0.01;
+
+    assert_near(analytic.delta, delta_fd, 4e-6, "delta finite-difference");
+    assert_near(analytic.gamma, gamma_fd, 2e-6, "gamma finite-difference");
+    assert_near(
+        analytic.vega,
+        vega_fd_per_1pct,
+        2e-6,
+        "vega finite-difference (per 1pct)",
+    );
+}
+
 // ============== Compute Greeks Integration Tests ==============
 
 #[test]

@@ -1298,6 +1298,36 @@ async fn option_chain_greeks_enabled_returns_greek_fields() -> Result<(), Box<dy
 }
 
 #[tokio::test]
+async fn option_chain_greeks_with_minimal_fields_still_computes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&fields=contract,close&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+
+    for row in array {
+        assert!(row.get("contract").is_some(), "contract alias should be present");
+        assert!(row.get("ticker").is_none(), "ticker should stay aliased away");
+        assert!(row.get("close").is_some());
+        assert_eq!(row["greek_status"], "ok");
+        assert!(!row["iv"].is_null());
+        assert_eq!(row["greek_meta"]["theta_unit"], "per_day");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn option_chain_greeks_invalid_model_returns_400() -> Result<(), Box<dyn std::error::Error>> {
     let app = upq_service::app::build_router();
     let request = Request::builder()
@@ -1523,6 +1553,72 @@ fn create_greeks_minute_test_env() -> Result<TempDir, Box<dyn std::error::Error>
     Ok(tmp)
 }
 
+/// Regression fixture: minute row belongs to ET trade date 2025-01-15, but its
+/// UTC timestamp crosses into 2025-01-16. Greeks lookup should still use the
+/// row's trade_date (partition date), not UTC calendar date.
+fn create_greeks_minute_utc_boundary_env() -> Result<TempDir, Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    let option_dir = tmp
+        .path()
+        .join("option_minute")
+        .join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'O:NVDA250221C00140000' AS ticker, \
+                1736986200000000000::BIGINT AS window_start, \
+                5.40::DOUBLE AS open, \
+                5.70::DOUBLE AS high, \
+                5.30::DOUBLE AS low, \
+                5.50::DOUBLE AS close, \
+                200::BIGINT AS volume, \
+                50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Only provide spot/rates for 2025-01-15. If minute enrichment incorrectly
+    // derives date from UTC timestamp (2025-01-16), this test will fail.
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'NVDA' AS ticker, \
+                DATE '2025-01-15' AS trade_date, \
+                135.0::DOUBLE AS open, \
+                137.0::DOUBLE AS high, \
+                133.0::DOUBLE AS low, \
+                136.0::DOUBLE AS close, \
+                5000::BIGINT AS volume, \
+                50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    Ok(tmp)
+}
+
 #[tokio::test]
 async fn option_ticker_query_minute_greeks_enabled() -> Result<(), Box<dyn std::error::Error>> {
     let tmp = create_greeks_minute_test_env()?;
@@ -1591,6 +1687,66 @@ async fn option_ticker_query_minute_greeks_enabled() -> Result<(), Box<dyn std::
             "row {i} should use minute_precise T convention"
         );
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_ticker_query_minute_greeks_with_minimal_fields_still_computes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_minute_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-15T14:00:00&end=2025-01-15T16:00:00&resolution=minute&fields=volume&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+
+    for row in array {
+        // User-requested field should remain.
+        assert!(row.get("volume").is_some());
+        // Internal enrichment should still work even when user omitted close/window_start.
+        assert_eq!(row["greek_status"], "ok");
+        assert!(!row["iv"].is_null());
+        assert!(!row["delta"].is_null());
+        assert_eq!(row["greek_meta"]["t_convention"], "minute_precise");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_ticker_query_minute_uses_trade_date_not_utc_date_for_spot_and_rates(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_minute_utc_boundary_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-15T23:50:00&end=2025-01-16T00:20:00&resolution=minute&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+
+    // Regression intent: should remain computable from trade_date=2025-01-15
+    // data, even when window_start UTC date is 2025-01-16.
+    assert_eq!(array[0]["greek_status"], "ok");
+    assert!(!array[0]["iv"].is_null(), "iv should be present");
+    assert_eq!(array[0]["greek_meta"]["spot_source"], "stock_daily");
+    assert_eq!(array[0]["greek_meta"]["t_convention"], "minute_precise");
+    assert_eq!(array[0]["greek_meta"]["expiry_anchor"], "expiry_date_16_00_ET");
 
     Ok(())
 }
