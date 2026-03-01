@@ -1500,3 +1500,313 @@ async fn option_chain_greeks_below_intrinsic_returns_status(
 
     Ok(())
 }
+
+#[tokio::test]
+async fn option_chain_greeks_no_bracket_returns_status() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day with impossibly high close price (999.0) for S=136, K=140.
+    // BSM cannot bracket the root when the option price exceeds the maximum
+    // theoretical price at sigma=10.
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            999.0::DOUBLE AS open, 999.0::DOUBLE AS high, 999.0::DOUBLE AS low, 999.0::DOUBLE AS close, \
+            200::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Stock spot
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            135.0::DOUBLE AS open, 137.0::DOUBLE AS high, 133.0::DOUBLE AS low, \
+            136.0::DOUBLE AS close, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rates
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0]["greek_status"], "no_bracket",
+        "impossibly high option price should get no_bracket status"
+    );
+    assert!(array[0]["iv"].is_null(), "IV should be null for no_bracket");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_non_finite_input_returns_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day with close=0.0 (zero price triggers non_finite_input
+    // because enrich_row_with_greeks rejects close <= 0.0).
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            0.0::DOUBLE AS open, 0.0::DOUBLE AS high, 0.0::DOUBLE AS low, 0.0::DOUBLE AS close, \
+            200::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Stock spot
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            135.0::DOUBLE AS open, 137.0::DOUBLE AS high, 133.0::DOUBLE AS low, \
+            136.0::DOUBLE AS close, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rates
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0]["greek_status"], "non_finite_input",
+        "zero option price should get non_finite_input status"
+    );
+    assert!(
+        array[0]["iv"].is_null(),
+        "IV should be null for non_finite_input"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_model_error_returns_status() -> Result<(), Box<dyn std::error::Error>>
+{
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day with an invalid right value ('X' instead of 'C' or 'P').
+    // During chain enrichment, row_is_call() returns None for unknown right,
+    // which triggers model_error status.
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'BADTICKER' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            140.0::DOUBLE AS strike, 'X' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            5.50::DOUBLE AS open, 5.70::DOUBLE AS high, 5.30::DOUBLE AS low, 5.50::DOUBLE AS close, \
+            200::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Stock spot
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            135.0::DOUBLE AS open, 137.0::DOUBLE AS high, 133.0::DOUBLE AS low, \
+            136.0::DOUBLE AS close, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rates
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0]["greek_status"], "model_error",
+        "invalid right value should get model_error status"
+    );
+    assert!(
+        array[0]["iv"].is_null(),
+        "IV should be null for model_error"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_ticker_query_minute_near_expiry_approx_returns_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_minute data where the option expires on 2025-01-15 and
+    // window_start is 10 seconds before the 16:00 ET expiry anchor.
+    // January is EST, so 16:00 ET = 21:00 UTC.
+    // window_start = 2025-01-15 20:59:50 UTC = 1736974790000000000 ns
+    // T will be ~10 seconds expressed in years, well below the 1-minute threshold.
+    let option_dir = tmp
+        .path()
+        .join("option_minute")
+        .join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'O:NVDA250115C00140000' AS ticker, \
+                1736974790000000000::BIGINT AS window_start, \
+                5.40::DOUBLE AS open, \
+                5.70::DOUBLE AS high, \
+                5.30::DOUBLE AS low, \
+                5.50::DOUBLE AS close, \
+                200::BIGINT AS volume, \
+                50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Stock spot
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            135.0::DOUBLE AS open, 137.0::DOUBLE AS high, 133.0::DOUBLE AS low, \
+            136.0::DOUBLE AS close, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Rates
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250115C00140000&start=2025-01-15T20:59:00&end=2025-01-15T21:00:00&resolution=minute&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(
+        array[0]["greek_status"], "near_expiry_approx",
+        "option near expiry should get near_expiry_approx status"
+    );
+    // near_expiry_approx still produces an IV value (approximation)
+    assert!(
+        !array[0]["iv"].is_null(),
+        "IV should be present (approximated) for near_expiry_approx"
+    );
+
+    Ok(())
+}

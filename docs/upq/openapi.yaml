@@ -504,7 +504,8 @@ components:
 
     OptionRecord:
       description: |
-        Option ticker query row. When include_greeks=true, Greek fields are appended.
+        Option ticker query row. Day resolution includes underlying/expiry/strike/type
+        fields; minute resolution omits them. When include_greeks=true, Greek fields are appended.
       allOf:
         - type: object
           properties:
@@ -512,6 +513,21 @@ components:
               type: string
               description: Option contract OPRA symbol
               example: "O:NVDA250117C00136000"
+            underlying:
+              type: string
+              description: Underlying asset ticker (day resolution only)
+            expiry:
+              type: string
+              format: date
+              description: Option expiration date (day resolution only)
+            strike:
+              type: number
+              format: double
+              description: Strike price (day resolution only)
+            type:
+              type: string
+              enum: [C, P]
+              description: Option type, aliased from "right" column (day resolution only)
             window_start:
               type: integer
               description: Timestamp in nanoseconds
@@ -553,10 +569,10 @@ components:
               type: number
               format: double
               description: Strike price
-            right:
+            type:
               type: string
               enum: [C, P]
-              description: Option type (Call or Put)
+              description: Option type (Call or Put), aliased from "right" column
             window_start:
               type: integer
             open:

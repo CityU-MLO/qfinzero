@@ -161,7 +161,7 @@ Each option row is enriched with: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`
 - `theta_unit`: per_day
 - `vega_unit`: per_1pct_vol (per 1 percentage point of volatility)
 - `rho_unit`: per_1pct_rate (per 1 percentage point of rate)
-- `t_convention`: calendar_days_over_365 (day-level), or minute-precise for minute resolution
+- `t_convention`: `calendar_days_over_365` (day-level), or `minute_precise` for minute resolution
 - `expiry_anchor`: expiry_date_16_00_ET (4:00 PM Eastern Time on expiry date)
 
 **Example with Greeks (curl):**
