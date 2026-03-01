@@ -34,7 +34,11 @@ fn erf_approx(x: f64) -> f64 {
     let poly = t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5))));
     let erfc_abs = poly * (-ax * ax).exp();
     let erf_abs = 1.0 - erfc_abs.clamp(0.0, 1.0);
-    if x > 0.0 { erf_abs } else { -erf_abs }
+    if x > 0.0 {
+        erf_abs
+    } else {
+        -erf_abs
+    }
 }
 
 /// Standard normal PDF
@@ -90,12 +94,10 @@ pub fn bsm_greeks(s: f64, k: f64, t: f64, r: f64, q: f64, sigma: f64, is_call: b
 
     // Theta in per-year, then convert to per-day by dividing by 365.
     let theta_annual = if is_call {
-        -s * exp_qt * pdf_d1 * sigma / (2.0 * sqrt_t)
-            - r * k * exp_rt * norm_cdf(d2)
+        -s * exp_qt * pdf_d1 * sigma / (2.0 * sqrt_t) - r * k * exp_rt * norm_cdf(d2)
             + q * s * exp_qt * norm_cdf(d1)
     } else {
-        -s * exp_qt * pdf_d1 * sigma / (2.0 * sqrt_t)
-            + r * k * exp_rt * norm_cdf(-d2)
+        -s * exp_qt * pdf_d1 * sigma / (2.0 * sqrt_t) + r * k * exp_rt * norm_cdf(-d2)
             - q * s * exp_qt * norm_cdf(-d1)
     };
     let theta = theta_annual / 365.0;
@@ -110,7 +112,13 @@ pub fn bsm_greeks(s: f64, k: f64, t: f64, r: f64, q: f64, sigma: f64, is_call: b
         -k * t * exp_rt * norm_cdf(-d2) * 0.01
     };
 
-    BsmGreeks { delta, gamma, theta, vega, rho }
+    BsmGreeks {
+        delta,
+        gamma,
+        theta,
+        vega,
+        rho,
+    }
 }
 
 /// Status of an IV inversion attempt.
@@ -151,7 +159,10 @@ pub fn implied_volatility(
         || k <= 0.0
         || market_price <= 0.0
     {
-        return IvResult { iv: None, status: IvStatus::NonFiniteInput };
+        return IvResult {
+            iv: None,
+            status: IvStatus::NonFiniteInput,
+        };
     }
 
     // Near-expiry guard: about 1 minute expressed in years.
@@ -163,15 +174,24 @@ pub fn implied_volatility(
             (k * (-r * t).exp() - s * (-q * t).exp()).max(0.0)
         };
         if market_price < intrinsic - 1e-10 {
-            return IvResult { iv: None, status: IvStatus::BelowIntrinsic };
+            return IvResult {
+                iv: None,
+                status: IvStatus::BelowIntrinsic,
+            };
         }
         let time_value = (market_price - intrinsic).max(0.0);
         if time_value < 1e-10 {
-            return IvResult { iv: Some(0.001), status: IvStatus::NearExpiryApprox };
+            return IvResult {
+                iv: Some(0.001),
+                status: IvStatus::NearExpiryApprox,
+            };
         }
         // Brenner-Subrahmanyam approximation for the near-expiry case.
         let approx_iv = (time_value * (2.0 * PI).sqrt() / (s * t.sqrt())).max(0.001);
-        return IvResult { iv: Some(approx_iv.min(10.0)), status: IvStatus::NearExpiryApprox };
+        return IvResult {
+            iv: Some(approx_iv.min(10.0)),
+            status: IvStatus::NearExpiryApprox,
+        };
     }
 
     // Check below intrinsic for normal time horizons.
@@ -181,11 +201,14 @@ pub fn implied_volatility(
         (k * (-r * t).exp() - s * (-q * t).exp()).max(0.0)
     };
     if market_price < intrinsic - 1e-10 {
-        return IvResult { iv: None, status: IvStatus::BelowIntrinsic };
+        return IvResult {
+            iv: None,
+            status: IvStatus::BelowIntrinsic,
+        };
     }
 
     // Brenner-Subrahmanyam initial guess: sigma ≈ sqrt(2π/T) * C/S
-    let _sigma_init = ((2.0 * PI / t).sqrt() * market_price / s).max(0.01).min(5.0);
+    let _sigma_init = ((2.0 * PI / t).sqrt() * market_price / s).clamp(0.01, 5.0);
 
     let sigma_lo = 0.001_f64;
     let sigma_hi = 10.0_f64;
@@ -199,7 +222,10 @@ pub fn implied_volatility(
 
     // Verify that [sigma_lo, sigma_hi] brackets the root.
     if f_lo * f_hi > 0.0 {
-        return IvResult { iv: None, status: IvStatus::NoBracket };
+        return IvResult {
+            iv: None,
+            status: IvStatus::NoBracket,
+        };
     }
 
     // Brent's method.
@@ -232,7 +258,10 @@ pub fn implied_volatility(
         let xm = 0.5 * (c - b);
 
         if xm.abs() <= tol1 || fb.abs() < tol {
-            return IvResult { iv: Some(b), status: IvStatus::Ok };
+            return IvResult {
+                iv: Some(b),
+                status: IvStatus::Ok,
+            };
         }
 
         if e.abs() >= tol1 && fa.abs() > fb.abs() {
@@ -247,9 +276,7 @@ pub fn implied_volatility(
                 // Inverse quadratic interpolation.
                 let q_fa_fc = fa / fc;
                 let r_val = fb / fc;
-                let p = s_val
-                    * (2.0 * xm * q_fa_fc * (q_fa_fc - r_val)
-                        - (b - a) * (r_val - 1.0));
+                let p = s_val * (2.0 * xm * q_fa_fc * (q_fa_fc - r_val) - (b - a) * (r_val - 1.0));
                 let q_local = (q_fa_fc - 1.0) * (r_val - 1.0) * (s_val - 1.0);
                 (p, q_local)
             };
@@ -284,7 +311,10 @@ pub fn implied_volatility(
     }
 
     // Failed to converge within max_iter iterations.
-    IvResult { iv: None, status: IvStatus::NoBracket }
+    IvResult {
+        iv: None,
+        status: IvStatus::NoBracket,
+    }
 }
 
 /// Compute implied volatility and all BSM Greeks from a market price in a single call.

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use serde_json::json;
 use upq_service::rates_curve::{CurveError, RatesCurve};
 
@@ -50,9 +52,9 @@ fn curve_interpolation_midpoint() {
 #[test]
 fn curve_interpolation_near_endpoints() {
     let curve = RatesCurve::from_points(vec![
-        (0.25, 0.03),  // 3M = 3%
-        (1.0, 0.035),  // 1Y = 3.5%
-        (5.0, 0.04),   // 5Y = 4%
+        (0.25, 0.03), // 3M = 3%
+        (1.0, 0.035), // 1Y = 3.5%
+        (5.0, 0.04),  // 5Y = 4%
     ])
     .expect("should create curve");
 
@@ -64,8 +66,8 @@ fn curve_interpolation_near_endpoints() {
 
 #[test]
 fn curve_clamps_below_min_tenor() {
-    let curve = RatesCurve::from_points(vec![(0.25, 0.03), (1.0, 0.04)])
-        .expect("should create curve");
+    let curve =
+        RatesCurve::from_points(vec![(0.25, 0.03), (1.0, 0.04)]).expect("should create curve");
 
     // T below minimum tenor should clamp to min rate
     let r = curve.interpolate(0.01).expect("should interpolate");
@@ -74,8 +76,8 @@ fn curve_clamps_below_min_tenor() {
 
 #[test]
 fn curve_clamps_above_max_tenor() {
-    let curve = RatesCurve::from_points(vec![(1.0, 0.04), (10.0, 0.05)])
-        .expect("should create curve");
+    let curve =
+        RatesCurve::from_points(vec![(1.0, 0.04), (10.0, 0.05)]).expect("should create curve");
 
     // T above maximum tenor should clamp to max rate
     let r = curve.interpolate(50.0).expect("should interpolate");
@@ -84,12 +86,8 @@ fn curve_clamps_above_max_tenor() {
 
 #[test]
 fn curve_exact_tenor_point() {
-    let curve = RatesCurve::from_points(vec![
-        (1.0, 0.04),
-        (2.0, 0.045),
-        (5.0, 0.05),
-    ])
-    .expect("should create curve");
+    let curve = RatesCurve::from_points(vec![(1.0, 0.04), (2.0, 0.045), (5.0, 0.05)])
+        .expect("should create curve");
 
     let r = curve.interpolate(2.0).expect("should interpolate");
     assert_near(r, 0.045, 1e-10, "exact tenor point");

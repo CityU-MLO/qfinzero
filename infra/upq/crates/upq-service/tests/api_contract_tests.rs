@@ -33,8 +33,8 @@ async fn freshness_endpoint_returns_sources_for_empty_storage(
 }
 
 #[tokio::test]
-async fn freshness_endpoint_detects_latest_partition_date(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn freshness_endpoint_detects_latest_partition_date() -> Result<(), Box<dyn std::error::Error>>
+{
     let tmp = TempDir::new()?;
 
     // Create two stock_minute partitions with parquet files
@@ -1015,8 +1015,8 @@ fn create_greeks_test_env() -> Result<TempDir, Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-async fn option_chain_greeks_disabled_returns_legacy_fields() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn option_chain_greeks_disabled_returns_legacy_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
     let tmp = create_greeks_test_env()?;
     let app = upq_service::app::build_router_with_storage_root(tmp.path());
     let request = Request::builder()
@@ -1027,7 +1027,9 @@ async fn option_chain_greeks_disabled_returns_legacy_fields() -> Result<(), Box<
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
     assert_eq!(array.len(), 2);
     // Should NOT have greeks fields
     assert!(array[0].get("iv").is_none());
@@ -1050,7 +1052,9 @@ async fn option_chain_greeks_enabled_returns_greek_fields() -> Result<(), Box<dy
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
     assert_eq!(array.len(), 2);
 
     // First row: call option (expiry 2025-02-21 sorts first, strike 130 < 140 so put comes first by strike)
@@ -1065,10 +1069,18 @@ async fn option_chain_greeks_enabled_returns_greek_fields() -> Result<(), Box<dy
     assert!(call_row.get("theta").is_some(), "should have theta field");
     assert!(call_row.get("vega").is_some(), "should have vega field");
     assert!(call_row.get("rho").is_some(), "should have rho field");
-    assert!(call_row.get("greek_status").is_some(), "should have greek_status");
-    assert!(call_row.get("greek_meta").is_some(), "should have greek_meta");
+    assert!(
+        call_row.get("greek_status").is_some(),
+        "should have greek_status"
+    );
+    assert!(
+        call_row.get("greek_meta").is_some(),
+        "should have greek_meta"
+    );
 
-    let status = call_row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    let status = call_row["greek_status"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("expected string"))?;
     assert_eq!(status, "ok");
 
     // Check meta fields
@@ -1081,18 +1093,32 @@ async fn option_chain_greeks_enabled_returns_greek_fields() -> Result<(), Box<dy
     assert_eq!(meta["rho_unit"], "per_1pct_rate");
 
     // IV should be a positive number
-    let iv = call_row["iv"].as_f64().ok_or_else(|| std::io::Error::other("iv should be a number"))?;
+    let iv = call_row["iv"]
+        .as_f64()
+        .ok_or_else(|| std::io::Error::other("iv should be a number"))?;
     assert!(iv > 0.0 && iv < 10.0, "iv={iv} should be reasonable");
 
     // Delta for a call should be positive
-    let delta = call_row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
-    assert!(delta > 0.0 && delta < 1.0, "call delta={delta} should be in (0,1)");
+    let delta = call_row["delta"]
+        .as_f64()
+        .ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    assert!(
+        delta > 0.0 && delta < 1.0,
+        "call delta={delta} should be in (0,1)"
+    );
 
     // Put row checks
-    let put_status = put_row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    let put_status = put_row["greek_status"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("expected string"))?;
     assert_eq!(put_status, "ok");
-    let put_delta = put_row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
-    assert!(put_delta > -1.0 && put_delta < 0.0, "put delta={put_delta} should be in (-1,0)");
+    let put_delta = put_row["delta"]
+        .as_f64()
+        .ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    assert!(
+        put_delta > -1.0 && put_delta < 0.0,
+        "put delta={put_delta} should be in (-1,0)"
+    );
 
     Ok(())
 }
@@ -1152,7 +1178,9 @@ async fn option_chain_greeks_missing_spot_returns_missing_spot_status(
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
     assert_eq!(array.len(), 1);
     assert_eq!(array[0]["greek_status"], "missing_spot");
     assert!(array[0]["iv"].is_null());
@@ -1202,7 +1230,9 @@ async fn option_chain_greeks_missing_rate_returns_missing_rate_status(
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
     assert_eq!(array.len(), 1);
     assert_eq!(array[0]["greek_status"], "missing_rate");
     assert!(array[0]["iv"].is_null());
@@ -1222,17 +1252,23 @@ async fn option_ticker_query_day_greeks_enabled() -> Result<(), Box<dyn std::err
     assert_eq!(response.status(), StatusCode::OK);
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
     let payload: Value = serde_json::from_slice(&bytes)?;
-    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
     assert_eq!(array.len(), 1);
 
     let row = &array[0];
     assert!(row.get("iv").is_some());
     assert!(row.get("greek_status").is_some());
-    let status = row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    let status = row["greek_status"]
+        .as_str()
+        .ok_or_else(|| std::io::Error::other("expected string"))?;
     assert_eq!(status, "ok");
 
     // Call delta should be positive
-    let delta = row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    let delta = row["delta"]
+        .as_f64()
+        .ok_or_else(|| std::io::Error::other("delta should be a number"))?;
     assert!(delta > 0.0 && delta < 1.0, "call delta={delta}");
 
     Ok(())

@@ -57,6 +57,22 @@ Date: 2026-02-10
 - Result: PASS
 - Coverage intent: manifest path normalization prevents duplicate ingest for equivalent file paths
 
+15. `cargo test -p upq-service --test greeks_math_tests`
+- Result: PASS (26 tests)
+- Coverage intent: BSM pricing, Greeks signs/magnitudes, IV round-trip accuracy,
+  error status paths (below_intrinsic, non_finite, near_expiry), norm_cdf properties
+
+16. `cargo test -p upq-service --test rates_curve_tests`
+- Result: PASS (12 tests)
+- Coverage intent: yield curve parsing, linear interpolation, boundary clamping,
+  missing/partial data handling, null value skipping
+
+17. `cargo test -p upq-service --test api_contract_tests` (Greeks integration)
+- Result: PASS (33 tests total, 7 new Greeks tests)
+- Coverage intent: include_greeks=false preserves legacy, include_greeks=true
+  enriches rows with iv/delta/greeks/meta, invalid model/price_field returns 400,
+  missing spot/rate returns correct status, ticker_query day resolution works
+
 ## Implemented Test Cases
 
 ### `upq-core`
@@ -83,6 +99,45 @@ Date: 2026-02-10
   - `/health` returns `{"status":"ok"}`
   - non-finite option chain strike filters are rejected with 400
   - rates cache retains recently-used key after crossing capacity boundary
+
+- `greeks_math_tests.rs`
+  - BSM price ATM/ITM/OTM for calls and puts
+  - put-call parity holds within 1e-8
+  - call delta in (0,1), put delta in (-1,0)
+  - gamma positive and equal for call/put
+  - theta negative for ATM call
+  - vega positive and equal for call/put
+  - rho positive for call, negative for put
+  - IV round-trip recovery within 1e-8 for call and put
+  - IV below intrinsic returns BelowIntrinsic status
+  - IV non-finite input returns NonFiniteInput status
+  - IV negative price returns NonFiniteInput status
+  - IV near expiry returns NearExpiryApprox with finite value
+  - IV convergence verified for 4 test cases
+  - compute_greeks full integration returns all fields
+  - compute_greeks below intrinsic returns None greeks
+  - norm_cdf symmetry, zero, extremes
+- `rates_curve_tests.rs`
+  - JSON row parsing with all 7 tenors
+  - linear interpolation at midpoint
+  - interpolation near endpoints
+  - clamp below min tenor
+  - clamp above max tenor
+  - exact tenor point hit
+  - single point curve (returns same rate for any T)
+  - missing data returns error
+  - empty points returns error
+  - partial data interpolation
+  - null value skipping
+  - full interpolation across all tenor ranges
+- `api_contract_tests.rs` (Greeks tests)
+  - include_greeks=false returns legacy fields only (no iv/greek_status)
+  - include_greeks=true returns all Greek fields + meta for both call and put
+  - invalid greek_model returns 400
+  - missing spot data returns missing_spot status
+  - missing rate data returns missing_rate status
+  - ticker_query day resolution with greeks returns ok status + positive call delta
+  - invalid greek_price_field returns 400
 
 ### `upq-ingest`
 - `manifest_tests.rs`

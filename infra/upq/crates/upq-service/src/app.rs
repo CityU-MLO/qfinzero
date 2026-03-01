@@ -10,8 +10,6 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use tower_http::trace::{self, TraceLayer};
-use tracing::Level;
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
@@ -20,6 +18,8 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
+use tower_http::trace::{self, TraceLayer};
+use tracing::Level;
 use upq_core::rates::map_tenor_aliases;
 use upq_core::rates::split_by_month;
 use upq_core::sql_builder::build_tenor_projection;
@@ -460,7 +460,11 @@ async fn option() -> axum::response::Response {
 }
 
 async fn health() -> axum::response::Response {
-    (StatusCode::OK, Json(json!({ "status": "ok", "version": "0.1.0" }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "version": "0.1.0" })),
+    )
+        .into_response()
 }
 
 async fn health_freshness(State(state): State<AppState>) -> axum::response::Response {
@@ -540,18 +544,14 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 if *has_window_start {
                     if let Some(latest_ts) = row.get("latest_timestamp") {
                         if !latest_ts.is_null() {
-                            source_info
-                                .insert("latest_timestamp".to_string(), latest_ts.clone());
+                            source_info.insert("latest_timestamp".to_string(), latest_ts.clone());
                         }
                     }
                 }
             }
         }
 
-        source_info.insert(
-            "unique_key_label".to_string(),
-            json!(unique_key_label),
-        );
+        source_info.insert("unique_key_label".to_string(), json!(unique_key_label));
         source_info.insert("partition_count".to_string(), json!(partition_count));
 
         sources.insert(dataset_name.to_string(), Value::Object(source_info));
@@ -573,10 +573,7 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 }
                 // 7 standard tenors: 1M, 3M, 1Y, 2Y, 5Y, 10Y, 30Y
                 rates_info.insert("unique_keys".to_string(), json!(7));
-                rates_info.insert(
-                    "unique_key_label".to_string(),
-                    json!("tenors"),
-                );
+                rates_info.insert("unique_key_label".to_string(), json!("tenors"));
                 sources.insert("rates".to_string(), Value::Object(rates_info));
             }
         }
@@ -895,17 +892,14 @@ fn ensure_greeks_columns_ticker_day(base_projection: &str) -> String {
 }
 
 /// Enrich chain query rows (day-level) with Greeks.
-fn enrich_chain_rows_day(
-    storage_root: &Path,
-    date: &str,
-    underlying: &str,
-    rows: &mut [Value],
-) {
+fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows: &mut [Value]) {
     // Per-request caches
     let spot = fetch_spot_daily(storage_root, underlying, date);
     let rates_row = fetch_rates_row(storage_root, date);
 
-    let curve = rates_row.as_ref().and_then(|r| RatesCurve::from_json_row(r).ok());
+    let curve = rates_row
+        .as_ref()
+        .and_then(|r| RatesCurve::from_json_row(r).ok());
 
     let observation_date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
 
@@ -918,7 +912,12 @@ fn enrich_chain_rows_day(
         let spot_val = match spot {
             Some(s) => s,
             None => {
-                let result = null_greek_result(GreekStatus::MissingSpot, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -927,7 +926,12 @@ fn enrich_chain_rows_day(
         let curve_ref = match curve.as_ref() {
             Some(c) => c,
             None => {
-                let result = null_greek_result(GreekStatus::MissingRate, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -936,7 +940,12 @@ fn enrich_chain_rows_day(
         let is_call = match row_is_call(row) {
             Some(v) => v,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -946,7 +955,12 @@ fn enrich_chain_rows_day(
         let expiry_str = match row.get("expiry").and_then(Value::as_str) {
             Some(e) => e.to_string(),
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -955,7 +969,12 @@ fn enrich_chain_rows_day(
         let expiry_date = match NaiveDate::parse_from_str(&expiry_str, "%Y-%m-%d").ok() {
             Some(d) => d,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -964,7 +983,12 @@ fn enrich_chain_rows_day(
         let obs_date = match observation_date {
             Some(d) => d,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1005,12 +1029,7 @@ fn ensure_greeks_columns_ticker_minute(base_projection: &str) -> String {
 /// Enrich ticker query rows with Greeks.
 /// For day resolution: similar to chain but needs to parse underlying/expiry from the OPRA contract.
 /// For minute resolution: uses window_start for T calculation.
-fn enrich_ticker_rows(
-    storage_root: &Path,
-    contract: &str,
-    resolution: &str,
-    rows: &mut [Value],
-) {
+fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, rows: &mut [Value]) {
     // Parse the OPRA contract to extract underlying, expiry, and right
     let parsed = parse_opra_contract(contract);
     let (underlying, expiry_date, is_call) = match parsed {
@@ -1019,9 +1038,18 @@ fn enrich_ticker_rows(
             // Can't parse contract — mark all rows as model_error
             for row_val in rows.iter_mut() {
                 if let Some(row) = row_val.as_object_mut() {
-                    let t_conv = if resolution == "minute" { "minute_precise" } else { "calendar_days_over_365" };
-                    let anchor = if resolution == "minute" { "expiry_date_16_00_ET" } else { "expiry_date_eod" };
-                    let result = null_greek_result(GreekStatus::ModelError, "stock_daily", t_conv, anchor);
+                    let t_conv = if resolution == "minute" {
+                        "minute_precise"
+                    } else {
+                        "calendar_days_over_365"
+                    };
+                    let anchor = if resolution == "minute" {
+                        "expiry_date_16_00_ET"
+                    } else {
+                        "expiry_date_eod"
+                    };
+                    let result =
+                        null_greek_result(GreekStatus::ModelError, "stock_daily", t_conv, anchor);
                     merge_greek_result(row, &result);
                 }
             }
@@ -1085,7 +1113,12 @@ fn enrich_ticker_rows_day(
         let obs_date_str = match obs_date_str {
             Some(d) => d,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1094,7 +1127,12 @@ fn enrich_ticker_rows_day(
         let obs_date = match NaiveDate::parse_from_str(&obs_date_str, "%Y-%m-%d").ok() {
             Some(d) => d,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1107,23 +1145,31 @@ fn enrich_ticker_rows_day(
         let spot = match spot_val {
             Some(s) => s,
             None => {
-                let result = null_greek_result(GreekStatus::MissingSpot, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
         };
 
-        let curve = rates_cache
-            .entry(obs_date_str.clone())
-            .or_insert_with(|| {
-                fetch_rates_row(storage_root, &obs_date_str)
-                    .and_then(|r| RatesCurve::from_json_row(&r).ok())
-            });
+        let curve = rates_cache.entry(obs_date_str.clone()).or_insert_with(|| {
+            fetch_rates_row(storage_root, &obs_date_str)
+                .and_then(|r| RatesCurve::from_json_row(&r).ok())
+        });
 
         let curve_ref = match curve.as_ref() {
             Some(c) => c,
             None => {
-                let result = null_greek_result(GreekStatus::MissingRate, "stock_daily", "calendar_days_over_365", "expiry_date_eod");
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1137,8 +1183,14 @@ fn enrich_ticker_rows_day(
         };
 
         enrich_row_with_greeks(
-            row, spot, curve_ref, t_years, is_call,
-            "stock_daily", "calendar_days_over_365", "expiry_date_eod",
+            row,
+            spot,
+            curve_ref,
+            t_years,
+            is_call,
+            "stock_daily",
+            "calendar_days_over_365",
+            "expiry_date_eod",
         );
     }
 }
@@ -1166,7 +1218,12 @@ fn enrich_ticker_rows_minute(
         None => {
             for row_val in rows.iter_mut() {
                 if let Some(row) = row_val.as_object_mut() {
-                    let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "minute_precise", "expiry_date_16_00_ET");
+                    let result = null_greek_result(
+                        GreekStatus::ModelError,
+                        "stock_daily",
+                        "minute_precise",
+                        "expiry_date_16_00_ET",
+                    );
                     merge_greek_result(row, &result);
                 }
             }
@@ -1184,7 +1241,12 @@ fn enrich_ticker_rows_minute(
         let window_start_ns = match row.get("window_start").and_then(Value::as_i64) {
             Some(ns) => ns,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "minute_precise", "expiry_date_16_00_ET");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1203,7 +1265,12 @@ fn enrich_ticker_rows_minute(
         let trade_date_str = match trade_date_str {
             Some(d) => d,
             None => {
-                let result = null_greek_result(GreekStatus::ModelError, "stock_daily", "minute_precise", "expiry_date_16_00_ET");
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1217,7 +1284,12 @@ fn enrich_ticker_rows_minute(
         let spot = match spot_val {
             Some(s) => s,
             None => {
-                let result = null_greek_result(GreekStatus::MissingSpot, "stock_daily", "minute_precise", "expiry_date_16_00_ET");
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
@@ -1233,15 +1305,26 @@ fn enrich_ticker_rows_minute(
         let curve_ref = match curve.as_ref() {
             Some(c) => c,
             None => {
-                let result = null_greek_result(GreekStatus::MissingRate, "stock_daily", "minute_precise", "expiry_date_16_00_ET");
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
                 merge_greek_result(row, &result);
                 continue;
             }
         };
 
         enrich_row_with_greeks(
-            row, spot, curve_ref, t_years, is_call,
-            "stock_daily", "minute_precise", "expiry_date_16_00_ET",
+            row,
+            spot,
+            curve_ref,
+            t_years,
+            is_call,
+            "stock_daily",
+            "minute_precise",
+            "expiry_date_16_00_ET",
         );
     }
 }
@@ -1314,7 +1397,12 @@ fn iv_status_to_greek_status(status: &IvStatus) -> GreekStatus {
 }
 
 /// Build a GreekResult with null fields and the given status.
-fn null_greek_result(status: GreekStatus, spot_source: &'static str, t_convention: &'static str, expiry_anchor: &'static str) -> GreekResult {
+fn null_greek_result(
+    status: GreekStatus,
+    spot_source: &'static str,
+    t_convention: &'static str,
+    expiry_anchor: &'static str,
+) -> GreekResult {
     GreekResult {
         iv: None,
         delta: None,
@@ -1340,6 +1428,7 @@ fn null_greek_result(status: GreekStatus, spot_source: &'static str, t_conventio
 
 /// Enrich a single option row with Greeks fields.
 /// Returns the row with Greek fields appended.
+#[allow(clippy::too_many_arguments)]
 fn enrich_row_with_greeks(
     row: &mut Map<String, Value>,
     spot: f64,
@@ -1353,7 +1442,12 @@ fn enrich_row_with_greeks(
     let close = match row.get("close").and_then(Value::as_f64) {
         Some(c) if c.is_finite() && c > 0.0 => c,
         _ => {
-            let result = null_greek_result(GreekStatus::NonFiniteInput, spot_source, t_convention, expiry_anchor);
+            let result = null_greek_result(
+                GreekStatus::NonFiniteInput,
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
             merge_greek_result(row, &result);
             return;
         }
@@ -1362,7 +1456,12 @@ fn enrich_row_with_greeks(
     let strike = match row.get("strike").and_then(Value::as_f64) {
         Some(k) if k.is_finite() && k > 0.0 => k,
         _ => {
-            let result = null_greek_result(GreekStatus::NonFiniteInput, spot_source, t_convention, expiry_anchor);
+            let result = null_greek_result(
+                GreekStatus::NonFiniteInput,
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
             merge_greek_result(row, &result);
             return;
         }
@@ -1371,7 +1470,12 @@ fn enrich_row_with_greeks(
     let r = match curve.interpolate(t_years) {
         Ok(rate) => rate,
         Err(_) => {
-            let result = null_greek_result(GreekStatus::MissingRate, spot_source, t_convention, expiry_anchor);
+            let result = null_greek_result(
+                GreekStatus::MissingRate,
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
             merge_greek_result(row, &result);
             return;
         }
@@ -1422,19 +1526,56 @@ fn enrich_row_with_greeks(
 
 /// Merge a GreekResult into a row's JSON map.
 fn merge_greek_result(row: &mut Map<String, Value>, result: &GreekResult) {
-    row.insert("iv".to_string(), match result.iv { Some(v) => json!(v), None => Value::Null });
-    row.insert("delta".to_string(), match result.delta { Some(v) => json!(v), None => Value::Null });
-    row.insert("gamma".to_string(), match result.gamma { Some(v) => json!(v), None => Value::Null });
-    row.insert("theta".to_string(), match result.theta { Some(v) => json!(v), None => Value::Null });
-    row.insert("vega".to_string(), match result.vega { Some(v) => json!(v), None => Value::Null });
-    row.insert("rho".to_string(), match result.rho { Some(v) => json!(v), None => Value::Null });
+    row.insert(
+        "iv".to_string(),
+        match result.iv {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "delta".to_string(),
+        match result.delta {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "gamma".to_string(),
+        match result.gamma {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "theta".to_string(),
+        match result.theta {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "vega".to_string(),
+        match result.vega {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "rho".to_string(),
+        match result.rho {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
     row.insert("greek_status".to_string(), json!(result.greek_status));
     row.insert("greek_meta".to_string(), json!(result.greek_meta));
 }
 
 /// Determine if a row represents a call based on the "type" or "right" field.
 fn row_is_call(row: &Map<String, Value>) -> Option<bool> {
-    let right_val = row.get("type")
+    let right_val = row
+        .get("type")
         .or_else(|| row.get("right"))
         .and_then(Value::as_str)?;
     match right_val {

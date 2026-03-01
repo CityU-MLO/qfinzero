@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use upq_service::greeks::*;
 
 /// Helper: assert float equality within tolerance.
@@ -49,7 +51,10 @@ fn bsm_price_deep_otm_call() {
 fn bsm_price_deep_itm_put() {
     // Deep ITM put: S=50, K=100, T=0.5, r=0.03, q=0, sigma=0.25
     let price = bsm_price(50.0, 100.0, 0.5, 0.03, 0.0, 0.25, false);
-    assert!(price > 48.0, "deep ITM put should be above intrinsic minus discount");
+    assert!(
+        price > 48.0,
+        "deep ITM put should be above intrinsic minus discount"
+    );
 }
 
 #[test]
@@ -85,7 +90,11 @@ fn put_call_parity_holds() {
 #[test]
 fn greeks_delta_call_between_0_and_1() {
     let g = bsm_greeks(100.0, 100.0, 1.0, 0.05, 0.0, 0.20, true);
-    assert!(g.delta > 0.0 && g.delta < 1.0, "call delta should be in (0,1), got {}", g.delta);
+    assert!(
+        g.delta > 0.0 && g.delta < 1.0,
+        "call delta should be in (0,1), got {}",
+        g.delta
+    );
     // ATM call delta should be near 0.5 (slightly above due to drift)
     assert_near(g.delta, 0.6368, 0.01, "ATM call delta");
 }
@@ -93,7 +102,11 @@ fn greeks_delta_call_between_0_and_1() {
 #[test]
 fn greeks_delta_put_between_neg1_and_0() {
     let g = bsm_greeks(100.0, 100.0, 1.0, 0.05, 0.0, 0.20, false);
-    assert!(g.delta > -1.0 && g.delta < 0.0, "put delta should be in (-1,0), got {}", g.delta);
+    assert!(
+        g.delta > -1.0 && g.delta < 0.0,
+        "put delta should be in (-1,0), got {}",
+        g.delta
+    );
 }
 
 #[test]
@@ -108,7 +121,11 @@ fn greeks_gamma_positive() {
 #[test]
 fn greeks_theta_call_negative() {
     let g = bsm_greeks(100.0, 100.0, 1.0, 0.05, 0.0, 0.20, true);
-    assert!(g.theta < 0.0, "theta per day should be negative for ATM call, got {}", g.theta);
+    assert!(
+        g.theta < 0.0,
+        "theta per day should be negative for ATM call, got {}",
+        g.theta
+    );
 }
 
 #[test]
@@ -226,7 +243,12 @@ fn iv_convergence_within_100_iterations() {
             "should converge for s={s}, k={k}, t={t}, r={r}, sigma={sigma}"
         );
         let recovered = result.iv.expect("should have IV");
-        assert_near(recovered, sigma, 1e-6, &format!("IV accuracy for s={s}, k={k}"));
+        assert_near(
+            recovered,
+            sigma,
+            1e-6,
+            &format!("IV accuracy for s={s}, k={k}"),
+        );
     }
 }
 
