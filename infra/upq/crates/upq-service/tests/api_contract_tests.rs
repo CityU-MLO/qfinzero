@@ -954,3 +954,299 @@ async fn rates_endpoint_treats_blank_tenors_as_all_columns(
 
     Ok(())
 }
+
+// ============== Greeks Integration Tests ==============
+
+/// Helper: create a full test environment with option_day, stock_daily, and rates data.
+fn create_greeks_test_env() -> Result<TempDir, Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day partition
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('O:NVDA250221C00140000', 'NVDA', DATE '2025-02-21', 140.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.40::DOUBLE, 5.70::DOUBLE, 5.30::DOUBLE, 5.50::DOUBLE, 200::BIGINT, 50::BIGINT),\
+                ('O:NVDA250221P00130000', 'NVDA', DATE '2025-02-21', 130.0::DOUBLE, 'P', 1736899200000000000::BIGINT, 2.20::DOUBLE, 2.50::DOUBLE, 2.10::DOUBLE, 2.30::DOUBLE, 150::BIGINT, 30::BIGINT)\
+            ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, open, high, low, close, volume, transactions)\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Create stock_daily partition
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT \
+                'NVDA' AS ticker, \
+                DATE '2025-01-15' AS trade_date, \
+                135.0::DOUBLE AS open, \
+                137.0::DOUBLE AS high, \
+                133.0::DOUBLE AS low, \
+                136.0::DOUBLE AS close, \
+                5000::BIGINT AS volume, \
+                50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Create rates data
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                (DATE '2025-01-15', 4.53::DOUBLE, 4.35::DOUBLE, 4.22::DOUBLE, 4.28::DOUBLE, 4.43::DOUBLE, 4.60::DOUBLE, 4.82::DOUBLE)\
+            ) AS t(date, yield_1_month, yield_3_month, yield_1_year, yield_2_year, yield_5_year, yield_10_year, yield_30_year)\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    Ok(tmp)
+}
+
+#[tokio::test]
+async fn option_chain_greeks_disabled_returns_legacy_fields() -> Result<(), Box<dyn std::error::Error>>
+{
+    let tmp = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=false")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+    // Should NOT have greeks fields
+    assert!(array[0].get("iv").is_none());
+    assert!(array[0].get("greek_status").is_none());
+    assert!(array[0].get("greek_meta").is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_enabled_returns_greek_fields() -> Result<(), Box<dyn std::error::Error>>
+{
+    let tmp = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+
+    // First row: call option (expiry 2025-02-21 sorts first, strike 130 < 140 so put comes first by strike)
+    // Actually ordering is by expiry then strike, so 130 comes before 140
+    let put_row = &array[0];
+    let call_row = &array[1];
+
+    // Call row checks
+    assert!(call_row.get("iv").is_some(), "should have iv field");
+    assert!(call_row.get("delta").is_some(), "should have delta field");
+    assert!(call_row.get("gamma").is_some(), "should have gamma field");
+    assert!(call_row.get("theta").is_some(), "should have theta field");
+    assert!(call_row.get("vega").is_some(), "should have vega field");
+    assert!(call_row.get("rho").is_some(), "should have rho field");
+    assert!(call_row.get("greek_status").is_some(), "should have greek_status");
+    assert!(call_row.get("greek_meta").is_some(), "should have greek_meta");
+
+    let status = call_row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    assert_eq!(status, "ok");
+
+    // Check meta fields
+    let meta = &call_row["greek_meta"];
+    assert_eq!(meta["model"], "bsm_european");
+    assert_eq!(meta["style_assumption"], "European");
+    assert_eq!(meta["dividend_assumption"], "q0");
+    assert_eq!(meta["theta_unit"], "per_day");
+    assert_eq!(meta["vega_unit"], "per_1pct_vol");
+    assert_eq!(meta["rho_unit"], "per_1pct_rate");
+
+    // IV should be a positive number
+    let iv = call_row["iv"].as_f64().ok_or_else(|| std::io::Error::other("iv should be a number"))?;
+    assert!(iv > 0.0 && iv < 10.0, "iv={iv} should be reasonable");
+
+    // Delta for a call should be positive
+    let delta = call_row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    assert!(delta > 0.0 && delta < 1.0, "call delta={delta} should be in (0,1)");
+
+    // Put row checks
+    let put_status = put_row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    assert_eq!(put_status, "ok");
+    let put_delta = put_row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    assert!(put_delta > -1.0 && put_delta < 0.0, "put delta={put_delta} should be in (-1,0)");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_invalid_model_returns_400() -> Result<(), Box<dyn std::error::Error>> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true&greek_model=binomial")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_missing_spot_returns_missing_spot_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day but NO stock_daily
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            5.50::DOUBLE AS close, 200::BIGINT AS volume\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    // Create rates but no stock
+    let rates_dir = tmp.path().join("rates");
+    fs::create_dir_all(&rates_dir)?;
+    let rates_parquet = rates_dir.join("rates.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT DATE '2025-01-15' AS date, 4.53::DOUBLE AS yield_1_month, 4.35::DOUBLE AS yield_3_month, \
+            4.22::DOUBLE AS yield_1_year, 4.28::DOUBLE AS yield_2_year, 4.43::DOUBLE AS yield_5_year, \
+            4.60::DOUBLE AS yield_10_year, 4.82::DOUBLE AS yield_30_year\
+         ) TO '{}' (FORMAT PARQUET)",
+        rates_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(array[0]["greek_status"], "missing_spot");
+    assert!(array[0]["iv"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_missing_rate_returns_missing_rate_status(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let conn = Connection::open_in_memory()?;
+
+    // Create option_day and stock_daily but NO rates
+    let option_dir = tmp.path().join("option_day").join("trade_date=2025-01-15");
+    fs::create_dir_all(&option_dir)?;
+    let option_parquet = option_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            5.50::DOUBLE AS close, 200::BIGINT AS volume\
+         ) TO '{}' (FORMAT PARQUET)",
+        option_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let stock_dir = tmp.path().join("stock_daily").join("trade_date=2025-01-15");
+    fs::create_dir_all(&stock_dir)?;
+    let stock_parquet = stock_dir.join("data.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT 'NVDA' AS ticker, DATE '2025-01-15' AS trade_date, \
+            136.0::DOUBLE AS close, 136.0::DOUBLE AS open, 137.0::DOUBLE AS high, \
+            133.0::DOUBLE AS low, 5000::BIGINT AS volume, 50::BIGINT AS transactions\
+         ) TO '{}' (FORMAT PARQUET)",
+        stock_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+    assert_eq!(array[0]["greek_status"], "missing_rate");
+    assert!(array[0]["iv"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_ticker_query_day_greeks_enabled() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-15&end=2025-01-15&resolution=day&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload.as_array().ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 1);
+
+    let row = &array[0];
+    assert!(row.get("iv").is_some());
+    assert!(row.get("greek_status").is_some());
+    let status = row["greek_status"].as_str().ok_or_else(|| std::io::Error::other("expected string"))?;
+    assert_eq!(status, "ok");
+
+    // Call delta should be positive
+    let delta = row["delta"].as_f64().ok_or_else(|| std::io::Error::other("delta should be a number"))?;
+    assert!(delta > 0.0 && delta < 1.0, "call delta={delta}");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_ticker_query_greeks_invalid_price_field_returns_400(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = upq_service::app::build_router();
+    let request = Request::builder()
+        .uri("/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-15&end=2025-01-15&include_greeks=true&greek_price_field=mid")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
