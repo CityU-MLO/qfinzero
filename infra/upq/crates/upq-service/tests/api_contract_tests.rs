@@ -33,8 +33,8 @@ async fn freshness_endpoint_returns_sources_for_empty_storage(
 }
 
 #[tokio::test]
-async fn freshness_endpoint_detects_latest_partition_date() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn freshness_endpoint_detects_latest_partition_date(
+) -> Result<(), Box<dyn std::error::Error>> {
     let tmp = TempDir::new()?;
 
     // Create two stock_minute partitions with parquet files
