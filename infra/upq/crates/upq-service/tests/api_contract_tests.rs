@@ -723,7 +723,7 @@ async fn option_chain_query_treats_blank_fields_as_default_projection(
                 DATE '2025-01-17' AS expiry, \
                 136.0::DOUBLE AS strike, \
                 'C' AS \"right\", \
-                1736899200000000000::BIGINT AS window_start, \
+                1736974800000000000::BIGINT AS window_start, \
                 3.2::DOUBLE AS close, \
                 100::BIGINT AS volume\
          ) TO '{}' (FORMAT PARQUET)",
@@ -761,8 +761,8 @@ async fn option_chain_query_reads_filtered_rows_from_parquet(
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250117C00136000', 'NVDA', DATE '2025-01-17', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 3.2::DOUBLE, 100::BIGINT),\
-                ('O:NVDA250117P00130000', 'NVDA', DATE '2025-01-17', 130.0::DOUBLE, 'P', 1736899200000000000::BIGINT, 1.8::DOUBLE, 80::BIGINT)\
+                ('O:NVDA250117C00136000', 'NVDA', DATE '2025-01-17', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 3.2::DOUBLE, 100::BIGINT),\
+                ('O:NVDA250117P00130000', 'NVDA', DATE '2025-01-17', 130.0::DOUBLE, 'P', 1736974800000000000::BIGINT, 1.8::DOUBLE, 80::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
          ) TO '{}' (FORMAT PARQUET)",
         parquet_path.to_string_lossy().replace('\'', "''")
@@ -816,8 +816,8 @@ async fn option_chain_query_falls_back_to_nearest_expiry_when_exact_missing(
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
-                ('O:NVDA250214C00136000', 'NVDA', DATE '2025-02-14', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.6::DOUBLE, 115::BIGINT)\
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250214C00136000', 'NVDA', DATE '2025-02-14', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 4.6::DOUBLE, 115::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
          ) TO '{}' (FORMAT PARQUET)",
         parquet_path.to_string_lossy().replace('\'', "''")
@@ -858,8 +858,8 @@ async fn option_chain_query_falls_back_to_month_window_when_week_window_empty(
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT),\
-                ('O:NVDA250307C00136000', 'NVDA', DATE '2025-03-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.9::DOUBLE, 100::BIGINT)\
+                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT),\
+                ('O:NVDA250307C00136000', 'NVDA', DATE '2025-03-07', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 5.9::DOUBLE, 100::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
          ) TO '{}' (FORMAT PARQUET)",
         parquet_path.to_string_lossy().replace('\'', "''")
@@ -899,8 +899,8 @@ async fn option_chain_query_fallback_tie_prefers_earlier_expiry(
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
-                ('O:NVDA250213C00136000', 'NVDA', DATE '2025-02-13', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.3::DOUBLE, 100::BIGINT)\
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250213C00136000', 'NVDA', DATE '2025-02-13', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 4.3::DOUBLE, 100::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
          ) TO '{}' (FORMAT PARQUET)",
         parquet_path.to_string_lossy().replace('\'', "''")
@@ -940,8 +940,8 @@ async fn option_chain_query_range_filters_do_not_trigger_nearest_fallback(
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
-                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT)\
+                ('O:NVDA250207C00136000', 'NVDA', DATE '2025-02-07', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 4.1::DOUBLE, 120::BIGINT),\
+                ('O:NVDA250228C00136000', 'NVDA', DATE '2025-02-28', 136.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 5.4::DOUBLE, 140::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, close, volume)\
          ) TO '{}' (FORMAT PARQUET)",
         parquet_path.to_string_lossy().replace('\'', "''")
@@ -1143,8 +1143,8 @@ fn create_greeks_test_env() -> Result<TempDir, Box<dyn std::error::Error>> {
     let sql = format!(
         "COPY (\
             SELECT * FROM (VALUES \
-                ('O:NVDA250221C00140000', 'NVDA', DATE '2025-02-21', 140.0::DOUBLE, 'C', 1736899200000000000::BIGINT, 5.40::DOUBLE, 5.70::DOUBLE, 5.30::DOUBLE, 5.50::DOUBLE, 200::BIGINT, 50::BIGINT),\
-                ('O:NVDA250221P00130000', 'NVDA', DATE '2025-02-21', 130.0::DOUBLE, 'P', 1736899200000000000::BIGINT, 2.20::DOUBLE, 2.50::DOUBLE, 2.10::DOUBLE, 2.30::DOUBLE, 150::BIGINT, 30::BIGINT)\
+                ('O:NVDA250221C00140000', 'NVDA', DATE '2025-02-21', 140.0::DOUBLE, 'C', 1736974800000000000::BIGINT, 5.40::DOUBLE, 5.70::DOUBLE, 5.30::DOUBLE, 5.50::DOUBLE, 200::BIGINT, 50::BIGINT),\
+                ('O:NVDA250221P00130000', 'NVDA', DATE '2025-02-21', 130.0::DOUBLE, 'P', 1736974800000000000::BIGINT, 2.20::DOUBLE, 2.50::DOUBLE, 2.10::DOUBLE, 2.30::DOUBLE, 150::BIGINT, 30::BIGINT)\
             ) AS t(ticker, underlying, expiry, strike, \"right\", window_start, open, high, low, close, volume, transactions)\
          ) TO '{}' (FORMAT PARQUET)",
         option_parquet.to_string_lossy().replace('\'', "''")
@@ -1322,7 +1322,7 @@ async fn option_chain_greeks_missing_spot_returns_missing_spot_status(
     let sql = format!(
         "COPY (\
             SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             5.50::DOUBLE AS close, 200::BIGINT AS volume\
          ) TO '{}' (FORMAT PARQUET)",
         option_parquet.to_string_lossy().replace('\'', "''")
@@ -1375,7 +1375,7 @@ async fn option_chain_greeks_missing_rate_returns_missing_rate_status(
     let sql = format!(
         "COPY (\
             SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             5.50::DOUBLE AS close, 200::BIGINT AS volume\
          ) TO '{}' (FORMAT PARQUET)",
         option_parquet.to_string_lossy().replace('\'', "''")
@@ -1610,7 +1610,7 @@ async fn option_chain_greeks_below_intrinsic_returns_status(
     let sql = format!(
         "COPY (\
             SELECT 'O:NVDA250221C00100000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            100.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            100.0::DOUBLE AS strike, 'C' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             0.01::DOUBLE AS open, 0.02::DOUBLE AS high, 0.005::DOUBLE AS low, 0.01::DOUBLE AS close, \
             200::BIGINT AS volume, 50::BIGINT AS transactions\
          ) TO '{}' (FORMAT PARQUET)",
@@ -1689,7 +1689,7 @@ async fn option_chain_greeks_no_bracket_returns_status() -> Result<(), Box<dyn s
     let sql = format!(
         "COPY (\
             SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             999.0::DOUBLE AS open, 999.0::DOUBLE AS high, 999.0::DOUBLE AS low, 999.0::DOUBLE AS close, \
             200::BIGINT AS volume, 50::BIGINT AS transactions\
          ) TO '{}' (FORMAT PARQUET)",
@@ -1761,7 +1761,7 @@ async fn option_chain_greeks_non_finite_input_returns_status(
     let sql = format!(
         "COPY (\
             SELECT 'O:NVDA250221C00140000' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            140.0::DOUBLE AS strike, 'C' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             0.0::DOUBLE AS open, 0.0::DOUBLE AS high, 0.0::DOUBLE AS low, 0.0::DOUBLE AS close, \
             200::BIGINT AS volume, 50::BIGINT AS transactions\
          ) TO '{}' (FORMAT PARQUET)",
@@ -1837,7 +1837,7 @@ async fn option_chain_greeks_model_error_returns_status() -> Result<(), Box<dyn 
     let sql = format!(
         "COPY (\
             SELECT 'BADTICKER' AS ticker, 'NVDA' AS underlying, DATE '2025-02-21' AS expiry, \
-            140.0::DOUBLE AS strike, 'X' AS \"right\", 1736899200000000000::BIGINT AS window_start, \
+            140.0::DOUBLE AS strike, 'X' AS \"right\", 1736974800000000000::BIGINT AS window_start, \
             5.50::DOUBLE AS open, 5.70::DOUBLE AS high, 5.30::DOUBLE AS low, 5.50::DOUBLE AS close, \
             200::BIGINT AS volume, 50::BIGINT AS transactions\
          ) TO '{}' (FORMAT PARQUET)",

@@ -1592,11 +1592,26 @@ fn is_us_dst(date: &NaiveDate) -> bool {
     }
 }
 
-/// Convert nanoseconds since epoch to a YYYY-MM-DD date string.
+/// Convert nanoseconds since epoch to a YYYY-MM-DD date string in US Eastern Time.
+///
+/// US equity markets operate in ET. A UTC timestamp near midnight could map to a
+/// different calendar date in ET, so we apply the ET offset (-5 EST or -4 EDT)
+/// before extracting the date.
 fn ns_to_date_string(ns: i64) -> Option<String> {
     let secs = ns / 1_000_000_000;
     let dt = chrono::DateTime::from_timestamp(secs, 0)?;
-    Some(dt.format("%Y-%m-%d").to_string())
+    let utc_date = dt.date_naive();
+    // Determine ET offset: first approximate with UTC date, then refine.
+    // The DST boundary is at 2 AM ET, so using UTC date is safe for market hours
+    // (09:30–20:00 ET = 14:30–01:00 UTC next day at most).
+    let et_offset_secs = if is_us_dst(&utc_date) {
+        -4 * 3600 // EDT (UTC-4)
+    } else {
+        -5 * 3600 // EST (UTC-5)
+    };
+    let et_secs = secs + et_offset_secs;
+    let et_dt = chrono::DateTime::from_timestamp(et_secs, 0)?;
+    Some(et_dt.format("%Y-%m-%d").to_string())
 }
 
 /// Fetch the spot (close) price for a given ticker on a given date from stock_daily.
