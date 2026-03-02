@@ -26,6 +26,7 @@ fn build_sample_sync_plan_selects_latest_n_dates_per_dataset(
             "/home/qlib/data/us_options_opra/minute_aggs_v1/2025/01/2025-01-09.csv.gz".to_string(),
         ],
         rates_file: Some("/home/qlib/data/assets/treasury_yields.csv".to_string()),
+        dividends_file: None,
     };
 
     let plan = build_sample_sync_plan(&lists, 2, "./raw_sample")?;
@@ -60,11 +61,46 @@ fn build_sample_sync_plan_includes_rates_file_when_present(
             "/home/qlib/data/us_options_opra/minute_aggs_v1/2025/01/2025-01-08.csv.gz".to_string(),
         ],
         rates_file: Some("/home/qlib/data/assets/treasury_yields.csv".to_string()),
+        dividends_file: None,
     };
 
     let plan = build_sample_sync_plan(&lists, 1, "./raw_sample")?;
     assert!(plan
         .iter()
         .any(|i| i.remote_path.ends_with("treasury_yields.csv")));
+    Ok(())
+}
+
+#[test]
+fn sync_plan_includes_dividends_file() -> Result<(), Box<dyn std::error::Error>> {
+    let lists = DatasetFileLists {
+        stock_day: vec![
+            "/home/qlib/data/stock/us_stocks_sip_day_aggs_v1_2025_01_2025-01-08.csv.gz".to_string(),
+        ],
+        stock_minute: vec![
+            "/home/qlib/data/stock/us_stocks_sip_minute_aggs_v1_2025_01_2025-01-08.csv.gz"
+                .to_string(),
+        ],
+        option_day: vec![
+            "/home/qlib/data/us_options_opra/day_aggs_v1/2025/01/2025-01-08.csv.gz".to_string(),
+        ],
+        option_minute: vec![
+            "/home/qlib/data/us_options_opra/minute_aggs_v1/2025/01/2025-01-08.csv.gz".to_string(),
+        ],
+        rates_file: None,
+        dividends_file: Some("/home/qlib/news/massive_dividends.sqlite".to_string()),
+    };
+
+    let plan = build_sample_sync_plan(&lists, 1, "./raw_sample")?;
+    let div_item = plan
+        .iter()
+        .find(|i| i.remote_path.ends_with("massive_dividends.sqlite"));
+    assert!(div_item.is_some());
+    let div_item = div_item.ok_or("dividends item not found")?;
+    assert!(
+        div_item.local_dir.ends_with("/dividends"),
+        "expected local_dir ending in /dividends, got {}",
+        div_item.local_dir
+    );
     Ok(())
 }
