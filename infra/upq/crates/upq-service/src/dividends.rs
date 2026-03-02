@@ -6,6 +6,7 @@ pub struct DividendEvent {
     pub amount: f64,
 }
 
+#[derive(Debug)]
 pub struct DividendCalendar {
     events: HashMap<String, Vec<DividendEvent>>,
 }
@@ -18,9 +19,9 @@ impl DividendCalendar {
     }
 
     /// Build from a flat list of (ticker, event) pairs. Sorts internally.
-    pub fn from_events(mut items: Vec<(String, DividendEvent)>) -> Self {
+    pub fn from_events(items: Vec<(String, DividendEvent)>) -> Self {
         let mut events: HashMap<String, Vec<DividendEvent>> = HashMap::new();
-        for (ticker, event) in items.drain(..) {
+        for (ticker, event) in items {
             events.entry(ticker).or_default().push(event);
         }
         for v in events.values_mut() {
