@@ -53,10 +53,10 @@ impl DividendCalendar {
 
         for row in rows {
             let (ticker, ex_date_days, amount) = row?;
-            events
-                .entry(ticker)
-                .or_default()
-                .push(DividendEvent { ex_date_days, amount });
+            events.entry(ticker).or_default().push(DividendEvent {
+                ex_date_days,
+                amount,
+            });
         }
 
         Ok(Self { events })

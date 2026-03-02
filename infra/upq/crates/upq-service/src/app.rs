@@ -455,7 +455,13 @@ async fn option_ticker_query(
                 let contract = params.contract.clone();
                 let resolution_clone = resolution.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    enrich_ticker_rows(&storage_root, &contract, &resolution_clone, &dividend_calendar, &mut rows);
+                    enrich_ticker_rows(
+                        &storage_root,
+                        &contract,
+                        &resolution_clone,
+                        &dividend_calendar,
+                        &mut rows,
+                    );
                     rows
                 })
                 .await;
@@ -750,7 +756,13 @@ async fn option_chain_query(
             let date = params.date.clone();
             let underlying = params.underlying.clone();
             let result = tokio::task::spawn_blocking(move || {
-                enrich_chain_rows_day(&storage_root, &date, &underlying, &dividend_calendar, &mut rows);
+                enrich_chain_rows_day(
+                    &storage_root,
+                    &date,
+                    &underlying,
+                    &dividend_calendar,
+                    &mut rows,
+                );
                 rows
             })
             .await;
@@ -1276,8 +1288,13 @@ fn enrich_ticker_rows(
                     } else {
                         "expiry_date_eod"
                     };
-                    let result =
-                        null_greek_result(GreekStatus::ModelError, "q0", "stock_daily", t_conv, anchor);
+                    let result = null_greek_result(
+                        GreekStatus::ModelError,
+                        "q0",
+                        "stock_daily",
+                        t_conv,
+                        anchor,
+                    );
                     merge_greek_result(row, &result);
                 }
             }
@@ -1853,7 +1870,8 @@ fn enrich_row_with_greeks(
         }
     };
 
-    let (pv_sum, div_count) = dividend_calendar.pv_dividends(underlying, obs_date_days, expiry_days, r);
+    let (pv_sum, div_count) =
+        dividend_calendar.pv_dividends(underlying, obs_date_days, expiry_days, r);
     let s_adj = (spot - pv_sum).max(0.01);
     let dividend_assumption = if div_count > 0 { "discrete" } else { "q0" };
 

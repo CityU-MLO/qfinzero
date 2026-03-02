@@ -1316,8 +1316,14 @@ async fn option_chain_greeks_with_minimal_fields_still_computes(
     assert_eq!(array.len(), 2);
 
     for row in array {
-        assert!(row.get("contract").is_some(), "contract alias should be present");
-        assert!(row.get("ticker").is_none(), "ticker should stay aliased away");
+        assert!(
+            row.get("contract").is_some(),
+            "contract alias should be present"
+        );
+        assert!(
+            row.get("ticker").is_none(),
+            "ticker should stay aliased away"
+        );
         assert!(row.get("close").is_some());
         assert_eq!(row["greek_status"], "ok");
         assert!(!row["iv"].is_null());
@@ -1746,7 +1752,10 @@ async fn option_ticker_query_minute_uses_trade_date_not_utc_date_for_spot_and_ra
     assert!(!array[0]["iv"].is_null(), "iv should be present");
     assert_eq!(array[0]["greek_meta"]["spot_source"], "stock_daily");
     assert_eq!(array[0]["greek_meta"]["t_convention"], "minute_precise");
-    assert_eq!(array[0]["greek_meta"]["expiry_anchor"], "expiry_date_16_00_ET");
+    assert_eq!(
+        array[0]["greek_meta"]["expiry_anchor"],
+        "expiry_date_16_00_ET"
+    );
 
     Ok(())
 }
