@@ -122,6 +122,10 @@ pub struct GreekMeta {
     pub rate_source: &'static str,
     pub t_convention: &'static str,
     pub expiry_anchor: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_original: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dividend_pv: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -148,16 +152,16 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
     let dividend_calendar = if dividend_path.is_file() {
         match DividendCalendar::load(&dividend_path) {
             Ok(cal) => {
-                eprintln!("loaded dividend calendar from {}", dividend_path.display());
+                tracing::info!(path = %dividend_path.display(), "loaded dividend calendar");
                 Arc::new(cal)
             }
             Err(e) => {
-                eprintln!("warning: failed to load dividends: {e}, using empty calendar");
+                tracing::warn!(error = %e, "failed to load dividends, using empty calendar");
                 Arc::new(DividendCalendar::empty())
             }
         }
     } else {
-        eprintln!("no dividends parquet found, using empty calendar");
+        tracing::warn!("no dividends parquet found, using empty calendar");
         Arc::new(DividendCalendar::empty())
     };
 
@@ -1804,6 +1808,8 @@ fn null_greek_result(
             rate_source: "rates_parquet",
             t_convention,
             expiry_anchor,
+            spot_original: None,
+            dividend_pv: None,
         },
     }
 }
@@ -1875,6 +1881,22 @@ fn enrich_row_with_greeks(
     let s_adj = (spot - pv_sum).max(0.01);
     let dividend_assumption = if div_count > 0 { "discrete" } else { "q0" };
 
+    if pv_sum >= spot {
+        tracing::warn!(
+            underlying,
+            spot,
+            pv_sum,
+            s_adj,
+            "dividend PV exceeds spot price, S_adj floored at 0.01"
+        );
+    }
+
+    let (spot_original, dividend_pv) = if div_count > 0 {
+        (Some(spot), Some(pv_sum))
+    } else {
+        (None, None)
+    };
+
     let q = 0.0;
     let (iv_result, greeks_opt) = compute_greeks(close, s_adj, strike, t_years, r, q, is_call);
 
@@ -1890,6 +1912,8 @@ fn enrich_row_with_greeks(
         rate_source: "rates_parquet",
         t_convention,
         expiry_anchor,
+        spot_original,
+        dividend_pv,
     };
 
     let result = match greeks_opt {
