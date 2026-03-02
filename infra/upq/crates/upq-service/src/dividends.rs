@@ -74,6 +74,13 @@ impl DividendCalendar {
         Self { events }
     }
 
+    /// Check whether the calendar has any dividend data for the given ticker.
+    pub fn has_dividends(&self, ticker: &str) -> bool {
+        self.events
+            .get(ticker)
+            .is_some_and(|v| !v.is_empty())
+    }
+
     /// Sum of present values of dividends where ex_date in (obs_date_days, expiry_days].
     /// Returns (pv_sum, dividend_count).
     pub fn pv_dividends(
@@ -89,6 +96,10 @@ impl DividendCalendar {
         };
         let start = events.partition_point(|e| e.ex_date_days <= obs_date_days);
         let end = events.partition_point(|e| e.ex_date_days <= expiry_days);
+
+        if start >= end {
+            return (0.0, 0);
+        }
 
         let slice = &events[start..end];
         let mut pv_sum = 0.0;

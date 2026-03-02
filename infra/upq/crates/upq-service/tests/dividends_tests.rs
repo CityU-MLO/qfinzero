@@ -203,6 +203,65 @@ fn load_from_parquet_round_trips() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn has_dividends_returns_true_for_known_ticker() {
+    let cal = DividendCalendar::from_events(vec![(
+        "AAPL".to_string(),
+        DividendEvent {
+            ex_date_days: 19050,
+            amount: 0.25,
+        },
+    )]);
+    assert!(cal.has_dividends("AAPL"));
+}
+
+#[test]
+fn has_dividends_returns_false_for_unknown_ticker() {
+    let cal = DividendCalendar::from_events(vec![(
+        "AAPL".to_string(),
+        DividendEvent {
+            ex_date_days: 19050,
+            amount: 0.25,
+        },
+    )]);
+    assert!(!cal.has_dividends("TSLA"));
+}
+
+#[test]
+fn has_dividends_returns_false_for_empty_calendar() {
+    let cal = DividendCalendar::empty();
+    assert!(!cal.has_dividends("AAPL"));
+}
+
+#[test]
+fn expiry_before_obs_returns_zero_no_panic() {
+    let cal = DividendCalendar::from_events(vec![(
+        "AAPL".to_string(),
+        DividendEvent {
+            ex_date_days: 19050,
+            amount: 0.25,
+        },
+    )]);
+    // expiry_days (19000) < obs_date_days (19100) — should not panic
+    let (pv, count) = cal.pv_dividends("AAPL", 19100, 19000, 0.05);
+    assert_eq!(pv, 0.0);
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn expiry_equals_obs_returns_zero() {
+    let cal = DividendCalendar::from_events(vec![(
+        "AAPL".to_string(),
+        DividendEvent {
+            ex_date_days: 19050,
+            amount: 0.25,
+        },
+    )]);
+    let (pv, count) = cal.pv_dividends("AAPL", 19050, 19050, 0.05);
+    assert_eq!(pv, 0.0);
+    assert_eq!(count, 0);
+}
+
+#[test]
 fn load_missing_file_returns_error() {
     let result = DividendCalendar::load(Path::new("/nonexistent/dividends.parquet"));
     assert!(result.is_err());
