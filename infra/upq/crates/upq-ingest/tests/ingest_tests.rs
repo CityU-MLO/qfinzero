@@ -187,3 +187,65 @@ fn ingest_dividends_sqlite_to_parquet() -> Result<(), Box<dyn std::error::Error>
 
     Ok(())
 }
+
+#[test]
+fn ingest_dividends_filters_dirty_data() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let raw_root = tmp.path().join("raw_sample");
+    let storage_root = tmp.path().join("storage");
+    let manifest_path = tmp.path().join("state").join("manifest.sqlite");
+
+    let div_dir = raw_root.join("dividends");
+    fs::create_dir_all(&div_dir)?;
+    let sqlite_path = div_dir.join("massive_dividends.sqlite");
+
+    let sqlite_conn = rusqlite::Connection::open(&sqlite_path)?;
+    sqlite_conn.execute_batch(
+        "CREATE TABLE dividends (
+            ticker TEXT,
+            ex_dividend_date TEXT,
+            split_adjusted_cash_amount REAL,
+            currency TEXT
+        );
+        -- Valid row
+        INSERT INTO dividends VALUES ('AAPL', '2024-02-09', 0.24, 'USD');
+        -- Negative amount (should be filtered)
+        INSERT INTO dividends VALUES ('AAPL', '2024-05-10', -0.50, 'USD');
+        -- Zero amount (should be filtered)
+        INSERT INTO dividends VALUES ('MSFT', '2024-03-14', 0.0, 'USD');
+        -- NULL ticker (should be filtered)
+        INSERT INTO dividends VALUES (NULL, '2024-06-01', 1.00, 'USD');
+        -- NULL date (should be filtered)
+        INSERT INTO dividends VALUES ('GOOG', NULL, 0.50, 'USD');
+        -- Non-USD (should be filtered)
+        INSERT INTO dividends VALUES ('SONY', '2024-07-01', 50.0, 'JPY');",
+    )?;
+    drop(sqlite_conn);
+
+    let report = run_ingest(&IngestOptions {
+        raw_root,
+        storage_root: storage_root.clone(),
+        manifest_path,
+    })?;
+    assert_eq!(report.processed_files, 1);
+
+    let conn = Connection::open_in_memory()?;
+    let parquet_path = storage_root.join("dividends/dividends.parquet");
+    assert!(parquet_path.is_file());
+
+    let sql = format!(
+        "SELECT ticker, amount FROM read_parquet('{}') ORDER BY ticker",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(String, f64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+
+    // Only the one valid USD row with positive amount should survive
+    assert_eq!(rows.len(), 1, "expected 1 valid row, got {}: {:?}", rows.len(), rows);
+    assert_eq!(rows[0].0, "AAPL");
+    assert!((rows[0].1 - 0.24).abs() < 1e-6);
+
+    Ok(())
+}

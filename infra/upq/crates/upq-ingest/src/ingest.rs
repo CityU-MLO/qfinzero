@@ -335,6 +335,9 @@ fn ingest_dividends(
             CAST(split_adjusted_cash_amount AS DOUBLE) AS amount \
          FROM sqlite_scan('{source}', 'dividends') \
          WHERE currency = 'USD' \
+           AND ticker IS NOT NULL \
+           AND ex_dividend_date IS NOT NULL \
+           AND split_adjusted_cash_amount > 0 \
          ORDER BY ticker, ex_dividend_date",
         source = source_literal,
     );
