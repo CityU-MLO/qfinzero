@@ -28,6 +28,7 @@ use upq_core::validation::{
     validate_resolution,
 };
 
+use crate::dividends::DividendCalendar;
 use crate::greeks::{compute_greeks, IvStatus};
 use crate::rates_curve::RatesCurve;
 
@@ -38,6 +39,7 @@ const RATES_CACHE_CAPACITY: usize = 512;
 pub struct AppState {
     storage_root: PathBuf,
     rates_cache: Arc<RwLock<RatesCache>>,
+    dividend_calendar: Arc<DividendCalendar>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -141,9 +143,28 @@ pub fn build_router() -> Router {
 }
 
 pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Router {
+    let storage_root: PathBuf = storage_root.into();
+    let dividend_path = storage_root.join("dividends/dividends.parquet");
+    let dividend_calendar = if dividend_path.is_file() {
+        match DividendCalendar::load(&dividend_path) {
+            Ok(cal) => {
+                eprintln!("loaded dividend calendar from {}", dividend_path.display());
+                Arc::new(cal)
+            }
+            Err(e) => {
+                eprintln!("warning: failed to load dividends: {e}, using empty calendar");
+                Arc::new(DividendCalendar::empty())
+            }
+        }
+    } else {
+        eprintln!("no dividends parquet found, using empty calendar");
+        Arc::new(DividendCalendar::empty())
+    };
+
     let state = AppState {
-        storage_root: storage_root.into(),
+        storage_root,
         rates_cache: Arc::new(RwLock::new(RatesCache::default())),
+        dividend_calendar,
     };
 
     Router::new()
@@ -430,10 +451,11 @@ async fn option_ticker_query(
         Ok(mut rows) => {
             if include_greeks {
                 let storage_root = state.storage_root.clone();
+                let dividend_calendar = Arc::clone(&state.dividend_calendar);
                 let contract = params.contract.clone();
                 let resolution_clone = resolution.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    enrich_ticker_rows(&storage_root, &contract, &resolution_clone, &mut rows);
+                    enrich_ticker_rows(&storage_root, &contract, &resolution_clone, &dividend_calendar, &mut rows);
                     rows
                 })
                 .await;
@@ -724,10 +746,11 @@ async fn option_chain_query(
     let maybe_enrich = |mut rows: Vec<Value>| async {
         if include_greeks {
             let storage_root = state.storage_root.clone();
+            let dividend_calendar = Arc::clone(&state.dividend_calendar);
             let date = params.date.clone();
             let underlying = params.underlying.clone();
             let result = tokio::task::spawn_blocking(move || {
-                enrich_chain_rows_day(&storage_root, &date, &underlying, &mut rows);
+                enrich_chain_rows_day(&storage_root, &date, &underlying, &dividend_calendar, &mut rows);
                 rows
             })
             .await;
@@ -1069,7 +1092,13 @@ fn ensure_greeks_columns_ticker_day(base_projection: &str) -> String {
 }
 
 /// Enrich chain query rows (day-level) with Greeks.
-fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows: &mut [Value]) {
+fn enrich_chain_rows_day(
+    storage_root: &Path,
+    date: &str,
+    underlying: &str,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
     // Per-request caches
     let spot = fetch_spot_daily(storage_root, underlying, date);
     let rates_row = fetch_rates_row(storage_root, date);
@@ -1091,6 +1120,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingSpot,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1105,6 +1135,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingRate,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1119,6 +1150,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1134,6 +1166,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1148,6 +1181,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1162,6 +1196,7 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1179,12 +1214,19 @@ fn enrich_chain_rows_day(storage_root: &Path, date: &str, underlying: &str, rows
             days_to_expiry as f64 / 365.0
         };
 
+        let obs_date_days = date_to_epoch_days(&obs_date);
+        let expiry_days = date_to_epoch_days(&expiry_date);
+
         enrich_row_with_greeks(
             row,
             spot_val,
             curve_ref,
             t_years,
             is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
             "stock_daily",
             "calendar_days_over_365",
             "expiry_date_eod",
@@ -1209,7 +1251,13 @@ fn ensure_greeks_columns_ticker_minute(base_projection: &str) -> String {
 /// Enrich ticker query rows with Greeks.
 /// For day resolution: similar to chain but needs to parse underlying/expiry from the OPRA contract.
 /// For minute resolution: uses window_start for T calculation.
-fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, rows: &mut [Value]) {
+fn enrich_ticker_rows(
+    storage_root: &Path,
+    contract: &str,
+    resolution: &str,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
     // Parse the OPRA contract to extract underlying, expiry, and right
     let parsed = parse_opra_contract(contract);
     let opra = match parsed {
@@ -1229,7 +1277,7 @@ fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, row
                         "expiry_date_eod"
                     };
                     let result =
-                        null_greek_result(GreekStatus::ModelError, "stock_daily", t_conv, anchor);
+                        null_greek_result(GreekStatus::ModelError, "q0", "stock_daily", t_conv, anchor);
                     merge_greek_result(row, &result);
                 }
             }
@@ -1243,6 +1291,7 @@ fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, row
             &opra.underlying,
             &opra.expiry,
             opra.is_call,
+            dividend_calendar,
             rows,
         );
     } else {
@@ -1252,6 +1301,7 @@ fn enrich_ticker_rows(storage_root: &Path, contract: &str, resolution: &str, row
             &opra.expiry,
             opra.is_call,
             opra.strike,
+            dividend_calendar,
             rows,
         );
     }
@@ -1300,11 +1350,14 @@ fn enrich_ticker_rows_day(
     underlying: &str,
     expiry_date: &NaiveDate,
     is_call: bool,
+    dividend_calendar: &DividendCalendar,
     rows: &mut [Value],
 ) {
     // Per-request caches for spot and rates by date
     let mut spot_cache: HashMap<String, Option<f64>> = HashMap::new();
     let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
+
+    let expiry_days = date_to_epoch_days(expiry_date);
 
     for row_val in rows.iter_mut() {
         let row = match row_val.as_object_mut() {
@@ -1324,6 +1377,7 @@ fn enrich_ticker_rows_day(
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1338,6 +1392,7 @@ fn enrich_ticker_rows_day(
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1356,6 +1411,7 @@ fn enrich_ticker_rows_day(
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingSpot,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1375,6 +1431,7 @@ fn enrich_ticker_rows_day(
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingRate,
+                    "q0",
                     "stock_daily",
                     "calendar_days_over_365",
                     "expiry_date_eod",
@@ -1391,12 +1448,18 @@ fn enrich_ticker_rows_day(
             days_to_expiry as f64 / 365.0
         };
 
+        let obs_date_days = date_to_epoch_days(&obs_date);
+
         enrich_row_with_greeks(
             row,
             spot,
             curve_ref,
             t_years,
             is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
             "stock_daily",
             "calendar_days_over_365",
             "expiry_date_eod",
@@ -1411,11 +1474,14 @@ fn enrich_ticker_rows_minute(
     expiry_date: &NaiveDate,
     is_call: bool,
     strike: f64,
+    dividend_calendar: &DividendCalendar,
     rows: &mut [Value],
 ) {
     // Per-request caches
     let mut spot_cache: HashMap<String, Option<f64>> = HashMap::new();
     let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
+
+    let expiry_days = date_to_epoch_days(expiry_date);
 
     // Expiry anchor: 16:00 ET = 21:00 UTC (EST) or 20:00 UTC (EDT)
     let utc_hour = if is_us_dst(expiry_date) { 20 } else { 21 };
@@ -1430,6 +1496,7 @@ fn enrich_ticker_rows_minute(
                 if let Some(row) = row_val.as_object_mut() {
                     let result = null_greek_result(
                         GreekStatus::ModelError,
+                        "q0",
                         "stock_daily",
                         "minute_precise",
                         "expiry_date_16_00_ET",
@@ -1453,6 +1520,7 @@ fn enrich_ticker_rows_minute(
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "minute_precise",
                     "expiry_date_16_00_ET",
@@ -1477,6 +1545,23 @@ fn enrich_ticker_rows_minute(
             None => {
                 let result = null_greek_result(
                     GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // Derive obs_date_days from trade_date_str for dividend PV calculation
+        let obs_date_days = match NaiveDate::parse_from_str(&trade_date_str, "%Y-%m-%d") {
+            Ok(d) => date_to_epoch_days(&d),
+            Err(_) => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
                     "stock_daily",
                     "minute_precise",
                     "expiry_date_16_00_ET",
@@ -1496,6 +1581,7 @@ fn enrich_ticker_rows_minute(
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingSpot,
+                    "q0",
                     "stock_daily",
                     "minute_precise",
                     "expiry_date_16_00_ET",
@@ -1517,6 +1603,7 @@ fn enrich_ticker_rows_minute(
             None => {
                 let result = null_greek_result(
                     GreekStatus::MissingRate,
+                    "q0",
                     "stock_daily",
                     "minute_precise",
                     "expiry_date_16_00_ET",
@@ -1535,6 +1622,10 @@ fn enrich_ticker_rows_minute(
             curve_ref,
             t_years,
             is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
             "stock_daily",
             "minute_precise",
             "expiry_date_16_00_ET",
@@ -1650,6 +1741,13 @@ fn fetch_rates_row(storage_root: &Path, date: &str) -> Option<Value> {
     rows.into_iter().next()
 }
 
+/// Convert a NaiveDate to epoch days (days since 1970-01-01).
+fn date_to_epoch_days(d: &NaiveDate) -> i32 {
+    // NaiveDate::num_days_from_ce() counts from year 1 CE
+    // Unix epoch (1970-01-01) is day 719,163 from CE
+    d.num_days_from_ce() - 719_163
+}
+
 /// Convert an IvStatus to our API GreekStatus.
 fn iv_status_to_greek_status(status: &IvStatus) -> GreekStatus {
     match status {
@@ -1665,6 +1763,7 @@ fn iv_status_to_greek_status(status: &IvStatus) -> GreekStatus {
 /// Build a GreekResult with null fields and the given status.
 fn null_greek_result(
     status: GreekStatus,
+    dividend_assumption: &'static str,
     spot_source: &'static str,
     t_convention: &'static str,
     expiry_anchor: &'static str,
@@ -1680,7 +1779,7 @@ fn null_greek_result(
         greek_meta: GreekMeta {
             model: "bsm_european",
             style_assumption: "European",
-            dividend_assumption: "q0",
+            dividend_assumption,
             theta_unit: "per_day",
             vega_unit: "per_1pct_vol",
             rho_unit: "per_1pct_rate",
@@ -1701,6 +1800,10 @@ fn enrich_row_with_greeks(
     curve: &RatesCurve,
     t_years: f64,
     is_call: bool,
+    dividend_calendar: &DividendCalendar,
+    underlying: &str,
+    obs_date_days: i32,
+    expiry_days: i32,
     spot_source: &'static str,
     t_convention: &'static str,
     expiry_anchor: &'static str,
@@ -1710,6 +1813,7 @@ fn enrich_row_with_greeks(
         _ => {
             let result = null_greek_result(
                 GreekStatus::NonFiniteInput,
+                "q0",
                 spot_source,
                 t_convention,
                 expiry_anchor,
@@ -1724,6 +1828,7 @@ fn enrich_row_with_greeks(
         _ => {
             let result = null_greek_result(
                 GreekStatus::NonFiniteInput,
+                "q0",
                 spot_source,
                 t_convention,
                 expiry_anchor,
@@ -1738,6 +1843,7 @@ fn enrich_row_with_greeks(
         Err(_) => {
             let result = null_greek_result(
                 GreekStatus::MissingRate,
+                "q0",
                 spot_source,
                 t_convention,
                 expiry_anchor,
@@ -1747,14 +1853,18 @@ fn enrich_row_with_greeks(
         }
     };
 
-    let q = 0.0; // V1: no dividend
-    let (iv_result, greeks_opt) = compute_greeks(close, spot, strike, t_years, r, q, is_call);
+    let (pv_sum, div_count) = dividend_calendar.pv_dividends(underlying, obs_date_days, expiry_days, r);
+    let s_adj = (spot - pv_sum).max(0.01);
+    let dividend_assumption = if div_count > 0 { "discrete" } else { "q0" };
+
+    let q = 0.0;
+    let (iv_result, greeks_opt) = compute_greeks(close, s_adj, strike, t_years, r, q, is_call);
 
     let greek_status = iv_status_to_greek_status(&iv_result.status);
     let meta = GreekMeta {
         model: "bsm_european",
         style_assumption: "European",
-        dividend_assumption: "q0",
+        dividend_assumption,
         theta_unit: "per_day",
         vega_unit: "per_1pct_vol",
         rho_unit: "per_1pct_rate",
