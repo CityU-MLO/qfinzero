@@ -119,3 +119,71 @@ fn write_gzip_csv(path: &std::path::Path, content: &str) -> Result<(), Box<dyn s
     encoder.finish()?;
     Ok(())
 }
+
+#[test]
+fn ingest_dividends_sqlite_to_parquet() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let raw_root = tmp.path().join("raw_sample");
+    let storage_root = tmp.path().join("storage");
+    let manifest_path = tmp.path().join("state").join("manifest.sqlite");
+
+    // Create a minimal SQLite dividends database
+    let div_dir = raw_root.join("dividends");
+    fs::create_dir_all(&div_dir)?;
+    let sqlite_path = div_dir.join("massive_dividends.sqlite");
+
+    let sqlite_conn = rusqlite::Connection::open(&sqlite_path)?;
+    sqlite_conn.execute_batch(
+        "CREATE TABLE dividends (
+            ticker TEXT,
+            ex_dividend_date TEXT,
+            split_adjusted_cash_amount REAL,
+            currency TEXT
+        );
+        INSERT INTO dividends VALUES ('AAPL', '2024-02-09', 0.24, 'USD');
+        INSERT INTO dividends VALUES ('AAPL', '2024-05-10', 0.25, 'USD');
+        INSERT INTO dividends VALUES ('MSFT', '2024-03-14', 0.75, 'USD');
+        INSERT INTO dividends VALUES ('SONY', '2024-06-01', 50.0, 'JPY');",
+    )?;
+    drop(sqlite_conn);
+
+    let report = run_ingest(&IngestOptions {
+        raw_root: raw_root.clone(),
+        storage_root: storage_root.clone(),
+        manifest_path: manifest_path.clone(),
+    })?;
+    assert_eq!(report.processed_files, 1);
+
+    // Verify the output parquet
+    let conn = Connection::open_in_memory()?;
+    let parquet_path = storage_root.join("dividends/dividends.parquet");
+    assert!(parquet_path.is_file(), "dividends parquet should exist");
+
+    let sql = format!(
+        "SELECT ticker, CAST(ex_dividend_date AS VARCHAR), amount \
+         FROM read_parquet('{}') ORDER BY ticker, ex_dividend_date",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(String, String, f64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+
+    // Should only have USD rows (3), not JPY (1)
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].0, "AAPL");
+    assert_eq!(rows[0].1, "2024-02-09");
+    assert!((rows[0].2 - 0.24).abs() < 1e-6);
+    assert_eq!(rows[2].0, "MSFT");
+
+    // Second run should skip (manifest idempotency)
+    let second = run_ingest(&IngestOptions {
+        raw_root,
+        storage_root,
+        manifest_path,
+    })?;
+    assert_eq!(second.processed_files, 0);
+    assert_eq!(second.skipped_files, 1);
+
+    Ok(())
+}
