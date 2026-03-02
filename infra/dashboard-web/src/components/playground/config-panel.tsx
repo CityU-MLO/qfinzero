@@ -118,7 +118,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
   }
 
   return (
-    <aside className="flex flex-col gap-5 p-5 min-w-[240px] max-w-[280px] rounded-2xl border bg-white/60 shadow-sm">
+    <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-white/60 rounded-l-2xl">
       <div>
         <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
           LLM Config
