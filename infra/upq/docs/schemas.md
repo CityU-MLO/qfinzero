@@ -51,6 +51,14 @@ Columns:
 - `yield_3_month` (float64)
 - `yield_1_month` (float64)
 
+### Dividends (`qlib:/home/qlib/news/massive_dividends.sqlite`)
+Source format: SQLite database with a single `dividends` table.
+
+Columns used during ingest (filtered to `currency = 'USD'`):
+- `ticker` (text)
+- `ex_dividend_date` (text, YYYY-MM-DD)
+- `split_adjusted_cash_amount` (real)
+
 ## Logical Tables
 
 ### `stock_minute`
@@ -103,3 +111,11 @@ Partition: `trade_date`
 - tenor columns as doubles
 
 Stored in a single Parquet file in `storage/rates/`.
+
+### `dividends`
+- `ticker TEXT`
+- `ex_dividend_date DATE`
+- `amount DOUBLE` (split-adjusted cash dividend, USD only)
+
+Stored in a single Parquet file in `storage/dividends/`.
+Used by `DividendCalendar` for discrete dividend adjustment in Greeks calculations (`S_adj = S - Σ PV(D_i)`).

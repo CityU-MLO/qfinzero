@@ -1316,8 +1316,14 @@ async fn option_chain_greeks_with_minimal_fields_still_computes(
     assert_eq!(array.len(), 2);
 
     for row in array {
-        assert!(row.get("contract").is_some(), "contract alias should be present");
-        assert!(row.get("ticker").is_none(), "ticker should stay aliased away");
+        assert!(
+            row.get("contract").is_some(),
+            "contract alias should be present"
+        );
+        assert!(
+            row.get("ticker").is_none(),
+            "ticker should stay aliased away"
+        );
         assert!(row.get("close").is_some());
         assert_eq!(row["greek_status"], "ok");
         assert!(!row["iv"].is_null());
@@ -1746,7 +1752,10 @@ async fn option_ticker_query_minute_uses_trade_date_not_utc_date_for_spot_and_ra
     assert!(!array[0]["iv"].is_null(), "iv should be present");
     assert_eq!(array[0]["greek_meta"]["spot_source"], "stock_daily");
     assert_eq!(array[0]["greek_meta"]["t_convention"], "minute_precise");
-    assert_eq!(array[0]["greek_meta"]["expiry_anchor"], "expiry_date_16_00_ET");
+    assert_eq!(
+        array[0]["greek_meta"]["expiry_anchor"],
+        "expiry_date_16_00_ET"
+    );
 
     Ok(())
 }
@@ -2137,6 +2146,211 @@ async fn option_ticker_query_minute_near_expiry_approx_returns_status(
         !array[0]["iv"].is_null(),
         "IV should be present (approximated) for near_expiry_approx"
     );
+
+    Ok(())
+}
+
+/// Helper: create test env with dividend data for NVDA.
+/// NVDA spot=136, option expiry=2025-02-21, obs=2025-01-15.
+/// Dividend: ex_date=2025-02-03 (in range), amount=0.50.
+fn create_greeks_test_env_with_dividends() -> Result<TempDir, Box<dyn std::error::Error>> {
+    let tmp = create_greeks_test_env()?;
+    let conn = Connection::open_in_memory()?;
+
+    let div_dir = tmp.path().join("dividends");
+    fs::create_dir_all(&div_dir)?;
+    let div_parquet = div_dir.join("dividends.parquet");
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('NVDA', DATE '2025-02-03', 0.50::DOUBLE)\
+            ) AS t(ticker, ex_dividend_date, amount)\
+         ) TO '{}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+        div_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    Ok(tmp)
+}
+
+#[tokio::test]
+async fn option_chain_greeks_with_dividends_returns_discrete_assumption(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = create_greeks_test_env_with_dividends()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+
+    for row in array {
+        let meta = &row["greek_meta"];
+        assert_eq!(
+            meta["dividend_assumption"], "discrete",
+            "should be discrete when dividend data exists in range"
+        );
+        assert!(
+            meta["spot_original"].is_number(),
+            "spot_original should be present when dividends applied"
+        );
+        assert!(
+            meta["dividend_pv"].is_number(),
+            "dividend_pv should be present when dividends applied"
+        );
+
+        let spot_orig = meta["spot_original"].as_f64().ok_or("not a number")?;
+        let div_pv = meta["dividend_pv"].as_f64().ok_or("not a number")?;
+        assert!(
+            (spot_orig - 136.0).abs() < 0.01,
+            "spot_original={spot_orig} should be ~136"
+        );
+        assert!(
+            div_pv > 0.0 && div_pv < 1.0,
+            "dividend_pv={div_pv} should be PV of 0.50 dividend"
+        );
+    }
+
+    // Greeks should still be computable
+    let call_row = &array[1];
+    assert_eq!(call_row["greek_status"], "ok");
+    assert!(!call_row["iv"].is_null());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_without_dividends_has_no_disclosure_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Use base env without dividends
+    let tmp = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+
+    for row in array {
+        let meta = &row["greek_meta"];
+        assert_eq!(meta["dividend_assumption"], "q0");
+        // spot_original and dividend_pv should be absent (skip_serializing_if None)
+        assert!(
+            meta.get("spot_original").is_none() || meta["spot_original"].is_null(),
+            "spot_original should not be present without dividends"
+        );
+        assert!(
+            meta.get("dividend_pv").is_none() || meta["dividend_pv"].is_null(),
+            "dividend_pv should not be present without dividends"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_dividends_affect_delta_value() -> Result<(), Box<dyn std::error::Error>>
+{
+    // Get Greeks WITHOUT dividends
+    let tmp_no_div = create_greeks_test_env()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp_no_div.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload_no_div: Value = serde_json::from_slice(&bytes)?;
+    let arr_no_div = payload_no_div.as_array().ok_or("expected array")?;
+    let call_no_div = &arr_no_div[1]; // call row
+    let delta_no_div = call_no_div["delta"].as_f64().ok_or("expected delta")?;
+
+    // Get Greeks WITH dividends
+    let tmp_div = create_greeks_test_env_with_dividends()?;
+    let app = upq_service::app::build_router_with_storage_root(tmp_div.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload_div: Value = serde_json::from_slice(&bytes)?;
+    let arr_div = payload_div.as_array().ok_or("expected array")?;
+    let call_div = &arr_div[1]; // call row
+    let delta_div = call_div["delta"].as_f64().ok_or("expected delta")?;
+
+    // Dividend reduces effective spot → call delta should decrease
+    assert!(
+        delta_div < delta_no_div,
+        "call delta with dividends ({delta_div}) should be less than without ({delta_no_div})"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn option_chain_greeks_extreme_dividend_still_computes(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create env with massive dividend (PV > spot → triggers floor)
+    let tmp = create_greeks_test_env()?;
+    let conn = Connection::open_in_memory()?;
+
+    let div_dir = tmp.path().join("dividends");
+    fs::create_dir_all(&div_dir)?;
+    let div_parquet = div_dir.join("dividends.parquet");
+    // Dividend of 200.0 on NVDA (spot = 136) → PV > spot → S_adj floors at 0.01
+    let sql = format!(
+        "COPY (\
+            SELECT * FROM (VALUES \
+                ('NVDA', DATE '2025-02-03', 200.0::DOUBLE)\
+            ) AS t(ticker, ex_dividend_date, amount)\
+         ) TO '{}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+        div_parquet.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/option/chain_query?underlying=NVDA&date=2025-01-15&include_greeks=true")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let array = payload
+        .as_array()
+        .ok_or_else(|| std::io::Error::other("expected array"))?;
+    assert_eq!(array.len(), 2);
+
+    for row in array {
+        let meta = &row["greek_meta"];
+        assert_eq!(meta["dividend_assumption"], "discrete");
+        let div_pv = meta["dividend_pv"].as_f64().ok_or("expected dividend_pv")?;
+        let spot_orig = meta["spot_original"]
+            .as_f64()
+            .ok_or("expected spot_original")?;
+        assert!(
+            div_pv > spot_orig,
+            "dividend PV ({div_pv}) should exceed spot ({spot_orig})"
+        );
+        // Greeks should still be computed (S_adj floored at 0.01, not a crash)
+        assert!(
+            !row["greek_status"].is_null(),
+            "greek_status should be present"
+        );
+    }
 
     Ok(())
 }

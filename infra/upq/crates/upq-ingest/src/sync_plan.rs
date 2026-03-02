@@ -11,6 +11,7 @@ pub struct DatasetFileLists {
     pub option_day: Vec<String>,
     pub option_minute: Vec<String>,
     pub rates_file: Option<String>,
+    pub dividends_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,13 @@ pub fn build_sample_sync_plan(
         items.push(SyncItem {
             remote_path: rates.to_string(),
             local_dir: format!("{local_root}/assets"),
+        });
+    }
+
+    if let Some(div) = lists.dividends_file.as_deref() {
+        items.push(SyncItem {
+            remote_path: div.to_string(),
+            local_dir: format!("{local_root}/dividends"),
         });
     }
 

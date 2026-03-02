@@ -273,7 +273,9 @@ fn iv_near_expiry_zero_time_value_returns_floor_iv() {
 
     let result = implied_volatility(intrinsic, s, k, t, r, q, true);
     assert_eq!(result.status, IvStatus::NearExpiryApprox);
-    let iv = result.iv.expect("near-expiry branch should return approximate IV");
+    let iv = result
+        .iv
+        .expect("near-expiry branch should return approximate IV");
     assert_near(iv, 0.001, 1e-12, "near-expiry floor IV");
 }
 

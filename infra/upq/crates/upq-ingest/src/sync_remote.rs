@@ -49,12 +49,20 @@ pub fn collect_remote_files(
         None
     };
 
+    let dividends_path = "/home/qlib/news/massive_dividends.sqlite";
+    let dividends_file = if ssh_file_exists(host, dividends_path)? {
+        Some(dividends_path.to_string())
+    } else {
+        None
+    };
+
     Ok(DatasetFileLists {
         stock_day,
         stock_minute,
         option_day,
         option_minute,
         rates_file,
+        dividends_file,
     })
 }
 

@@ -417,12 +417,7 @@ mod tests {
             (2.0, 0.977_249_868_051_820_8),
         ];
         for &(x, expected) in &cases {
-            assert_close(
-                norm_cdf(x),
-                expected,
-                1e-6,
-                &format!("norm_cdf({})", x),
-            );
+            assert_close(norm_cdf(x), expected, 1e-6, &format!("norm_cdf({})", x));
         }
     }
 
@@ -450,11 +445,7 @@ mod tests {
     #[test]
     fn bsm_price_atm_put_positive() {
         let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
-        assert!(
-            price > 0.0,
-            "ATM put price must be positive, got {}",
-            price,
-        );
+        assert!(price > 0.0, "ATM put price must be positive, got {}", price,);
     }
 
     #[test]
@@ -462,14 +453,8 @@ mod tests {
         // C - P = S*exp(-qT) - K*exp(-rT)
         let call = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
         let put = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
-        let forward_diff =
-            ATM_S * (-ATM_Q * ATM_T).exp() - ATM_K * (-ATM_R * ATM_T).exp();
-        assert_close(
-            call - put,
-            forward_diff,
-            1e-10,
-            "put-call parity (ATM)",
-        );
+        let forward_diff = ATM_S * (-ATM_Q * ATM_T).exp() - ATM_K * (-ATM_R * ATM_T).exp();
+        assert_close(call - put, forward_diff, 1e-10, "put-call parity (ATM)");
     }
 
     #[test]
@@ -477,8 +462,7 @@ mod tests {
         // Also verify parity with the deep ITM parameters.
         let call = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
         let put = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, false);
-        let forward_diff =
-            DITM_S * (-DITM_Q * DITM_T).exp() - DITM_K * (-DITM_R * DITM_T).exp();
+        let forward_diff = DITM_S * (-DITM_Q * DITM_T).exp() - DITM_K * (-DITM_R * DITM_T).exp();
         assert_close(
             call - put,
             forward_diff,
@@ -556,19 +540,18 @@ mod tests {
         let price = bsm_price(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
         let result = implied_volatility(price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, false);
         assert_eq!(result.status, IvStatus::Ok, "ATM put round-trip status");
-        assert_close(
-            result.iv.unwrap(),
-            ATM_SIGMA,
-            1e-8,
-            "ATM put round-trip IV",
-        );
+        assert_close(result.iv.unwrap(), ATM_SIGMA, 1e-8, "ATM put round-trip IV");
     }
 
     #[test]
     fn iv_round_trip_ditm_call() {
         let price = bsm_price(DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, DITM_SIGMA, true);
         let result = implied_volatility(price, DITM_S, DITM_K, DITM_T, DITM_R, DITM_Q, true);
-        assert_eq!(result.status, IvStatus::Ok, "deep ITM call round-trip status");
+        assert_eq!(
+            result.status,
+            IvStatus::Ok,
+            "deep ITM call round-trip status"
+        );
         assert_close(
             result.iv.unwrap(),
             DITM_SIGMA,
@@ -645,8 +628,7 @@ mod tests {
         // A call price far above any BSM price (even at sigma=10) should fail to bracket.
         // Max BSM call at sigma=10 is bounded by S*exp(-qT), so use a price above that.
         let absurd_price = ATM_S * 10.0;
-        let result =
-            implied_volatility(absurd_price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
+        let result = implied_volatility(absurd_price, ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, true);
         assert_eq!(
             result.status,
             IvStatus::NoBracket,
@@ -668,12 +650,7 @@ mod tests {
             result.status,
         );
         if result.status == IvStatus::Ok {
-            assert_close(
-                result.iv.unwrap(),
-                sigma,
-                1e-6,
-                "small T round-trip IV",
-            );
+            assert_close(result.iv.unwrap(), sigma, 1e-6, "small T round-trip IV");
         }
     }
 
@@ -685,12 +662,7 @@ mod tests {
         let price = bsm_price(ATM_S, ATM_K, t_large, ATM_R, ATM_Q, sigma, true);
         let result = implied_volatility(price, ATM_S, ATM_K, t_large, ATM_R, ATM_Q, true);
         assert_eq!(result.status, IvStatus::Ok, "large T status");
-        assert_close(
-            result.iv.unwrap(),
-            sigma,
-            1e-8,
-            "large T round-trip IV",
-        );
+        assert_close(result.iv.unwrap(), sigma, 1e-8, "large T round-trip IV");
     }
 
     // -----------------------------------------------------------------------
@@ -721,8 +693,16 @@ mod tests {
     fn greeks_gamma_positive() {
         let gc = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, true);
         let gp = bsm_greeks(ATM_S, ATM_K, ATM_T, ATM_R, ATM_Q, ATM_SIGMA, false);
-        assert!(gc.gamma > 0.0, "call gamma must be positive, got {}", gc.gamma);
-        assert!(gp.gamma > 0.0, "put gamma must be positive, got {}", gp.gamma);
+        assert!(
+            gc.gamma > 0.0,
+            "call gamma must be positive, got {}",
+            gc.gamma
+        );
+        assert!(
+            gp.gamma > 0.0,
+            "put gamma must be positive, got {}",
+            gp.gamma
+        );
     }
 
     #[test]
