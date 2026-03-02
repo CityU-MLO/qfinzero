@@ -1,4 +1,14 @@
 use std::collections::HashMap;
+use std::path::Path;
+
+use duckdb::Connection;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum DividendError {
+    #[error("duckdb error: {0}")]
+    Duckdb(#[from] duckdb::Error),
+}
 
 #[derive(Debug, Clone)]
 pub struct DividendEvent {
@@ -16,6 +26,40 @@ impl DividendCalendar {
         Self {
             events: HashMap::new(),
         }
+    }
+
+    /// Load from a Parquet file with columns: ticker (Utf8), ex_dividend_date (Date32), amount (Float64).
+    pub fn load(path: &Path) -> Result<Self, DividendError> {
+        let conn = Connection::open_in_memory()?;
+        let path_literal = path.to_string_lossy().replace('\'', "''");
+        let sql = format!(
+            "SELECT ticker, \
+                    epoch(ex_dividend_date::TIMESTAMP) / 86400 AS ex_date_days, \
+                    amount::DOUBLE AS amount \
+             FROM read_parquet('{}') \
+             ORDER BY ticker, ex_dividend_date",
+            path_literal
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut events: HashMap<String, Vec<DividendEvent>> = HashMap::new();
+
+        let rows = stmt.query_map([], |row| {
+            let ticker: String = row.get(0)?;
+            let ex_date_days: i64 = row.get(1)?;
+            let amount: f64 = row.get(2)?;
+            Ok((ticker, ex_date_days as i32, amount))
+        })?;
+
+        for row in rows {
+            let (ticker, ex_date_days, amount) = row?;
+            events
+                .entry(ticker)
+                .or_default()
+                .push(DividendEvent { ex_date_days, amount });
+        }
+
+        Ok(Self { events })
     }
 
     /// Build from a flat list of (ticker, event) pairs. Sorts internally.

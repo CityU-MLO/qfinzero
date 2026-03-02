@@ -1,3 +1,4 @@
+use std::path::Path;
 use upq_service::dividends::{DividendCalendar, DividendEvent};
 
 #[test]
@@ -162,4 +163,47 @@ fn multiple_tickers_are_independent() {
     let (pv_aapl, _) = cal.pv_dividends("AAPL", 19000, 19100, 0.05);
     let (pv_msft, _) = cal.pv_dividends("MSFT", 19000, 19100, 0.05);
     assert!(pv_msft > pv_aapl, "MSFT dividend is larger");
+}
+
+#[test]
+fn load_from_parquet_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = tempfile::TempDir::new()?;
+    let parquet_path = tmp.path().join("dividends.parquet");
+
+    // Create a test parquet with DuckDB
+    let conn = duckdb::Connection::open_in_memory()?;
+    let sql = format!(
+        "COPY (
+            SELECT * FROM (VALUES
+                ('AAPL', DATE '2024-02-09', 0.24),
+                ('AAPL', DATE '2024-05-10', 0.25),
+                ('MSFT', DATE '2024-03-14', 0.75)
+            ) AS t(ticker, ex_dividend_date, amount)
+        ) TO '{}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    );
+    conn.execute_batch(&sql)?;
+
+    let cal = DividendCalendar::load(&parquet_path)?;
+
+    // AAPL should have 2 events
+    // 2024-02-09 = epoch day 19762, 2024-05-10 = epoch day 19853
+    let (pv, count) = cal.pv_dividends("AAPL", 19700, 19900, 0.0);
+    assert_eq!(count, 2);
+    assert!(
+        (pv - 0.49).abs() < 1e-6,
+        "sum of 0.24+0.25=0.49 at r=0, got {pv}"
+    );
+
+    // MSFT should have 1 event
+    let (_, count) = cal.pv_dividends("MSFT", 19700, 19900, 0.0);
+    assert_eq!(count, 1);
+
+    Ok(())
+}
+
+#[test]
+fn load_missing_file_returns_error() {
+    let result = DividendCalendar::load(Path::new("/nonexistent/dividends.parquet"));
+    assert!(result.is_err());
 }
