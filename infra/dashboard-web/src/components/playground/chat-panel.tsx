@@ -175,7 +175,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, streaming, messages, config]);
+  }, [input, streaming, config]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
