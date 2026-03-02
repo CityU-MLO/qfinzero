@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   appendThreadMessage,
@@ -8,9 +8,50 @@ import {
   upsertThread,
 } from "@/lib/playground-history";
 
+function createMockStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear() {
+      map.clear();
+    },
+    getItem(key: string) {
+      return map.has(key) ? map.get(key)! : null;
+    },
+    key(index: number) {
+      const keys = Array.from(map.keys());
+      return keys[index] ?? null;
+    },
+    removeItem(key: string) {
+      map.delete(key);
+    },
+    setItem(key: string, value: string) {
+      map.set(key, value);
+    },
+  };
+}
+
 describe("playground-history", () => {
+  const originalLocalStorage = window.localStorage;
+
+  beforeAll(() => {
+    Object.defineProperty(window, "localStorage", {
+      value: createMockStorage(),
+      configurable: true,
+    });
+  });
+
   beforeEach(() => {
-    localStorage.clear();
+    window.localStorage.clear();
+  });
+
+  afterAll(() => {
+    Object.defineProperty(window, "localStorage", {
+      value: originalLocalStorage,
+      configurable: true,
+    });
   });
 
   it("persists thread metadata and can load it back", () => {

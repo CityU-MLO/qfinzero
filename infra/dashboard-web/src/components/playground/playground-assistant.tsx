@@ -13,6 +13,7 @@ import {
   ThreadPrimitive,
   unstable_useRemoteThreadListRuntime,
   useAui,
+  useAuiState,
   useLocalRuntime,
   useMessagePartText,
   type ChatModelAdapter,
@@ -24,10 +25,6 @@ import {
 } from "@assistant-ui/react";
 import { createAssistantStream } from "assistant-stream";
 import { Send, Square, Plus, Trash2, ChevronDown } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 
 import { cn } from "@/lib/utils";
 import {
@@ -44,17 +41,22 @@ import {
   type StoredThreadMessage,
 } from "@/lib/playground-history";
 import { normalizeMathDelimiters } from "@/lib/playground-math";
+import {
+  createPlaygroundStreamState,
+  parsePlaygroundSseLine,
+  reducePlaygroundSseEvent,
+} from "@/lib/playground-stream";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import { ToolCallCard, type ToolCallData } from "./tool-call-card";
 import type { PlaygroundConfig } from "./config-panel";
 
 interface PlaygroundAssistantProps {
   config: PlaygroundConfig;
 }
-
-type PlaygroundSseEvent = {
-  type?: string;
-  content?: string;
-  message?: string;
-};
 
 function makeId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -79,18 +81,6 @@ function extractFirstUserTitle(messages: readonly ThreadMessage[]): string {
   const firstUser = messages.find((message) => message.role === "user");
   if (!firstUser) return PLAYGROUND_HISTORY_DEFAULT_TITLE;
   return deriveThreadTitleFromMessage(firstUser as unknown as StoredThreadMessage);
-}
-
-function parseSseEventLine(line: string): PlaygroundSseEvent | null {
-  if (!line.startsWith("data: ")) return null;
-  const raw = line.slice(6).trim();
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as PlaygroundSseEvent;
-  } catch {
-    return null;
-  }
 }
 
 function upsertRepositoryItem(threadId: string, item: ExportedMessageRepositoryItem) {
@@ -228,7 +218,7 @@ function usePlaygroundModelAdapter(config: PlaygroundConfig): ChatModelAdapter {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let fullText = "";
+        let streamState = createPlaygroundStreamState();
 
         while (true) {
           const { done, value } = await reader.read();
@@ -239,18 +229,29 @@ function usePlaygroundModelAdapter(config: PlaygroundConfig): ChatModelAdapter {
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
-            const event = parseSseEventLine(line);
+            const event = parsePlaygroundSseLine(line);
             if (!event) continue;
 
-            if (event.type === "llm_chunk") {
-              fullText += event.content ?? "";
-              yield {
-                content: [{ type: "text", text: normalizeMathDelimiters(fullText) }],
-              };
+            if (event.type === "error") {
+              throw new Error(event.message ?? event.error ?? "Upstream error");
             }
 
-            if (event.type === "error") {
-              throw new Error(event.message ?? "Upstream error");
+            streamState = reducePlaygroundSseEvent(streamState, event, makeId);
+
+            if (
+              event.type === "llm_chunk" ||
+              event.type === "tool_start" ||
+              event.type === "tool_end"
+            ) {
+              const text = normalizeMathDelimiters(streamState.text);
+              yield {
+                content: text ? [{ type: "text" as const, text }] : [],
+                metadata: {
+                  custom: {
+                    toolCalls: streamState.toolCalls,
+                  },
+                },
+              };
             }
           }
         }
@@ -264,13 +265,30 @@ function AssistantMarkdownText() {
   const part = useMessagePartText();
 
   return (
-    <div className="text-sm leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+    <div className="text-sm leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_table]:w-full [&_table]:border-collapse [&_table_th]:border [&_table_th]:bg-zinc-50 [&_table_th]:px-2 [&_table_th]:py-1 [&_table_td]:border [&_table_td]:px-2 [&_table_td]:py-1 [&_pre]:overflow-x-auto">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
         {normalizeMathDelimiters(part.text)}
       </ReactMarkdown>
       <MessagePartPrimitive.InProgress>
         <span className="inline-block ml-1 animate-pulse">●</span>
       </MessagePartPrimitive.InProgress>
+    </div>
+  );
+}
+
+function AssistantToolCalls() {
+  const toolCalls = useAuiState((state) => {
+    const custom = state.message.metadata?.custom as { toolCalls?: ToolCallData[] } | undefined;
+    return custom?.toolCalls ?? [];
+  });
+
+  if (toolCalls.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex w-full max-w-[90%] flex-col gap-1.5">
+      {toolCalls.map((call) => (
+        <ToolCallCard key={call.id} call={call} />
+      ))}
     </div>
   );
 }
@@ -288,8 +306,11 @@ function UserMessage() {
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-start px-4 py-2">
-      <div className="max-w-[90%] rounded-2xl rounded-bl-sm border bg-white px-4 py-2.5 text-foreground shadow-sm">
-        <MessagePrimitive.Parts components={{ Text: AssistantMarkdownText }} />
+      <div className="flex w-full flex-col items-start">
+        <AssistantToolCalls />
+        <div className="max-w-[90%] rounded-2xl rounded-bl-sm border bg-white px-4 py-2.5 text-foreground shadow-sm">
+          <MessagePrimitive.Parts components={{ Text: AssistantMarkdownText }} />
+        </div>
       </div>
     </MessagePrimitive.Root>
   );

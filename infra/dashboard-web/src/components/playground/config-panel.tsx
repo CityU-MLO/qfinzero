@@ -16,6 +16,7 @@ export interface PlaygroundConfig {
 }
 
 const STORAGE_KEY = "playground_config";
+export const ET_ZONE = "America/New_York";
 
 export const DEFAULT_CONFIG: PlaygroundConfig = {
   model: "gpt-4o-mini",
@@ -24,8 +25,6 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   // Default: today at 09:00 ET stored as UTC ISO string
   asOfDate: getDefaultAsOfDate(),
 };
-
-export const ET_ZONE = "America/New_York";
 
 /** Returns today at 09:00 US/Eastern as a UTC ISO string "YYYY-MM-DDTHH:MM:SSZ" */
 function getDefaultAsOfDate(): string {
