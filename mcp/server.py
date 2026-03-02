@@ -104,8 +104,8 @@ def upq_stock_minute(
 
     Args:
         tickers: Stock symbols, e.g. ["AAPL", "NVDA"]
-        start: Start datetime "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T09:30:00"
-        end: End datetime "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T16:00:00"
+        start: Start datetime in UTC "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T14:30:00" (09:30 ET)
+        end: End datetime in UTC "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T21:00:00" (16:00 ET)
         fields: Comma-separated fields, e.g. "ticker,window_start,close,volume"
                 Available: ticker, window_start, open, high, low, close, volume, transactions
         limit: Max rows to return (default 10000, max 100000)
@@ -195,8 +195,8 @@ def upq_option_contract(
     Args:
         contract: OPRA contract string, e.g. "O:NVDA250117C00136000"
                   Use upq_make_opra() to build the contract string.
-        start: Start date/datetime string
-        end: End date/datetime string
+        start: Start date/datetime in UTC, e.g. "2024-01-15" or "2024-01-15T14:30:00" (09:30 ET)
+        end: End date/datetime in UTC, e.g. "2024-01-17" or "2024-01-15T21:00:00" (16:00 ET)
         resolution: "day" (default) or "minute"
         fields: Comma-separated fields to return
         include_greeks: When True, append BSM-European Greeks (iv, delta,

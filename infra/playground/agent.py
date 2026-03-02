@@ -29,18 +29,16 @@ def build_system_prompt(as_of_date: str) -> str:
     """
     as_of_date: UTC ISO string, e.g. "2025-02-26T14:00:00.000Z"
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    ET = ZoneInfo("America/New_York")
 
     # Parse UTC time and compute ET equivalent for human-readable display
     try:
         utc_dt = datetime.fromisoformat(as_of_date.replace("Z", "+00:00"))
-        # Approximate ET offset (no pytz dependency): EST=UTC-5, EDT=UTC-4
-        # Use the same Jan/Jul heuristic: if month is in [3..11] approximate EDT
-        month = utc_dt.month
-        et_offset = timedelta(hours=-4) if 3 <= month <= 11 else timedelta(hours=-5)
-        et_dt = utc_dt + et_offset
-        tz_label = "EDT" if et_offset.total_seconds() == -4 * 3600 else "EST"
-        et_str = et_dt.strftime(f"%Y-%m-%d %H:%M {tz_label}")
+        et_dt = utc_dt.astimezone(ET)
+        et_str = et_dt.strftime("%Y-%m-%d %H:%M %Z")  # auto EST/EDT
         utc_str = utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception:
         utc_str = as_of_date
@@ -49,6 +47,8 @@ def build_system_prompt(as_of_date: str) -> str:
     return (
         f"You are a financial analysis assistant for QFinZero. "
         f"The current simulation time is {utc_str} UTC ({et_str}). "
+        f"All tool datetime parameters use UTC. Convert user-mentioned times "
+        f"(e.g. '10:00 AM') from ET to UTC before calling tools. "
         f"Do not use data beyond this timestamp. "
         f"When calling tools that accept a 'now_utc' parameter, always pass '{utc_str}' "
         f"to ensure backtesting data boundaries are respected. "

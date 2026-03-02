@@ -10,7 +10,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
+use chrono_tz::America::New_York;
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
@@ -1504,11 +1505,11 @@ fn enrich_ticker_rows_minute(
 
     let expiry_days = date_to_epoch_days(expiry_date);
 
-    // Expiry anchor: 16:00 ET = 21:00 UTC (EST) or 20:00 UTC (EDT)
-    let utc_hour = if is_us_dst(expiry_date) { 20 } else { 21 };
+    // Expiry anchor: 16:00 ET → UTC via chrono-tz (handles DST automatically)
     let expiry_dt = expiry_date
-        .and_hms_opt(utc_hour, 0, 0)
-        .and_then(|dt| dt.and_utc().timestamp_nanos_opt());
+        .and_hms_opt(16, 0, 0)
+        .and_then(|ndt| New_York.from_local_datetime(&ndt).single())
+        .and_then(|et_dt| et_dt.with_timezone(&chrono::Utc).timestamp_nanos_opt());
 
     let expiry_ns = match expiry_dt {
         Some(ns) => ns,
@@ -1668,62 +1669,15 @@ fn extract_trade_date_from_row(row: &Map<String, Value>) -> Option<String> {
     None
 }
 
-/// Check if a date falls within US Eastern Daylight Time.
-/// US DST: second Sunday of March 02:00 to first Sunday of November 02:00.
-fn is_us_dst(date: &NaiveDate) -> bool {
-    let year = date.year();
-    let month = date.month();
-
-    // Quick reject: Jan, Feb, Dec are always EST
-    if !(3..=11).contains(&month) {
-        return false;
-    }
-    // Quick accept: Apr-Oct are always EDT
-    if (4..=10).contains(&month) {
-        return true;
-    }
-
-    if month == 3 {
-        // Second Sunday of March: find day of first Sunday, add 7
-        let march_1 = NaiveDate::from_ymd_opt(year, 3, 1);
-        if let Some(m1) = march_1 {
-            let dow = m1.weekday().num_days_from_sunday(); // 0=Sun
-            let first_sunday = if dow == 0 { 1 } else { 8 - dow };
-            let second_sunday = first_sunday + 7;
-            return date.day() >= second_sunday;
-        }
-        false
-    } else {
-        // month == 11: first Sunday of November
-        let nov_1 = NaiveDate::from_ymd_opt(year, 11, 1);
-        if let Some(n1) = nov_1 {
-            let dow = n1.weekday().num_days_from_sunday();
-            let first_sunday = if dow == 0 { 1 } else { 8 - dow };
-            return date.day() < first_sunday;
-        }
-        false
-    }
-}
-
 /// Convert nanoseconds since epoch to a YYYY-MM-DD date string in US Eastern Time.
 ///
 /// US equity markets operate in ET. A UTC timestamp near midnight could map to a
-/// different calendar date in ET, so we apply the ET offset (-5 EST or -4 EDT)
-/// before extracting the date.
+/// different calendar date in ET, so we apply the IANA `America/New_York` offset
+/// (via `chrono-tz`) before extracting the date.
 fn ns_to_date_string(ns: i64) -> Option<String> {
     let secs = ns / 1_000_000_000;
-    let dt = chrono::DateTime::from_timestamp(secs, 0)?;
-    let utc_date = dt.date_naive();
-    // Determine ET offset: first approximate with UTC date, then refine.
-    // The DST boundary is at 2 AM ET, so using UTC date is safe for market hours
-    // (09:30–20:00 ET = 14:30–01:00 UTC next day at most).
-    let et_offset_secs = if is_us_dst(&utc_date) {
-        -4 * 3600 // EDT (UTC-4)
-    } else {
-        -5 * 3600 // EST (UTC-5)
-    };
-    let et_secs = secs + et_offset_secs;
-    let et_dt = chrono::DateTime::from_timestamp(et_secs, 0)?;
+    let utc_dt = chrono::DateTime::from_timestamp(secs, 0)?;
+    let et_dt = utc_dt.with_timezone(&New_York);
     Some(et_dt.format("%Y-%m-%d").to_string())
 }
 
@@ -2483,4 +2437,98 @@ fn internal_error(error: ServiceError) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test assertions")]
+#[expect(clippy::panic, reason = "test helper")]
+mod timezone_tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    /// Helper: build UTC nanoseconds from a UTC datetime string.
+    fn utc_ns(s: &str) -> i64 {
+        let ndt = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+            .unwrap_or_else(|e| panic!("bad datetime {s:?}: {e}"));
+        ndt.and_utc()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| panic!("overflow for {s}"))
+    }
+
+    #[test]
+    fn ns_to_date_est_winter() {
+        // 2025-01-15 00:30 UTC → still Jan 14 in ET (EST, UTC-5)
+        let ns = utc_ns("2025-01-15 00:30:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-01-14".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_est_winter_daytime() {
+        // 2025-01-15 15:00 UTC → 10:00 EST → Jan 15 in ET
+        let ns = utc_ns("2025-01-15 15:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-01-15".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_edt_summer() {
+        // 2025-07-15 00:30 UTC → still Jul 14 in ET (EDT, UTC-4), since 00:30-4 = 20:30 Jul 14
+        let ns = utc_ns("2025-07-15 00:30:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-07-14".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_edt_summer_daytime() {
+        // 2025-07-15 14:00 UTC → 10:00 EDT → Jul 15
+        let ns = utc_ns("2025-07-15 14:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-07-15".to_string()));
+    }
+
+    #[test]
+    fn dst_spring_forward_march_2025() {
+        // 2025 DST spring forward: March 9 at 02:00 ET
+        // March 9 07:00 UTC = 02:00 EST = 03:00 EDT (just transitioned)
+        // Should map to March 9 in ET (EDT)
+        let ns = utc_ns("2025-03-09 07:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-03-09".to_string()));
+
+        // March 9 06:00 UTC = 01:00 EST (still EST, before transition)
+        // Should map to March 9 in ET
+        let ns = utc_ns("2025-03-09 06:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-03-09".to_string()));
+    }
+
+    #[test]
+    fn dst_fall_back_november_2025() {
+        // 2025 DST fall back: November 2 at 02:00 ET
+        // November 2 06:00 UTC = 02:00 EDT → falls back to 01:00 EST
+        // Should map to November 2 in ET
+        let ns = utc_ns("2025-11-02 06:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-11-02".to_string()));
+
+        // November 2 05:00 UTC = 01:00 EDT (still EDT)
+        let ns = utc_ns("2025-11-02 05:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-11-02".to_string()));
+    }
+
+    #[test]
+    fn expiry_anchor_est() {
+        // Winter: 16:00 ET = 21:00 UTC (EST)
+        let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+        let ndt = date.and_hms_opt(16, 0, 0).unwrap();
+        let et_dt = New_York.from_local_datetime(&ndt).single().unwrap();
+        let utc_dt = et_dt.with_timezone(&chrono::Utc);
+        assert_eq!(utc_dt.hour(), 21);
+    }
+
+    #[test]
+    fn expiry_anchor_edt() {
+        // Summer: 16:00 ET = 20:00 UTC (EDT)
+        let date = NaiveDate::from_ymd_opt(2025, 7, 18).unwrap();
+        let ndt = date.and_hms_opt(16, 0, 0).unwrap();
+        let et_dt = New_York.from_local_datetime(&ndt).single().unwrap();
+        let utc_dt = et_dt.with_timezone(&chrono::Utc);
+        assert_eq!(utc_dt.hour(), 20);
+    }
+
+    use chrono::Timelike;
 }

@@ -16,6 +16,7 @@ version = "0.1.0"
 anyhow = "1.0"
 axum = { version = "0.7", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 dotenvy = "0.15"
 duckdb = { version = "1.4.4", features = ["bundled", "parquet"] }
 regex = "1.11"
