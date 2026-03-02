@@ -243,7 +243,13 @@ fn ingest_dividends_filters_dirty_data() -> Result<(), Box<dyn std::error::Error
         .collect::<Result<_, _>>()?;
 
     // Only the one valid USD row with positive amount should survive
-    assert_eq!(rows.len(), 1, "expected 1 valid row, got {}: {:?}", rows.len(), rows);
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected 1 valid row, got {}: {:?}",
+        rows.len(),
+        rows
+    );
     assert_eq!(rows[0].0, "AAPL");
     assert!((rows[0].1 - 0.24).abs() < 1e-6);
 

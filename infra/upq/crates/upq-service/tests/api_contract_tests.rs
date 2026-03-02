@@ -2262,8 +2262,8 @@ async fn option_chain_greeks_without_dividends_has_no_disclosure_fields(
 }
 
 #[tokio::test]
-async fn option_chain_greeks_dividends_affect_delta_value(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn option_chain_greeks_dividends_affect_delta_value() -> Result<(), Box<dyn std::error::Error>>
+{
     // Get Greeks WITHOUT dividends
     let tmp_no_div = create_greeks_test_env()?;
     let app = upq_service::app::build_router_with_storage_root(tmp_no_div.path());
@@ -2338,7 +2338,9 @@ async fn option_chain_greeks_extreme_dividend_still_computes(
         let meta = &row["greek_meta"];
         assert_eq!(meta["dividend_assumption"], "discrete");
         let div_pv = meta["dividend_pv"].as_f64().ok_or("expected dividend_pv")?;
-        let spot_orig = meta["spot_original"].as_f64().ok_or("expected spot_original")?;
+        let spot_orig = meta["spot_original"]
+            .as_f64()
+            .ok_or("expected spot_original")?;
         assert!(
             div_pv > spot_orig,
             "dividend PV ({div_pv}) should exceed spot ({spot_orig})"

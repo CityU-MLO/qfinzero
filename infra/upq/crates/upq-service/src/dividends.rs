@@ -76,9 +76,7 @@ impl DividendCalendar {
 
     /// Check whether the calendar has any dividend data for the given ticker.
     pub fn has_dividends(&self, ticker: &str) -> bool {
-        self.events
-            .get(ticker)
-            .is_some_and(|v| !v.is_empty())
+        self.events.get(ticker).is_some_and(|v| !v.is_empty())
     }
 
     /// Sum of present values of dividends where ex_date in (obs_date_days, expiry_days].
