@@ -7,6 +7,9 @@
 #   ./scripts/test-env.sh restart [pmb|npp|upq|web|playground]   — stop then start
 #   ./scripts/test-env.sh status                                  — show all services status
 #
+# Options:
+#   -b <branch>   — use specific branch instead of default (main)
+#
 # Services run on the remote host accessible via `ssh qlib`.
 #   PMB         19701  /home/qlib/qfinzero/infra/pmb          (Python)
 #   NPP         19702  /home/qlib/qfinzero/infra/npp          (Python)
@@ -20,7 +23,7 @@ set -euo pipefail
 
 SSH_HOST="qlib"
 REMOTE_ROOT="/home/qlib/qfinzero"
-DEFAULT_REMOTE_BRANCH="feat/data-platform-frontend"
+DEFAULT_REMOTE_BRANCH="main"
 WEB_REMOTE_BRANCH="main"
 
 LOG_DIR="/tmp/efan"
@@ -70,7 +73,9 @@ remote_run() {
 
 resolve_remote_branch() {
     local svcs="$1"
-    if echo "$svcs" | grep -qw web; then
+    if [ -n "$BRANCH_OVERRIDE" ]; then
+        echo "$BRANCH_OVERRIDE"
+    elif echo "$svcs" | grep -qw web; then
         echo "$WEB_REMOTE_BRANCH"
     else
         echo "$DEFAULT_REMOTE_BRANCH"
@@ -83,10 +88,12 @@ remote_git_pull() {
     remote_run <<EOF
 set -e
 cd '${REMOTE_ROOT}'
+echo 'Fetching all branches from origin...'
+git fetch origin
 current_branch=\$(git rev-parse --abbrev-ref HEAD)
 if [ "\$current_branch" != '${target_branch}' ]; then
-    echo "WARNING: remote HEAD is on '\$current_branch', not '${target_branch}'."
-    git checkout '${target_branch}'
+    echo "Switching from '\$current_branch' to '${target_branch}'..."
+    git checkout '${target_branch}' 2>/dev/null || git checkout -b '${target_branch}' 'origin/${target_branch}'
 fi
 echo 'Pulling latest from origin/${target_branch}...'
 git pull origin '${target_branch}'
@@ -441,7 +448,10 @@ EOF
 
 usage() {
     echo ""
-    echo "Usage: $0 <command> [service]"
+    echo "Usage: $0 [-b <branch>] <command> [service]"
+    echo ""
+    echo "Options:"
+    echo "  -b <branch>   Use specific git branch (default: main)"
     echo ""
     echo "Commands:"
     echo "  start   [pmb|npp|upq|playground|web]   — git pull, build if needed, then start"
@@ -450,6 +460,10 @@ usage() {
     echo "  status                                  — show all services status"
     echo ""
     echo "Omit [service] to target all five services."
+    echo ""
+    echo "Examples:"
+    echo "  $0 restart upq                          — restart UPQ on main branch"
+    echo "  $0 -b dev/tools-unit-tests restart upq  — restart UPQ on specific branch"
     echo ""
 }
 
@@ -460,6 +474,17 @@ resolve_services() {
         *)               error "Unknown service: '${1}'. Valid: pmb, npp, upq, playground, web"; exit 1 ;;
     esac
 }
+
+# ── Parse options ─────────────────────────────────────────────────────────────
+
+BRANCH_OVERRIDE=""
+while getopts "b:" opt; do
+    case "$opt" in
+        b) BRANCH_OVERRIDE="$OPTARG" ;;
+        *) usage; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
 
 CMD="${1:-}"
 SVC_ARG="${2:-}"

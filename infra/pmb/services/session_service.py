@@ -253,6 +253,10 @@ class SessionService:
         for order in state.order_manager.get_all_orders():
             state.history.update_order(order)
 
+        # 3b. Re-mark positions created/modified by fills to bar close
+        if trades:
+            state.ledger.update_market_prices(prices)
+
         # 4. Account snapshot
         im = state.margin_engine.total_initial_margin(state.ledger.positions)
         mm = state.margin_engine.total_maintenance_margin(state.ledger.positions)
