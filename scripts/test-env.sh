@@ -88,10 +88,12 @@ remote_git_pull() {
     remote_run <<EOF
 set -e
 cd '${REMOTE_ROOT}'
+echo 'Fetching all branches from origin...'
+git fetch origin
 current_branch=\$(git rev-parse --abbrev-ref HEAD)
 if [ "\$current_branch" != '${target_branch}' ]; then
-    echo "WARNING: remote HEAD is on '\$current_branch', not '${target_branch}'."
-    git checkout '${target_branch}'
+    echo "Switching from '\$current_branch' to '${target_branch}'..."
+    git checkout '${target_branch}' 2>/dev/null || git checkout -b '${target_branch}' 'origin/${target_branch}'
 fi
 echo 'Pulling latest from origin/${target_branch}...'
 git pull origin '${target_branch}'
