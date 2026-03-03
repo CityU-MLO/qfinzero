@@ -2307,8 +2307,21 @@ fn parse_projection(
     Ok(default_fields.join(", "))
 }
 
+/// Strip UTC suffixes (Z, +00:00) that LLMs commonly append.
+/// Must match the logic in `upq_core::validation::validate_datetime`.
+fn strip_utc_suffix(input: &str) -> &str {
+    if input.ends_with('Z') {
+        &input[..input.len() - 1]
+    } else if input.ends_with("+00:00") {
+        &input[..input.len() - 6]
+    } else {
+        input
+    }
+}
+
 fn parse_datetime_ns(input: &str, end_of_second: bool) -> Result<i64, &'static str> {
-    let dt = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+    let bare = strip_utc_suffix(input);
+    let dt = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S")
         .map_err(|_| "failed to parse datetime")?;
     let dt = if end_of_second {
         dt.checked_add_signed(Duration::nanoseconds(999_999_999))
@@ -2323,7 +2336,8 @@ fn parse_datetime_ns(input: &str, end_of_second: bool) -> Result<i64, &'static s
 }
 
 fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'static str> {
-    if let Ok(dt) = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S") {
+    let bare = strip_utc_suffix(input);
+    if let Ok(dt) = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S") {
         let final_dt = if end_of_day {
             dt.checked_add_signed(Duration::nanoseconds(999_999_999))
                 .ok_or("datetime overflow")?
@@ -2351,7 +2365,8 @@ fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'sta
 }
 
 fn extract_date_from_datetime(input: &str) -> Result<String, &'static str> {
-    let dt = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+    let bare = strip_utc_suffix(input);
+    let dt = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S")
         .map_err(|_| "failed to parse datetime")?;
     Ok(dt.date().format("%Y-%m-%d").to_string())
 }
