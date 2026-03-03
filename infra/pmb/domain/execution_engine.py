@@ -202,7 +202,7 @@ class ExecutionEngine:
         is_buy = order.side == Side.BUY
 
         if order.order_type == OrderType.MARKET:
-            return self._apply_slippage(bar.close, is_buy)
+            return self._apply_slippage(bar.open, is_buy)
 
         if order.order_type == OrderType.LIMIT:
             if is_buy and bar.low <= order.limit_price:
