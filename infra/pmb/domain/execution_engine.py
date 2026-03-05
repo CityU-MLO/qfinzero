@@ -9,6 +9,8 @@ from models.event import (
     EventEnvelope,
     OrderEventPayload,
     TradeEventPayload,
+    OptionExpiryEventPayload,
+    AssignmentPayload,
 )
 from models.session import FeeModel
 from domain.order_manager import OrderManager
@@ -261,3 +263,68 @@ class ExecutionEngine:
         if order.side == Side.SELL and pos.qty <= 0:
             return True  # adding to short
         return False  # closing existing position
+
+    def process_expiries(
+        self,
+        ts: str,
+        actions: list,
+        ledger: "Ledger",
+        order_manager: "OrderManager",
+        margin_engine: "MarginEngine",
+    ) -> list:
+        """Apply option expiry lifecycle actions. Returns list of EventEnvelope."""
+        from domain.option_lifecycle import ExpiryAction
+
+        events = []
+        for action in actions:
+            pos = action.option_pos
+            option_iid = action.instrument_id
+
+            # 1. Close option position at zero (expiry settlement; ITM value is captured via assignment fill)
+            exercise_fee = self._fee_model.option_exercise_fee * abs(pos.qty)
+            realized_option = ledger.apply_fill(
+                instrument_id=option_iid,
+                instrument_type=InstrumentType.OPTION,
+                side=Side.BUY if pos.qty < 0 else Side.SELL,
+                qty=abs(pos.qty),
+                price=0.0,
+                fees=exercise_fee,
+            )
+
+            # 2. If ITM short: execute underlying stock transaction at strike price
+            assignment = None
+            if action.stock_side is not None and action.underlying is not None:
+                stock_iid = f"STOCK:{action.underlying}"
+                stock_fee = self._fee_model.stock_fee_per_share * action.stock_qty
+                ledger.apply_fill(
+                    instrument_id=stock_iid,
+                    instrument_type=InstrumentType.STOCK,
+                    side=action.stock_side,
+                    qty=action.stock_qty,
+                    price=action.strike,
+                    fees=stock_fee,
+                )
+                assignment = AssignmentPayload(
+                    underlying=action.underlying,
+                    side=action.stock_side.value,
+                    qty=action.stock_qty,
+                    strike=action.strike,
+                )
+
+            # 3. Emit OPTION_EXPIRY_EVENT
+            payload = OptionExpiryEventPayload(
+                contract=action.contract,
+                is_itm=action.is_itm,
+                intrinsic_value=action.intrinsic_value,
+                option_qty=pos.qty,
+                realized_pnl=round(realized_option, 4),
+                assignment=assignment,
+            )
+            events.append(EventEnvelope(
+                event_id=self._next_event_id(),
+                ts=ts,
+                type=EventType.OPTION_EXPIRY_EVENT,
+                payload=payload.model_dump(),
+            ))
+
+        return events
