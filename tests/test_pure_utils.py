@@ -1,12 +1,19 @@
 """Tests for pure utility functions — no HTTP mocking needed."""
 
 import json
+import sys
+import os
 from datetime import datetime, timezone
 
 import pytest
 
 from clients.upq.client import UPQClient
 from clients.pmb.client import StepResult
+
+# Allow importing from infra/npp without installing it as a package
+_NPP = os.path.join(os.path.dirname(__file__), "..", "infra", "npp")
+sys.path.insert(0, os.path.join(_NPP, "services"))
+sys.path.insert(0, _NPP)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -124,3 +131,126 @@ class TestStepResult:
     def test_get_stock_price_no_tick(self):
         sr = StepResult({"ok": True, "clock": {}, "events": []})
         assert sr.get_stock_price("AAPL") is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NPP data_sources pure builder functions
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestBuildEarningsSnippet:
+    def test_scheduled_snippet_omits_actual_eps_and_revenue(self):
+        from data_sources import build_earnings_snippet
+        row = {"ticker": "AAPL", "fiscal_period": "Q1", "fiscal_year": "2026",
+               "actual_eps": 2.10, "estimated_eps": 2.05, "actual_revenue": 120_000_000}
+        snippet = build_earnings_snippet(row, occurred=False)
+        assert "2.10" not in snippet
+        assert "120" not in snippet
+
+    def test_scheduled_snippet_keeps_estimated_eps(self):
+        from data_sources import build_earnings_snippet
+        row = {"ticker": "AAPL", "fiscal_period": "Q1", "fiscal_year": "2026",
+               "actual_eps": None, "estimated_eps": 2.05, "actual_revenue": None}
+        snippet = build_earnings_snippet(row, occurred=False)
+        assert "2.05" in snippet
+
+    def test_occurred_snippet_includes_actual_eps(self):
+        from data_sources import build_earnings_snippet
+        row = {"ticker": "AAPL", "fiscal_period": "Q1", "fiscal_year": "2026",
+               "actual_eps": 2.10, "estimated_eps": 2.05, "actual_revenue": 120_000_000}
+        snippet = build_earnings_snippet(row, occurred=True)
+        assert "EPS 2.1" in snippet
+        assert "120,000,000" in snippet
+
+    def test_empty_row_returns_empty_string(self):
+        from data_sources import build_earnings_snippet
+        assert build_earnings_snippet({}, occurred=False) == ""
+
+
+class TestBuildEarningsPayload:
+    def test_scheduled_payload_nulls_actual_fields(self):
+        from data_sources import build_earnings_payload
+        row = {"actual_eps": 2.10, "estimated_eps": 2.05, "previous_eps": 1.90,
+               "eps_surprise": 0.05, "eps_surprise_percent": 2.4,
+               "actual_revenue": 120_000_000, "estimated_revenue": 118_000_000,
+               "revenue_surprise": 2_000_000, "revenue_surprise_percent": 1.7,
+               "fiscal_period": "Q1", "fiscal_year": "2026", "company_name": "Apple"}
+        payload = build_earnings_payload(row, occurred=False)
+        assert payload["actual_eps"] is None
+        assert payload["previous_eps"] is None
+        assert payload["eps_surprise"] is None
+        assert payload["eps_surprise_percent"] is None
+        assert payload["actual_revenue"] is None
+        assert payload["revenue_surprise"] is None
+        assert payload["revenue_surprise_percent"] is None
+
+    def test_scheduled_payload_keeps_estimated_fields(self):
+        from data_sources import build_earnings_payload
+        row = {"actual_eps": 2.10, "estimated_eps": 2.05, "previous_eps": 1.90,
+               "eps_surprise": 0.05, "eps_surprise_percent": 2.4,
+               "actual_revenue": 120_000_000, "estimated_revenue": 118_000_000,
+               "revenue_surprise": 2_000_000, "revenue_surprise_percent": 1.7,
+               "fiscal_period": "Q1", "fiscal_year": "2026", "company_name": "Apple"}
+        payload = build_earnings_payload(row, occurred=False)
+        assert payload["estimated_eps"] == 2.05
+        assert payload["estimated_revenue"] == 118_000_000
+
+    def test_occurred_payload_includes_all_actual_fields(self):
+        from data_sources import build_earnings_payload
+        row = {"actual_eps": 2.10, "estimated_eps": 2.05, "previous_eps": 1.90,
+               "eps_surprise": 0.05, "eps_surprise_percent": 2.4,
+               "actual_revenue": 120_000_000, "estimated_revenue": 118_000_000,
+               "revenue_surprise": 2_000_000, "revenue_surprise_percent": 1.7,
+               "fiscal_period": "Q1", "fiscal_year": "2026", "company_name": "Apple"}
+        payload = build_earnings_payload(row, occurred=True)
+        assert payload["actual_eps"] == 2.10
+        assert payload["eps_surprise"] == 0.05
+        assert payload["actual_revenue"] == 120_000_000
+
+
+class TestBuildEconSnippet:
+    def test_scheduled_snippet_omits_actual_and_previous(self):
+        from data_sources import build_econ_snippet
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%"}
+        snippet = build_econ_snippet(row, occurred=False)
+        assert "3.2%" not in snippet
+        assert "Previous" not in snippet
+
+    def test_scheduled_snippet_keeps_consensus(self):
+        from data_sources import build_econ_snippet
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%"}
+        snippet = build_econ_snippet(row, occurred=False)
+        assert "3.0%" in snippet
+
+    def test_occurred_snippet_includes_actual(self):
+        from data_sources import build_econ_snippet
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%"}
+        snippet = build_econ_snippet(row, occurred=True)
+        assert "3.2%" in snippet
+        assert "3.1%" in snippet
+
+
+class TestBuildEconPayload:
+    def test_scheduled_payload_nulls_actual_and_previous(self):
+        from data_sources import build_econ_payload
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%",
+               "description": "CPI data"}
+        payload = build_econ_payload(row, occurred=False)
+        assert payload["actual"] is None
+        assert payload["previous"] is None
+
+    def test_scheduled_payload_keeps_consensus_and_description(self):
+        from data_sources import build_econ_payload
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%",
+               "description": "CPI data"}
+        payload = build_econ_payload(row, occurred=False)
+        assert payload["consensus"] == "3.0%"
+        assert payload["description"] == "CPI data"
+
+    def test_occurred_payload_includes_actual_and_previous(self):
+        from data_sources import build_econ_payload
+        row = {"actual": "3.2%", "consensus": "3.0%", "previous": "3.1%",
+               "description": "CPI data"}
+        payload = build_econ_payload(row, occurred=True)
+        assert payload["actual"] == "3.2%"
+        assert payload["previous"] == "3.1%"

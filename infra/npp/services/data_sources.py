@@ -15,8 +15,6 @@ from typing import Any, Optional
 
 import html as html_mod
 
-import aiosqlite
-
 from models import Event, EventType, EventStatus, Importance
 
 logger = logging.getLogger("npp.data_sources")
@@ -71,7 +69,21 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _build_earnings_snippet(row: dict) -> str:
+def _clean_html(s: str) -> str:
+    """Strip &nbsp; and other HTML entities."""
+    if not s:
+        return ""
+    return html_mod.unescape(s).strip()
+
+
+# ── Pure builder functions (no DB dependency, easily unit-tested) ─
+
+def build_earnings_snippet(row: dict, *, occurred: bool) -> str:
+    """Build a human-readable snippet for an earnings event.
+
+    When occurred=False (scheduled), actual values are omitted to avoid
+    leaking results that haven't happened yet.
+    """
     parts = []
     ticker = row.get("ticker") or ""
     period = row.get("fiscal_period") or ""
@@ -80,37 +92,82 @@ def _build_earnings_snippet(row: dict) -> str:
         parts.append(ticker)
     if period and fy:
         parts.append(f"{period} FY{fy}")
-    eps = row.get("actual_eps")
-    est = row.get("estimated_eps")
-    if eps is not None and est is not None:
-        parts.append(f"EPS {eps} vs est {est}")
-    elif eps is not None:
-        parts.append(f"EPS {eps}")
-    rev = row.get("actual_revenue")
-    if rev is not None:
-        parts.append(f"Rev {rev:,.0f}")
+
+    if occurred:
+        eps = row.get("actual_eps")
+        est = row.get("estimated_eps")
+        if eps is not None and est is not None:
+            parts.append(f"EPS {eps} vs est {est}")
+        elif eps is not None:
+            parts.append(f"EPS {eps}")
+        rev = row.get("actual_revenue")
+        if rev is not None:
+            parts.append(f"Rev {rev:,.0f}")
+    else:
+        est = row.get("estimated_eps")
+        if est is not None:
+            parts.append(f"Est EPS {est}")
+
     return " | ".join(parts) if parts else ""
 
 
-def _clean_html(s: str) -> str:
-    """Strip &nbsp; and other HTML entities."""
-    if not s:
-        return ""
-    return html_mod.unescape(s).strip()
+def build_earnings_payload(row: dict, *, occurred: bool) -> dict:
+    """Build the payload dict for an earnings event.
+
+    When occurred=False (scheduled), actual/surprise fields are set to None
+    so future events never expose result data.
+    """
+    fp = row.get("fiscal_period") or ""
+    fy = row.get("fiscal_year") or ""
+    return {
+        "actual_eps": row.get("actual_eps") if occurred else None,
+        "estimated_eps": row.get("estimated_eps"),
+        "previous_eps": row.get("previous_eps") if occurred else None,
+        "eps_surprise": row.get("eps_surprise") if occurred else None,
+        "eps_surprise_percent": row.get("eps_surprise_percent") if occurred else None,
+        "actual_revenue": row.get("actual_revenue") if occurred else None,
+        "estimated_revenue": row.get("estimated_revenue"),
+        "revenue_surprise": row.get("revenue_surprise") if occurred else None,
+        "revenue_surprise_percent": row.get("revenue_surprise_percent") if occurred else None,
+        "fiscal_period": fp,
+        "fiscal_year": fy,
+        "company_name": row.get("company_name"),
+    }
 
 
-def _build_econ_snippet(row: dict) -> str:
+def build_econ_snippet(row: dict, *, occurred: bool) -> str:
+    """Build a human-readable snippet for an economic calendar event.
+
+    When occurred=False (scheduled), actual and previous are omitted.
+    """
     parts = []
-    actual = _clean_html(row.get("actual") or "")
     consensus = _clean_html(row.get("consensus") or "")
-    previous = _clean_html(row.get("previous") or "")
-    if actual:
-        parts.append(f"Actual: {actual}")
-    if consensus:
-        parts.append(f"Consensus: {consensus}")
-    if previous:
-        parts.append(f"Previous: {previous}")
+    if occurred:
+        actual = _clean_html(row.get("actual") or "")
+        previous = _clean_html(row.get("previous") or "")
+        if actual:
+            parts.append(f"Actual: {actual}")
+        if consensus:
+            parts.append(f"Consensus: {consensus}")
+        if previous:
+            parts.append(f"Previous: {previous}")
+    else:
+        if consensus:
+            parts.append(f"Consensus: {consensus}")
     return " | ".join(parts) if parts else ""
+
+
+def build_econ_payload(row: dict, *, occurred: bool) -> dict:
+    """Build the payload dict for an economic calendar event.
+
+    When occurred=False (scheduled), actual and previous are set to None.
+    """
+    return {
+        "actual": (_clean_html(row.get("actual") or "") or None) if occurred else None,
+        "consensus": _clean_html(row.get("consensus") or "") or None,
+        "previous": (_clean_html(row.get("previous") or "") or None) if occurred else None,
+        "description": row.get("description"),
+    }
 
 
 # ── Cursor helpers ───────────────────────────────────────────────
@@ -294,9 +351,10 @@ class MongoNewsSource:
 class SQLiteEarningsSource:
     def __init__(self, db_path: str):
         self._path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[Any] = None
 
     async def connect(self):
+        import aiosqlite
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         logger.info("Earnings DB connected: %s", self._path)
@@ -417,6 +475,7 @@ class SQLiteEarningsSource:
 
         status_val = row.get("date_status")
         status = EventStatus.OCCURRED if status_val == "confirmed" else EventStatus.SCHEDULED
+        occurred = status == EventStatus.OCCURRED
 
         ticker = row.get("ticker") or ""
         fp = row.get("fiscal_period") or ""
@@ -431,21 +490,8 @@ class SQLiteEarningsSource:
             status=status,
             tickers=[ticker] if ticker else [],
             country="US",
-            snippet=_build_earnings_snippet(row),
-            payload={
-                "actual_eps": row.get("actual_eps"),
-                "estimated_eps": row.get("estimated_eps"),
-                "previous_eps": row.get("previous_eps"),
-                "eps_surprise": row.get("eps_surprise"),
-                "eps_surprise_percent": row.get("eps_surprise_percent"),
-                "actual_revenue": row.get("actual_revenue"),
-                "estimated_revenue": row.get("estimated_revenue"),
-                "revenue_surprise": row.get("revenue_surprise"),
-                "revenue_surprise_percent": row.get("revenue_surprise_percent"),
-                "fiscal_period": fp,
-                "fiscal_year": fy,
-                "company_name": row.get("company_name"),
-            },
+            snippet=build_earnings_snippet(row, occurred=occurred),
+            payload=build_earnings_payload(row, occurred=occurred),
             source="benzinga",
             source_id=row["benzinga_id"],
         )
@@ -458,9 +504,10 @@ class SQLiteEarningsSource:
 class SQLiteEconEventsSource:
     def __init__(self, db_path: str):
         self._path = db_path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: Optional[Any] = None
 
     async def connect(self):
+        import aiosqlite
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         logger.info("Econ Events DB connected: %s", self._path)
@@ -568,6 +615,7 @@ class SQLiteEconEventsSource:
 
         has_actual = bool(row.get("actual") and str(row["actual"]).strip())
         status = EventStatus.OCCURRED if has_actual else EventStatus.SCHEDULED
+        occurred = status == EventStatus.OCCURRED
 
         return Event(
             event_id=f"econ_{row['event_id']}",
@@ -578,13 +626,8 @@ class SQLiteEconEventsSource:
             status=status,
             tickers=[],
             country="US",
-            snippet=_build_econ_snippet(row),
-            payload={
-                "actual": _clean_html(row.get("actual") or "") or None,
-                "consensus": _clean_html(row.get("consensus") or "") or None,
-                "previous": _clean_html(row.get("previous") or "") or None,
-                "description": row.get("description"),
-            },
+            snippet=build_econ_snippet(row, occurred=occurred),
+            payload=build_econ_payload(row, occurred=occurred),
             source="nasdaq_econ",
             source_id=row["event_id"],
         )
