@@ -24,6 +24,7 @@ from domain.execution_engine import ExecutionEngine
 from domain.margin_engine import MarginEngine
 from domain.ledger import Ledger
 from domain.history_store import HistoryStore
+from domain.option_lifecycle import check_option_expiries
 from clients.upq_client import UPQClient
 
 logger = logging.getLogger(__name__)
@@ -230,6 +231,26 @@ class SessionService:
         # 2. Update market prices in ledger
         prices = state.cache.get_prices_at(ts_ns)
         state.ledger.update_market_prices(prices)
+
+        # 2b. Option expiry lifecycle check
+        current_date = ts[:10]  # "YYYY-MM-DD"
+        underlying_prices = {sym: bar.close for sym, bar in stock_bars.items()}
+        expiry_actions = check_option_expiries(
+            state.ledger.positions,
+            current_date,
+            underlying_prices,
+        )
+        if expiry_actions:
+            expiry_events = state.execution_engine.process_expiries(
+                ts,
+                expiry_actions,
+                state.ledger,
+                state.order_manager,
+                state.margin_engine,
+            )
+            for evt in expiry_events:
+                events.append(evt.model_dump())
+                state.history.append_event(evt)
 
         # 3. Execution: process open orders
         exec_events, trades = state.execution_engine.process_step(
