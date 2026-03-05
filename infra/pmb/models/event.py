@@ -64,3 +64,12 @@ class ErrorEventPayload(BaseModel):
     error_code: str
     message: str
     details: dict = {}
+
+
+class OptionExpiryEventPayload(BaseModel):
+    contract: str
+    is_itm: bool
+    intrinsic_value: float
+    option_qty: int
+    realized_pnl: float
+    assignment: Optional[dict] = None
