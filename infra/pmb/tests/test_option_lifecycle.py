@@ -18,6 +18,19 @@ def test_parse_invalid_returns_none():
     assert parse_opra_expiry("O:BAD") is None
 
 
+def test_parse_impossible_date_returns_none():
+    # Month 13 passes regex but is not a valid date
+    assert parse_opra_expiry("O:NVDA251332C00136000") is None
+
+
+def test_parse_lowercase_ticker_returns_none():
+    assert parse_opra_expiry("O:nvda250117C00136000") is None
+
+
+def test_parse_empty_string_returns_none():
+    assert parse_opra_expiry("") is None
+
+
 import pytest
 from domain.option_lifecycle import check_option_expiries, ExpiryAction
 from models.position import Position

@@ -1,3 +1,4 @@
+import datetime
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -22,6 +23,10 @@ def parse_opra_expiry(contract: str) -> Optional[str]:
         return None
     yy, mm, dd = m.group(2), m.group(3), m.group(4)
     year = 2000 + int(yy)
+    try:
+        datetime.date(year, int(mm), int(dd))
+    except ValueError:
+        return None
     return f"{year:04d}-{mm}-{dd}"
 
 
