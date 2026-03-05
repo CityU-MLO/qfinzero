@@ -18,6 +18,7 @@ class UPQConfig(BaseModel):
 class FeeModel(BaseModel):
     stock_fee_per_share: float = 0.0005
     option_fee_per_contract: float = 0.65
+    option_exercise_fee: float = 0.0  # per-contract fee on expiry/assignment (default 0, IBKR-style)
 
 
 class PartialFillConfig(BaseModel):
