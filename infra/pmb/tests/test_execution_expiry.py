@@ -130,6 +130,51 @@ def test_process_expiries_itm_put_triggers_stock_buy():
     assert any(e.type == EventType.OPTION_EXPIRY_EVENT for e in events)
 
 
+def test_process_expiries_long_itm_realizes_intrinsic():
+    """Long call expires ITM: option closed at intrinsic value, no stock transaction."""
+    engine = _engine()
+    ledger = Ledger(initial_cash=50000.0)
+    contract = "O:NVDA250117C00136000"
+    # Long 1 call, bought at 3.50, now ITM with intrinsic = 9.0
+    ledger._positions[f"OPTION:{contract}"] = Position(
+        instrument_id=f"OPTION:{contract}",
+        type=InstrumentType.OPTION,
+        qty=1,  # long
+        avg_price=3.50,
+        mark_price=9.0,
+    )
+    cash_before = ledger.cash
+
+    action = ExpiryAction(
+        contract=contract,
+        instrument_id=f"OPTION:{contract}",
+        option_pos=ledger._positions[f"OPTION:{contract}"],
+        is_itm=True,
+        intrinsic_value=9.0,
+        underlying="NVDA",
+        stock_side=None,   # no assignment for long
+        strike=136.0,
+        stock_qty=100,
+    )
+
+    order_manager = OrderManager()
+    margin_engine = MarginEngine(MarginConfig())
+    events = engine.process_expiries("2025-01-17T16:00:00+00:00", [action], ledger, order_manager, margin_engine)
+
+    # Option closed
+    opt_pos = ledger.positions.get(f"OPTION:{contract}")
+    assert opt_pos is None or opt_pos.qty == 0
+    # No stock position created
+    assert "STOCK:NVDA" not in ledger.positions
+    # Cash increases by intrinsic value (9.0 per contract, 1 contract)
+    assert ledger.cash == pytest.approx(cash_before + 9.0, abs=0.01)
+    # Realized PnL = intrinsic - avg_price = 9.0 - 3.50 = 5.50
+    assert ledger.realized_pnl == pytest.approx(5.50, abs=0.01)
+    # One event
+    assert len(events) == 1
+    assert events[0].type == EventType.OPTION_EXPIRY_EVENT
+
+
 def test_process_expiries_event_payload_has_assignment():
     """ITM call expiry event payload should contain assignment details."""
     engine = _engine()

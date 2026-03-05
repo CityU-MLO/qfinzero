@@ -280,14 +280,17 @@ class ExecutionEngine:
             pos = action.option_pos
             option_iid = action.instrument_id
 
-            # 1. Close option position at zero (expiry settlement; ITM value is captured via assignment fill)
+            # 1. Close option position at expiry settlement price
+            # Short position (assignment): close at 0.0, ITM value captured via stock fill at strike
+            # Long position (exercise): close at intrinsic_value to realize profit
+            close_price = 0.0 if pos.qty < 0 else action.intrinsic_value
             exercise_fee = self._fee_model.option_exercise_fee * abs(pos.qty)
             realized_option = ledger.apply_fill(
                 instrument_id=option_iid,
                 instrument_type=InstrumentType.OPTION,
                 side=Side.BUY if pos.qty < 0 else Side.SELL,
                 qty=abs(pos.qty),
-                price=0.0,
+                price=close_price,
                 fees=exercise_fee,
             )
 
