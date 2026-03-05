@@ -24,7 +24,7 @@ from domain.execution_engine import ExecutionEngine
 from domain.margin_engine import MarginEngine
 from domain.ledger import Ledger
 from domain.history_store import HistoryStore
-from domain.option_lifecycle import check_option_expiries
+from domain.option_lifecycle import check_option_expiries, get_expiring_contracts
 from clients.upq_client import UPQClient
 
 logger = logging.getLogger(__name__)
@@ -252,7 +252,28 @@ class SessionService:
                 events.append(evt.model_dump())
                 state.history.append_event(evt)
 
-        # 3. Execution: process open orders
+        # 3. Cancel open orders on contracts expiring today before execution.
+        # Orders on expired contracts must not fill — they are cancelled at EOD
+        # before the execution engine processes them.
+        expiring = get_expiring_contracts(
+            current_date,
+            list({
+                iid[len("OPTION:"):] for iid in state.ledger.positions
+                if iid.startswith("OPTION:")
+            } | {
+                o.instrument_id[len("OPTION:"):] for o in state.order_manager.get_open_orders()
+                if o.instrument_id.startswith("OPTION:")
+            }),
+        )
+        for order in state.order_manager.get_open_orders():
+            if not order.instrument_id.startswith("OPTION:"):
+                continue
+            contract = order.instrument_id[len("OPTION:"):]
+            if contract in expiring:
+                state.order_manager.cancel(order.order_id, ts)
+                state.history.update_order(order)
+
+        # 4. Execution: process open orders (expired-contract orders already cancelled above)
         exec_events, trades = state.execution_engine.process_step(
             ts=ts,
             ts_ns=ts_ns,
@@ -274,7 +295,7 @@ class SessionService:
         for order in state.order_manager.get_all_orders():
             state.history.update_order(order)
 
-        # 3b. Re-mark positions created/modified by fills to bar close
+        # 4b. Re-mark positions created/modified by fills to bar close
         if trades:
             state.ledger.update_market_prices(prices)
 

@@ -122,3 +122,12 @@ def check_option_expiries(
         ))
 
     return actions
+
+
+def get_expiring_contracts(current_date: str, contracts: list[str]) -> set[str]:
+    """Return the set of OPRA contract ids (without 'OPTION:' prefix) expiring on current_date."""
+    expiring = set()
+    for contract in contracts:
+        if parse_opra_expiry(contract) == current_date:
+            expiring.add(contract)
+    return expiring

@@ -213,3 +213,33 @@ def test_process_expiries_event_payload_has_assignment():
     assert payload["assignment"]["side"] == "SELL"
     assert payload["assignment"]["qty"] == 100
     assert payload["assignment"]["strike"] == 136.0
+
+
+def test_process_expiries_option_qty_preserves_pre_close_signed_qty():
+    """Regression: option_qty in payload must reflect the original signed qty, not 0 after close."""
+    engine = _engine()
+    ledger = Ledger(initial_cash=50000.0)
+    contract = "O:NVDA250117C00150000"
+    # Short 3 contracts
+    ledger._positions[f"OPTION:{contract}"] = _make_short_option_pos(contract, -3, 2.0)
+
+    action = ExpiryAction(
+        contract=contract,
+        instrument_id=f"OPTION:{contract}",
+        option_pos=ledger._positions[f"OPTION:{contract}"],
+        is_itm=False,
+        intrinsic_value=0.0,
+        underlying="NVDA",
+        stock_side=None,
+        strike=150.0,
+        stock_qty=300,
+    )
+
+    order_manager = OrderManager()
+    margin_engine = MarginEngine(MarginConfig())
+    events = engine.process_expiries("2025-01-17T16:00:00+00:00", [action], ledger, order_manager, margin_engine)
+
+    assert len(events) == 1
+    payload = events[0].payload
+    # Must be -3 (original signed qty), not 0 (post-close qty)
+    assert payload["option_qty"] == -3

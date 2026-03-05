@@ -129,3 +129,44 @@ def test_itm_expiry_triggers_call_away():
     # Expiry event present
     types = [e["type"] for e in events]
     assert EventType.OPTION_EXPIRY_EVENT.value in types
+
+
+def test_open_order_on_expiring_contract_is_cancelled():
+    """Regression [2]: a MARKET order placed on an expiring contract must be cancelled,
+    not filled and left as an open expired position."""
+    from models.enums import OrderType, Side as OrderSide, TimeInForce
+    from models.order import Order, OrderStatus
+
+    state = _make_state("2025-01-17", stock_price=125.0, option_avg_price=3.50)
+    contract = list(state.cache._option_bars.keys())[0]
+    ts_ns = state.clock._timestamps[0]
+
+    # Inject an open MARKET BUY order on the expiring contract (no prior position)
+    order = Order(
+        order_id="ord_test01",
+        session_id="sess_test",
+        account_id="acct_test",
+        instrument_id=f"OPTION:{contract}",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        qty=1,
+        remaining_qty=1,
+        status=OrderStatus.ACCEPTED,
+        time_in_force=TimeInForce.DAY,
+        created_ts=ns_to_iso(ts_ns),
+        last_update_ts=ns_to_iso(ts_ns),
+    )
+    state.order_manager._orders["ord_test01"] = order
+
+    svc = SessionService.__new__(SessionService)
+    svc._sessions = {"sess_test": state}
+
+    ts = ns_to_iso(ts_ns)
+    svc._process_tick(state, ts_ns, ts)
+
+    # The order must be cancelled, not left open or filled
+    result_order = state.order_manager.get_order("ord_test01")
+    assert result_order is not None
+    assert result_order.status == OrderStatus.CANCELLED, (
+        f"Expected CANCELLED, got {result_order.status}: open order on expired contract survived the tick"
+    )
