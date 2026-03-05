@@ -232,6 +232,21 @@ def main():
         events = step_data.get("events", [])
         day_count += 1
 
+        # Handle option expiry events
+        for evt in events:
+            if evt.get("type") == "OPTION_EXPIRY_EVENT":
+                payload = evt.get("payload", {})
+                contract = payload.get("contract", "")
+                is_itm = payload.get("is_itm", False)
+                assignment = payload.get("assignment")
+                if is_itm and assignment:
+                    print(f"  [EXPIRY] {contract} expired ITM -> {assignment['side']} "
+                          f"{assignment['qty']} shares at ${assignment['strike']:.2f}")
+                else:
+                    print(f"  [EXPIRY] {contract} expired worthless")
+                option_positions = [p for p in option_positions
+                                    if p.get("contract") != contract]
+
         # Get current state
         market_tick = next((e for e in events if e["type"] == "MARKET_TICK"), None)
         current_price = 0

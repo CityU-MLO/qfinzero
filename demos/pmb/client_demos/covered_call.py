@@ -106,6 +106,21 @@ def main():
             if not result.is_running:
                 break
 
+            # Handle option expiry events
+            for evt in result.events:
+                if evt.get("type") == "OPTION_EXPIRY_EVENT":
+                    payload = evt.get("payload", {})
+                    contract = payload.get("contract", "")
+                    is_itm = payload.get("is_itm", False)
+                    assignment = payload.get("assignment")
+                    if is_itm and assignment:
+                        print(f"  [EXPIRY] {contract} expired ITM -> {assignment['side']} "
+                              f"{assignment['qty']} shares at ${assignment['strike']:.2f}")
+                    else:
+                        print(f"  [EXPIRY] {contract} expired worthless")
+                    option_positions = [p for p in option_positions
+                                        if p.get("contract") != contract]
+
             day += 1
             price = result.get_stock_price("NVDA") or 0
             snap = result.get_snapshot()
