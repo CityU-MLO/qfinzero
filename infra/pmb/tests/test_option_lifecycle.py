@@ -1,4 +1,7 @@
-from domain.option_lifecycle import parse_opra_expiry
+import pytest
+from domain.option_lifecycle import parse_opra_expiry, check_option_expiries, ExpiryAction
+from models.position import Position
+from models.enums import InstrumentType, Side
 
 
 def test_parse_nvda_call():
@@ -29,12 +32,6 @@ def test_parse_lowercase_ticker_returns_none():
 
 def test_parse_empty_string_returns_none():
     assert parse_opra_expiry("") is None
-
-
-import pytest
-from domain.option_lifecycle import check_option_expiries, ExpiryAction
-from models.position import Position
-from models.enums import InstrumentType, Side
 
 
 def _make_option_pos(contract: str, qty: int) -> Position:
@@ -132,3 +129,16 @@ def test_missing_underlying_price():
     # Can't determine ITM/OTM → treat as OTM, no assignment
     assert a.is_itm is False
     assert a.stock_side is None
+
+
+def test_long_call_itm_no_assignment():
+    """Long call expires ITM: recognized as ITM but no stock transaction (no assignment for longs)."""
+    contract = "O:NVDA250117C00136000"  # strike 136
+    positions = {f"OPTION:{contract}": _make_option_pos(contract, 1)}  # qty=+1, long
+    # underlying = 145 > 136 strike → ITM
+    actions = check_option_expiries(positions, "2025-01-17", {"NVDA": 145.0})
+    assert len(actions) == 1
+    a = actions[0]
+    assert a.is_itm is True
+    assert a.intrinsic_value == pytest.approx(9.0)  # 145 - 136
+    assert a.stock_side is None  # no assignment for long positions

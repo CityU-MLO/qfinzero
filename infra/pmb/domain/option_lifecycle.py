@@ -43,7 +43,7 @@ class ExpiryAction:
     stock_qty: int
 
 
-def _parse_opra_parts(contract: str):
+def _parse_opra_parts(contract: str) -> Optional[tuple[str, str, float]]:
     """Return (underlying, right, strike_float) or None."""
     m = _OPRA_RE.match(contract)
     if not m:
