@@ -232,46 +232,53 @@ class SessionService:
         prices = state.cache.get_prices_at(ts_ns)
         state.ledger.update_market_prices(prices)
 
-        # 2b. Option expiry lifecycle check
+        # 2b. Option expiry lifecycle check — only at the last bar of the expiry date.
+        # For DAILY sessions every bar is EOD, so this always fires.
+        # For MINUTE sessions this fires only at the last intraday bar (e.g. 15:59/16:00),
+        # not at 09:31, so the full day of option mark-to-market is preserved.
         current_date = ts[:10]  # "YYYY-MM-DD"
-        underlying_prices = {sym: bar.close for sym, bar in stock_bars.items()}
-        expiry_actions = check_option_expiries(
-            state.ledger.positions,
-            current_date,
-            underlying_prices,
-        )
-        if expiry_actions:
-            expiry_events = state.execution_engine.process_expiries(
-                ts,
-                expiry_actions,
-                state.ledger,
-                state.order_manager,
-                state.margin_engine,
+        is_eod = state.clock.is_last_bar_of_date(ts_ns)
+
+        if is_eod:
+            underlying_prices = {sym: bar.close for sym, bar in stock_bars.items()}
+            expiry_actions = check_option_expiries(
+                state.ledger.positions,
+                current_date,
+                underlying_prices,
             )
-            for evt in expiry_events:
-                events.append(evt.model_dump())
-                state.history.append_event(evt)
+            if expiry_actions:
+                expiry_events = state.execution_engine.process_expiries(
+                    ts,
+                    expiry_actions,
+                    state.ledger,
+                    state.order_manager,
+                    state.margin_engine,
+                )
+                for evt in expiry_events:
+                    events.append(evt.model_dump())
+                    state.history.append_event(evt)
 
         # 3. Cancel open orders on contracts expiring today before execution.
         # Orders on expired contracts must not fill — they are cancelled at EOD
         # before the execution engine processes them.
-        expiring = get_expiring_contracts(
-            current_date,
-            list({
-                iid[len("OPTION:"):] for iid in state.ledger.positions
-                if iid.startswith("OPTION:")
-            } | {
-                o.instrument_id[len("OPTION:"):] for o in state.order_manager.get_open_orders()
-                if o.instrument_id.startswith("OPTION:")
-            }),
-        )
-        for order in state.order_manager.get_open_orders():
-            if not order.instrument_id.startswith("OPTION:"):
-                continue
-            contract = order.instrument_id[len("OPTION:"):]
-            if contract in expiring:
-                state.order_manager.cancel(order.order_id, ts)
-                state.history.update_order(order)
+        if is_eod:
+            expiring = get_expiring_contracts(
+                current_date,
+                list({
+                    iid[len("OPTION:"):] for iid in state.ledger.positions
+                    if iid.startswith("OPTION:")
+                } | {
+                    o.instrument_id[len("OPTION:"):] for o in state.order_manager.get_open_orders()
+                    if o.instrument_id.startswith("OPTION:")
+                }),
+            )
+            for order in state.order_manager.get_open_orders():
+                if not order.instrument_id.startswith("OPTION:"):
+                    continue
+                contract = order.instrument_id[len("OPTION:"):]
+                if contract in expiring:
+                    state.order_manager.cancel(order.order_id, ts)
+                    state.history.update_order(order)
 
         # 4. Execution: process open orders (expired-contract orders already cancelled above)
         exec_events, trades = state.execution_engine.process_step(

@@ -170,3 +170,87 @@ def test_open_order_on_expiring_contract_is_cancelled():
     assert result_order.status == OrderStatus.CANCELLED, (
         f"Expected CANCELLED, got {result_order.status}: open order on expired contract survived the tick"
     )
+
+
+def test_minute_session_expiry_fires_only_at_last_bar():
+    """Regression [4]: for MINUTE sessions, expiry must not fire at 09:31 on the expiry date.
+    It should fire only at the last bar of the expiry date."""
+    expiry_date = "2025-01-17"
+    contract = f"O:NVDA{expiry_date[2:4]}{expiry_date[5:7]}{expiry_date[8:10]}C00136000"
+    stock_price = 125.0  # OTM call (strike 136 > spot 125)
+
+    # Two minute bars on expiry date: 09:31 and 15:59
+    ts_morning = iso_to_ns(f"{expiry_date}T14:31:00+00:00")  # 09:31 ET
+    ts_close = iso_to_ns(f"{expiry_date}T20:59:00+00:00")   # 15:59 ET
+
+    cache = MarketDataCache()
+    for ts_ns in (ts_morning, ts_close):
+        cache._stock_bars.setdefault("NVDA", {})[ts_ns] = StockBar(
+            symbol="NVDA", window_start_ns=ts_ns,
+            open=stock_price, high=stock_price, low=stock_price, close=stock_price, volume=1000,
+        )
+        cache._option_bars.setdefault(contract, {})[ts_ns] = OptionBar(
+            contract=contract, window_start_ns=ts_ns,
+            open=0.01, high=0.01, low=0.0, close=0.0, volume=5,
+            underlying="NVDA", expiry=expiry_date, strike=136.0, right="C",
+        )
+    cache._rebuild_timestamps()
+
+    clock = SessionClock([ts_morning, ts_close], Frequency.MINUTE, f"{expiry_date}T21:00:00+00:00")
+
+    ledger = Ledger(50000.0)
+    ledger._positions[f"OPTION:{contract}"] = Position(
+        instrument_id=f"OPTION:{contract}",
+        type=InstrumentType.OPTION,
+        qty=-1,
+        avg_price=3.50,
+        mark_price=0.01,
+    )
+
+    exec_config = ExecutionConfig(fee_model=FeeModel())
+    req = CreateSessionRequest(
+        account_id="acct_test",
+        frequency=Frequency.MINUTE,
+        start_ts=f"{expiry_date}T14:31:00+00:00",
+        end_ts=f"{expiry_date}T21:00:00+00:00",
+        universe=Universe(stocks=["NVDA"], options=[contract]),
+        execution_config=exec_config,
+    )
+    state = SessionState(
+        session_id="sess_min",
+        account_id="acct_test",
+        config=req,
+        clock=clock,
+        cache=cache,
+        ledger=ledger,
+        order_manager=OrderManager(),
+        execution_engine=ExecutionEngine(seed=42, slippage_bps=0.0, fee_model=FeeModel()),
+        margin_engine=MarginEngine(MarginConfig()),
+        history=HistoryStore(),
+    )
+
+    svc = SessionService.__new__(SessionService)
+    svc._sessions = {"sess_min": state}
+
+    # --- First tick (09:31): expiry must NOT fire ---
+    ts_str = ns_to_iso(ts_morning)
+    events_morning = svc._process_tick(state, ts_morning, ts_str)
+
+    morning_types = [e["type"] for e in events_morning]
+    assert EventType.OPTION_EXPIRY_EVENT.value not in morning_types, (
+        "Expiry fired at 09:31 on expiry date — should only fire at last bar"
+    )
+    # Option position still intact
+    assert state.ledger.positions.get(f"OPTION:{contract}") is not None
+
+    # --- Second tick (15:59): expiry MUST fire (last bar of the day) ---
+    ts_str = ns_to_iso(ts_close)
+    events_close = svc._process_tick(state, ts_close, ts_str)
+
+    close_types = [e["type"] for e in events_close]
+    assert EventType.OPTION_EXPIRY_EVENT.value in close_types, (
+        "Expiry did not fire at last bar of expiry date"
+    )
+    # OTM — option position gone
+    opt_pos = state.ledger.positions.get(f"OPTION:{contract}")
+    assert opt_pos is None or opt_pos.qty == 0
