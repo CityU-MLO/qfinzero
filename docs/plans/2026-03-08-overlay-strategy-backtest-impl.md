@@ -1060,10 +1060,117 @@ git commit -m "feat(pmb): overlay strategy demos verified end-to-end"
 
 ---
 
-## Task 6: LLM-Driven Overlay Agent (Phase 2 — After Task 5 Verified)
+## Phase 2 Tasks (After Phase 1 Verified)
 
-> This task replaces the hardcoded rule logic with LLM decision-making.
-> Only start after Task 5 passes end-to-end.
+Phase 2 aligns with the paper's evaluation protocol and adds LLM agent integration.
+All Phase 2 tasks depend on Phase 1 (Tasks 1-5) passing end-to-end.
+
+---
+
+## Task 6: Paper Parameter Alignment
+
+> Upgrade demos from Phase 1 proof-of-concept to paper-spec configuration.
+
+**Files:**
+- Modify: `infra/pmb/demos/overlay_helpers.py`
+- Modify: `infra/pmb/demos/overlay_profit_increase.py`
+- Modify: `infra/pmb/demos/overlay_hedging.py`
+
+### Parameter Changes
+
+| Parameter | Phase 1 | Paper Spec |
+|-----------|---------|------------|
+| Underlyings (Profit) | AAPL | QQQ, NVDA, USO |
+| Underlyings (Hedge) | AAPL | QQQ, NVDA |
+| Position size | 100 shares | 10,000 shares |
+| Cash buffer | $100k all-in | 20% of stock notional |
+| Rebalance freq | Monthly | **Weekly** |
+| DTE range (Profit) | 25-35 days | **7-45 days** |
+| DTE range (Hedge) | 25-35 days | **7-60 days** |
+| Delta constraint | None | Total effective delta ≤ initial position |
+
+### Weekly Rebalance Logic
+
+```
+Every Friday (or last trading day of week):
+  1. Check active option positions
+  2. If position exists and DTE < 3: close early (buy back)
+  3. Query option chain with new DTE window
+  4. Open new position for next week/period
+```
+
+This replaces the "natural expiry only" approach from Phase 1.
+
+### Cash Buffer Calculation
+
+```python
+stock_notional = stock_price * 10_000  # e.g. QQQ $480 → $4.8M
+cash_buffer = stock_notional * 0.20     # $960k
+initial_cash = stock_notional + cash_buffer  # $5.76M
+```
+
+---
+
+## Task 7: Cash-Secured Put Selling (Profit Increase Addition)
+
+> Add CSP strategy alongside covered call for the Profit Increase task.
+
+**Files:**
+- Modify: `infra/pmb/demos/overlay_profit_increase.py`
+
+### Logic
+
+```
+Weekly rebalance:
+  If cash_available >= strike * 100:
+    Sell 1 OTM put (cash-secured)
+    Reserve: strike * 100 from cash
+
+  If put expires ITM (assignment):
+    Buy 100 shares at strike (adds to holdings)
+    Premium already collected
+
+  Constraint: total effective delta ≤ initial 10,000 shares
+```
+
+### Delta Constraint
+
+The agent must not amplify leverage beyond the initial stock position:
+- Long 10,000 shares = +10,000 delta
+- Short 1 call (delta ~-0.3) = reduces delta by ~30
+- Short 1 put (delta ~+0.3) = increases delta by ~30
+- Total delta must stay ≤ 10,000
+
+---
+
+## Task 8: Put Spread (Hedging Addition)
+
+> Add put spread strategy alongside protective put for the Hedging task.
+
+**Files:**
+- Modify: `infra/pmb/demos/overlay_hedging.py`
+
+### Logic
+
+```
+Weekly rebalance:
+  Option A — Protective put (existing):
+    Buy 1 OTM put at strike_high
+
+  Option B — Put spread (new):
+    Buy 1 put at strike_high (protection ceiling)
+    Sell 1 put at strike_low  (protection floor)
+    Net cost = premium_high - premium_low
+    Max protection = strike_high - strike_low
+```
+
+Put spreads reduce hedging cost but cap protection at (strike_high - strike_low).
+
+---
+
+## Task 9: LLM-Driven Overlay Agent
+
+> Replace hardcoded rules with LLM decision-making.
 
 **Files:**
 - Create: `infra/pmb/demos/overlay_llm_agent.py`
@@ -1073,43 +1180,27 @@ git commit -m "feat(pmb): overlay strategy demos verified end-to-end"
 ### Architecture
 
 ```
-每个交易日:
-  1. 构建 prompt (市场状态 + 持仓 + 期权链 + 策略指令)
-  2. 调用 DeepSeek API → 返回 JSON action
-  3. 解析 action → 调用 PMB 下单
-  4. 记录: latency, prompt_tokens, completion_tokens, equity
+Every rebalance day (weekly):
+  1. Build prompt (market state + holdings + option chain + strategy rules)
+  2. Call DeepSeek API → JSON action
+  3. Parse action → PMB orders
+  4. Record: latency, prompt_tokens, completion_tokens, equity
 ```
 
-### LLM Config (from eval/models.yaml)
+### LLM Config
+
+Load from `eval/models.yaml` to keep config DRY:
 
 ```python
-LLM_CONFIG = {
-    "model_name": "deepseek-chat",
-    "base_url": "https://api.deepseek.com/v1",
-    "api_key": "${DEEPSEEK_API_KEY}",  # from eval/models.yaml:36
-    "call_latency_s": 1.0,
-}
+import yaml
+with open("../../eval/models.yaml") as f:
+    models = yaml.safe_load(f)["models"]
+    deepseek = next(m for m in models if m["model_name"] == "deepseek-chat")
 ```
-
-Better: load directly from `eval/models.yaml` to keep config DRY.
 
 ### Token & Latency Tracking
 
-The existing `call_model()` in `eval/planning/runner/run_multistep.py:245-274` only
-extracts `content` from the response, but OpenAI-compatible APIs return a `usage` field:
-
-```json
-{
-  "choices": [...],
-  "usage": {
-    "prompt_tokens": 1234,
-    "completion_tokens": 567,
-    "total_tokens": 1801
-  }
-}
-```
-
-The LLM agent should extract and accumulate these:
+Extract `usage` field from OpenAI-compatible API responses:
 
 ```python
 def call_llm(prompt: str) -> tuple[str, float, dict]:
@@ -1124,83 +1215,90 @@ def call_llm(prompt: str) -> tuple[str, float, dict]:
     return content, latency, usage
 ```
 
-### Three Key Metrics to Track
+### Three Key Metrics
 
-**1. Latency (耗时)**
-- Per-call latency (seconds)
-- Total backtest wall time
-- Avg latency per trading day
+**1. Latency**
+- Per-call, total wall time, P50/P95
 - Saved to: `results/overlay_llm_*/timing.json`
 
-```json
-{
-  "total_wall_time_s": 312.5,
-  "total_llm_calls": 252,
-  "avg_latency_per_call_s": 1.24,
-  "avg_latency_per_day_s": 1.24,
-  "call_latency_p50_s": 1.1,
-  "call_latency_p95_s": 2.3
-}
-```
-
-**2. Token Consumption (Token 消耗)**
-- Total prompt tokens
-- Total completion tokens
-- Estimated cost (DeepSeek pricing: ~$0.14/M input, ~$0.28/M output for deepseek-chat)
+**2. Token Consumption**
+- Prompt/completion tokens, estimated cost
+- DeepSeek pricing: ~$0.14/M input, ~$0.28/M output
 - Saved to: `results/overlay_llm_*/tokens.json`
 
-```json
-{
-  "total_prompt_tokens": 315000,
-  "total_completion_tokens": 25200,
-  "total_tokens": 340200,
-  "estimated_cost_usd": 0.051,
-  "avg_prompt_tokens_per_call": 1250,
-  "avg_completion_tokens_per_call": 100
-}
-```
-
-**3. Equity Curve (账户曲线)**
-- Daily equity snapshots (same as rule-based demos)
-- Comparison columns: LLM agent vs rule-based vs buy-and-hold
+**3. Equity Curve**
+- Comparison: LLM agent vs rule-based vs buy-and-hold vs institutional ETF
 - Saved to: `results/overlay_llm_*/equity_curve.csv`
-
-```csv
-date,llm_equity,rule_equity,benchmark_equity
-2024-01-02,100000.00,100000.00,100000.00
-2024-01-03,100150.00,100120.00,100100.00
-...
-```
 
 ### Prompt Design (Sketch)
 
+**Profit Increase prompt:**
 ```
-You are an options overlay trading agent. Your goal is to enhance returns
-on an existing AAPL stock position using covered call writing.
+You are an options overlay trading agent managing a {underlying} portfolio.
+Objective: enhance income via covered calls and cash-secured put selling.
 
 Current state:
 - Date: {date}
-- AAPL price: ${price}
-- Cash: ${cash}
-- Stock position: {qty} shares
+- {underlying} price: ${price}
+- Cash: ${cash} (buffer for CSP)
+- Stock position: {qty} shares (target: 10,000)
 - Active options: {options_list}
-- Available contracts: {chain_summary}
+- Effective delta: {delta}
+- Available contracts (7-45 DTE): {chain_summary}
 
-Rules:
-- You MUST maintain 100 shares of AAPL at all times
-- You may sell up to 1 call contract at a time (covered)
-- Respond with JSON: {"action": "sell_call"|"hold"|"close_call", "contract": "...", "reason": "..."}
+Constraints:
+- Total effective delta must not exceed 10,000
+- Short puts must be fully cash-secured (strike * 100 ≤ available cash)
+- Option maturities: 7-45 DTE only
+
+Respond with JSON:
+{"action": "sell_call"|"sell_put"|"hold"|"close_position",
+ "contract": "O:...", "qty": 1, "reason": "..."}
 ```
 
-### Step-by-Step (high-level, detailed plan TBD after Task 5)
+**Hedging prompt:**
+```
+You are a risk management agent protecting a {underlying} portfolio.
+Objective: minimize downside risk while controlling hedging cost.
 
-1. Create `overlay_llm_agent.py` with LLM call loop
-2. Load DeepSeek config from `eval/models.yaml`
-3. Build prompt template with market state injection
-4. Parse LLM JSON response → PMB order
-5. Accumulate timing/token/equity metrics
-6. Save results with comparison to rule-based baseline
-7. Smoke test with live services
+Current state:
+- Date: {date}
+- {underlying} price: ${price}
+- Cash: ${cash} (hedging budget)
+- Stock position: {qty} shares
+- Active hedges: {options_list}
+- Available contracts (7-60 DTE): {chain_summary}
+
+Allowed strategies:
+- Protective put (buy put)
+- Put spread (buy high-strike put + sell low-strike put, same expiry)
+
+Respond with JSON:
+{"action": "buy_put"|"buy_spread"|"hold"|"close_position",
+ "contract_long": "O:...", "contract_short": "O:..." (spread only),
+ "qty": 1, "reason": "..."}
+```
+
+---
+
+## Task 10: Institutional ETF Benchmark
+
+> Add ETF price data for comparison baselines.
+
+**Files:**
+- Modify: `infra/pmb/demos/overlay_helpers.py` (add ETF price query)
+- Modify: result output to include ETF equity column
+
+### ETF Mapping
+
+| Underlying | Benchmark ETF | Description |
+|-----------|---------------|-------------|
+| QQQ | JEPQ | JPMorgan Nasdaq Equity Premium Income |
+| NVDA | NVDY | YieldMax NVDA Option Income |
+| USO | USOY | YieldMax USO Option Income |
+
+Query ETF daily prices from UPQ (same stock daily endpoint) and compute
+a normalized equity curve starting from the same initial capital.
 
 ---
 
@@ -1213,4 +1311,8 @@ Rules:
 | 3 | Protective Put demo | `demos/overlay_hedging.py` | 1 |
 | 4 | Update run_all.py | `demos/run_all.py` (modify) | 1 |
 | 5 | Smoke test with live services | Verify end-to-end | 1 |
-| 6 | LLM-driven overlay agent | `demos/overlay_llm_agent.py` | 2 (after Task 5) |
+| 6 | Paper parameter alignment | helpers + both demos (modify) | 2 |
+| 7 | Cash-secured put selling | `overlay_profit_increase.py` (modify) | 2 |
+| 8 | Put spread | `overlay_hedging.py` (modify) | 2 |
+| 9 | LLM-driven overlay agent | `demos/overlay_llm_agent.py` (create) | 2 |
+| 10 | Institutional ETF benchmark | helpers + result output (modify) | 2 |

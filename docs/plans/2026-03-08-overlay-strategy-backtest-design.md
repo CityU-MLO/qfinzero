@@ -230,30 +230,76 @@ infra/pmb/demos/
 
 ## Dependencies
 
-- PMB server running on `:19320`
-- UPQ server running on `:23333` with AAPL 2024 daily stock bars
-- UPQ option chain service on `:19350` with AAPL 2024 option data
+- PMB server running on `:19701` (test-env standard port)
+- UPQ server running on `:19703` (test-env standard port)
 - Option lifecycle support (already on main since 2026-03-06)
 
-## Phase 2: LLM-Driven Overlay Agent
+## Phase 2: LLM-Driven Overlay Agent + Paper Alignment
 
-After the rule-based demos (Phase 1) are verified end-to-end, replace the hardcoded
-trading rules with LLM decision-making:
+Phase 2 brings the implementation in line with the paper's evaluation protocol and
+replaces rule-based logic with LLM decision-making.
+
+### 2a. Paper Parameter Alignment
+
+The following parameters must be updated to match the paper specification:
+
+| Parameter | Phase 1 (current) | Paper Spec | Change |
+|-----------|-------------------|------------|--------|
+| **Underlyings (Profit)** | AAPL only | QQQ, NVDA, USO | Add 3 tickers |
+| **Underlyings (Hedge)** | AAPL only | QQQ, NVDA | Add 2 tickers |
+| **Position size** | 100 shares | 10,000 shares | 100x increase |
+| **Cash buffer** | All-in $100k | 20% of stock notional | Proportional |
+| **Rebalance freq** | Monthly | **Weekly** | 4x more frequent |
+| **DTE range (Profit)** | 25-35 days | **7-45 days** | Wider window |
+| **DTE range (Hedge)** | 25-35 days | **7-60 days** | Wider window |
+| **Strategies (Profit)** | Covered call only | Covered call **+ cash-secured put** | Add CSP |
+| **Strategies (Hedge)** | Protective put only | Protective put **+ put spread** | Add spread |
+| **Benchmark** | Buy-and-hold | **Institutional ETFs** (JEPQ, NVDY, USOY) | Add ETF data |
+| **Delta constraint** | None | Total effective delta ≤ initial position | Add check |
+
+### 2b. Cash-Secured Put Selling (Profit Increase addition)
+
+The agent may sell OTM puts that are fully cash-secured:
+- Cash required = strike × 100 × num_contracts
+- If assigned (ITM expiry): buy stock at strike (adds to holdings)
+- Premium collected regardless of outcome
+- Must not exceed cash buffer
+
+### 2c. Put Spread (Hedging addition)
+
+Buy high-strike put + sell low-strike put:
+- Net debit = premium_paid - premium_received
+- Max protection = high_strike - low_strike
+- Cheaper than naked put, but capped protection
+- Both legs must have same expiry
+
+### 2d. LLM Agent Integration
+
+Replace hardcoded rules with LLM decision-making:
 
 - **Model:** DeepSeek Chat (config from `eval/models.yaml:34-38`)
-- **Pattern:** Each trading day, feed market state + holdings + available option chain
-  to the LLM, receive a JSON action (sell_call / buy_put / hold / close), execute via PMB
+- **Pattern:** Each rebalance day (weekly), feed market state + holdings +
+  available option chain to the LLM, receive a JSON action, execute via PMB
+- **Agent decides:** when to enter/exit, which contracts (strike + maturity),
+  which strategy to apply (covered call vs CSP for profit; put vs spread for hedge)
 - **Three key metrics to track:**
   1. **Latency** — per-call and total wall time
   2. **Token consumption** — prompt/completion tokens, estimated cost
-  3. **Equity curve** — LLM agent vs rule-based vs buy-and-hold comparison
+  3. **Equity curve** — LLM agent vs rule-based vs buy-and-hold vs institutional ETF
 
-This enables evaluating whether an LLM can match or exceed a simple rule-based overlay.
+### 2e. Institutional ETF Benchmark
+
+For Profit Increase, compare against systematic overlay ETFs:
+- **JEPQ** — JPMorgan Nasdaq Equity Premium Income ETF (for QQQ)
+- **NVDY** — YieldMax NVDA Option Income ETF (for NVDA)
+- **USOY** — YieldMax USO Option Income ETF (for USO)
+
+These ETFs apply option overlays institutionally, serving as practical baselines
+to assess whether LLM-based agents can match or surpass structured implementations.
 
 ## Future Extensions
 
-1. **Cash-secured put** — Sell puts without holding stock (Profit Increase variant)
-2. **Put spread** — Buy high-strike put + sell low-strike put (Hedging cost reduction)
-3. **Multi-ticker** — Run same strategies on NVDA, SPY, etc.
-4. **Parameterized CLI** — `--ticker AAPL --start 2024-01-02 --end 2024-12-31 --otm-pct 0.05`
-5. **Greeks-based selection** — Use delta targeting instead of % OTM
+1. **Parameterized CLI** — `--ticker AAPL --start 2024-01-02 --end 2024-12-31 --otm-pct 0.05`
+2. **Greeks-based selection** — Use delta targeting instead of % OTM
+3. **Early roll logic** — Roll before expiry based on time decay / delta thresholds
+4. **Multi-leg strategies** — Iron condors, collars, strangles
