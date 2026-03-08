@@ -40,6 +40,8 @@ def main():
         ("daily_buy_close.py", "Daily Buy-at-Close Strategy (AAPL Jan 2025)"),
         ("intraday_5min_signal.py", "Intraday 5-Min Mean Reversion (AAPL)"),
         ("covered_call.py", "Covered Call Strategy (NVDA with Options)"),
+        ("overlay_profit_increase.py", "Overlay: Covered Call Profit Increase (AAPL 2024)"),
+        ("overlay_hedging.py", "Overlay: Protective Put Hedging (AAPL 2024)"),
     ]
 
     success_count = 0
