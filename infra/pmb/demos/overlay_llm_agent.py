@@ -570,7 +570,7 @@ def run_llm_strategy(underlying: str, strategy: str):
         "latency_p95_s": round(latencies[int(len(latencies)*0.95)], 3) if latencies else 0,
         "calls": llm_calls,
     }
-    metrics_path = os.path.join(saver.result_dir, "llm_metrics.json")
+    metrics_path = os.path.join(saver.output_dir, "llm_metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(llm_metrics, f, indent=2)
     print(f"   Saved LLM metrics: {metrics_path}")
