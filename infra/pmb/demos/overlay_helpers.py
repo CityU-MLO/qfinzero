@@ -105,9 +105,11 @@ def discover_contracts_weekly(underlying: str, start_date: str, end_date: str,
 
     Same logic as discover_contracts but uses weekly intervals and
     configurable DTE window instead of fixed monthly 25-35 day window.
+    Deduplicates by ticker — each unique contract appears only once.
     """
     weeks = get_weekly_option_dates(start_date, end_date, dte_min, dte_max)
     contracts = []
+    seen_tickers = set()
 
     for query_date, expiry_min, expiry_max in weeks:
         week_price = query_stock_price(underlying, query_date) or ref_price
@@ -133,14 +135,20 @@ def discover_contracts_weekly(underlying: str, start_date: str, end_date: str,
 
         selected = select_contract(chain, target_strike)
         if selected:
+            ticker = selected["ticker"]
+            if ticker in seen_tickers:
+                print(f"  [DISCOVERY] {query_date} (spot=${week_price:.2f}): "
+                      f"{ticker} (already discovered, skipping)")
+                continue
+            seen_tickers.add(ticker)
             contracts.append({
-                "ticker": selected["ticker"],
+                "ticker": ticker,
                 "strike": selected["strike"],
                 "expiry": selected["expiry"],
                 "close": selected["close"],
                 "query_date": query_date,
             })
-            print(f"  [DISCOVERY] {query_date} (spot=${week_price:.2f}): {selected['ticker']} "
+            print(f"  [DISCOVERY] {query_date} (spot=${week_price:.2f}): {ticker} "
                   f"strike=${selected['strike']:.2f} expiry={selected['expiry']} "
                   f"premium=${selected['close']:.2f}")
         else:
