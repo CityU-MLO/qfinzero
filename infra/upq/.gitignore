@@ -3,5 +3,6 @@
 .env
 /raw_sample/
 /storage/
+!/storage/splits.json
 /state/
 /scripts_sync_sample_14d.sh

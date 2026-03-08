@@ -1,0 +1,10 @@
+{
+  "splits": [
+    {"ticker": "NVDA", "effective_date": "2024-06-10", "ratio": 10},
+    {"ticker": "TSLA", "effective_date": "2022-08-25", "ratio": 3},
+    {"ticker": "AMZN", "effective_date": "2022-06-06", "ratio": 20},
+    {"ticker": "GOOGL", "effective_date": "2022-07-18", "ratio": 20},
+    {"ticker": "GOOG", "effective_date": "2022-07-18", "ratio": 20},
+    {"ticker": "SHOP", "effective_date": "2022-06-29", "ratio": 10}
+  ]
+}
