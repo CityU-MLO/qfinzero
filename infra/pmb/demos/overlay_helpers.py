@@ -5,8 +5,8 @@ Shared helpers for overlay strategy demos.
 import requests
 from datetime import datetime, timedelta
 
-PMB_BASE = "http://127.0.0.1:19320"
-UPQ_CHAIN = "http://127.0.0.1:19350"
+PMB_BASE = "http://127.0.0.1:19701"
+UPQ_CHAIN = "http://127.0.0.1:19703"
 
 
 def query_option_chain(underlying: str, date: str, option_type: str,
@@ -72,7 +72,7 @@ def get_monthly_option_dates(start_date: str, end_date: str) -> list[tuple[str, 
 def query_stock_price(underlying: str, date: str) -> float | None:
     """Get stock close price from UPQ for a specific date."""
     try:
-        resp = requests.get(f"http://127.0.0.1:23333/stock/daily", params={
+        resp = requests.get(f"{UPQ_CHAIN}/stock/daily", params={
             "tickers": underlying, "start": date, "end": date,
             "fields": "ticker,date,close",
         }, timeout=10)

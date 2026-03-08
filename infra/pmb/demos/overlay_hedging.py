@@ -26,7 +26,7 @@ from demos.overlay_helpers import (
     PMB_BASE,
     discover_contracts, create_account, create_session,
     place_order, step_session, get_summary, get_export,
-    get_positions, get_account, print_section,
+    get_positions, get_account, print_section, query_stock_price,
 )
 from demos.result_saver import ResultSaver
 
@@ -42,18 +42,8 @@ OTM_PCT = 0.05  # 5% OTM for put strike
 
 def get_reference_price(underlying: str, date: str) -> float:
     """Get approximate stock price from UPQ for strike estimation."""
-    try:
-        resp = requests.get(f"http://127.0.0.1:23333/stock/daily", params={
-            "tickers": underlying, "start": date, "end": date,
-            "fields": "ticker,date,close",
-        }, timeout=10)
-        if resp.status_code == 200:
-            rows = resp.json()
-            if rows:
-                return rows[0]["close"]
-    except Exception:
-        pass
-    return 185.0
+    price = query_stock_price(underlying, date)
+    return price if price is not None else 185.0
 
 
 def main():
