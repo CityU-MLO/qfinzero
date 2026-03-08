@@ -69,17 +69,36 @@ def get_monthly_option_dates(start_date: str, end_date: str) -> list[tuple[str, 
     return result
 
 
+def query_stock_price(underlying: str, date: str) -> float | None:
+    """Get stock close price from UPQ for a specific date."""
+    try:
+        resp = requests.get(f"http://127.0.0.1:23333/stock/daily", params={
+            "tickers": underlying, "start": date, "end": date,
+            "fields": "ticker,date,close",
+        }, timeout=10)
+        if resp.status_code == 200:
+            rows = resp.json()
+            if rows:
+                return rows[0]["close"]
+    except Exception:
+        pass
+    return None
+
+
 def discover_contracts(underlying: str, start_date: str, end_date: str,
                        option_type: str, otm_pct: float,
                        ref_price: float) -> list[dict]:
     """Pre-discover all option contracts needed for the backtest period.
+
+    Uses dynamic stock price per month for strike range calculation.
+    Falls back to ref_price if UPQ price query fails.
 
     Args:
         underlying: Stock symbol
         start_date/end_date: Backtest period
         option_type: "C" or "P"
         otm_pct: OTM percentage for strike target (e.g. 0.05 for 5%)
-        ref_price: Reference stock price for strike estimation
+        ref_price: Reference stock price (fallback if UPQ unavailable)
 
     Returns:
         List of selected contracts with {ticker, strike, expiry, close, query_date}
@@ -88,14 +107,17 @@ def discover_contracts(underlying: str, start_date: str, end_date: str,
     contracts = []
 
     for query_date, expiry_min, expiry_max in months:
+        # Dynamic price: query actual stock price for this month
+        month_price = query_stock_price(underlying, query_date) or ref_price
+
         if option_type == "C":
-            strike_min = ref_price * (1 + otm_pct * 0.5)
-            strike_max = ref_price * (1 + otm_pct * 2.0)
-            target_strike = ref_price * (1 + otm_pct)
+            strike_min = month_price * (1 + otm_pct * 0.5)
+            strike_max = month_price * (1 + otm_pct * 2.0)
+            target_strike = month_price * (1 + otm_pct)
         else:  # P
-            strike_min = ref_price * (1 - otm_pct * 2.0)
-            strike_max = ref_price * (1 - otm_pct * 0.5)
-            target_strike = ref_price * (1 - otm_pct)
+            strike_min = month_price * (1 - otm_pct * 2.0)
+            strike_max = month_price * (1 - otm_pct * 0.5)
+            target_strike = month_price * (1 - otm_pct)
 
         chain = query_option_chain(
             underlying=underlying,
@@ -116,11 +138,12 @@ def discover_contracts(underlying: str, start_date: str, end_date: str,
                 "close": selected["close"],
                 "query_date": query_date,
             })
-            print(f"  [DISCOVERY] {query_date}: {selected['ticker']} "
+            print(f"  [DISCOVERY] {query_date} (spot=${month_price:.2f}): {selected['ticker']} "
                   f"strike=${selected['strike']:.2f} expiry={selected['expiry']} "
                   f"premium=${selected['close']:.2f}")
         else:
-            print(f"  [DISCOVERY] {query_date}: no suitable {option_type} contract found")
+            print(f"  [DISCOVERY] {query_date} (spot=${month_price:.2f}): "
+                  f"no suitable {option_type} contract found")
 
     return contracts
 
