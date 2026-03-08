@@ -42,6 +42,8 @@ def main():
         ("covered_call.py", "Covered Call Strategy (NVDA with Options)"),
         ("overlay_profit_increase.py", "Overlay: Covered Call Profit Increase (AAPL 2024)"),
         ("overlay_hedging.py", "Overlay: Protective Put Hedging (AAPL 2024)"),
+        ("overlay_profit_increase_v2.py", "Overlay v2: Covered Call (Paper Spec, QQQ/NVDA/USO)"),
+        ("overlay_hedging_v2.py", "Overlay v2: Protective Put (Paper Spec, QQQ/NVDA)"),
     ]
 
     success_count = 0

@@ -69,6 +69,119 @@ def get_monthly_option_dates(start_date: str, end_date: str) -> list[tuple[str, 
     return result
 
 
+def get_weekly_option_dates(start_date: str, end_date: str,
+                            dte_min: int = 7, dte_max: int = 45
+                            ) -> list[tuple[str, str, str]]:
+    """Generate (query_date, expiry_min, expiry_max) tuples for each week.
+
+    query_date: Monday of each week (or start_date for the first week)
+    expiry_min/max: target expiry window based on dte_min/dte_max
+    """
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    result = []
+
+    current = start
+    while current < end:
+        query_date = current.strftime("%Y-%m-%d")
+        expiry_min = (current + timedelta(days=dte_min)).strftime("%Y-%m-%d")
+        expiry_max = (current + timedelta(days=dte_max)).strftime("%Y-%m-%d")
+        result.append((query_date, expiry_min, expiry_max))
+        # Advance to next Monday
+        days_to_monday = 7 - current.weekday()  # 0=Mon, so Mon->7
+        if current.weekday() == 0:
+            days_to_monday = 7
+        current = current + timedelta(days=days_to_monday)
+
+    return result
+
+
+def discover_contracts_weekly(underlying: str, start_date: str, end_date: str,
+                              option_type: str, otm_pct: float,
+                              ref_price: float,
+                              dte_min: int = 7, dte_max: int = 45
+                              ) -> list[dict]:
+    """Pre-discover option contracts for weekly rebalance schedule.
+
+    Same logic as discover_contracts but uses weekly intervals and
+    configurable DTE window instead of fixed monthly 25-35 day window.
+    """
+    weeks = get_weekly_option_dates(start_date, end_date, dte_min, dte_max)
+    contracts = []
+
+    for query_date, expiry_min, expiry_max in weeks:
+        week_price = query_stock_price(underlying, query_date) or ref_price
+
+        if option_type == "C":
+            strike_min = week_price * (1 + otm_pct * 0.5)
+            strike_max = week_price * (1 + otm_pct * 2.0)
+            target_strike = week_price * (1 + otm_pct)
+        else:  # P
+            strike_min = week_price * (1 - otm_pct * 2.0)
+            strike_max = week_price * (1 - otm_pct * 0.5)
+            target_strike = week_price * (1 - otm_pct)
+
+        chain = query_option_chain(
+            underlying=underlying,
+            date=query_date,
+            option_type=option_type,
+            strike_min=strike_min,
+            strike_max=strike_max,
+            expiry_min=expiry_min,
+            expiry_max=expiry_max,
+        )
+
+        selected = select_contract(chain, target_strike)
+        if selected:
+            contracts.append({
+                "ticker": selected["ticker"],
+                "strike": selected["strike"],
+                "expiry": selected["expiry"],
+                "close": selected["close"],
+                "query_date": query_date,
+            })
+            print(f"  [DISCOVERY] {query_date} (spot=${week_price:.2f}): {selected['ticker']} "
+                  f"strike=${selected['strike']:.2f} expiry={selected['expiry']} "
+                  f"premium=${selected['close']:.2f}")
+        else:
+            print(f"  [DISCOVERY] {query_date} (spot=${week_price:.2f}): "
+                  f"no suitable {option_type} contract found")
+
+    return contracts
+
+
+def get_etf_daily_prices(ticker: str, start_date: str, end_date: str) -> list[dict]:
+    """Get daily close prices for an ETF from UPQ.
+
+    Returns list of {date, close} sorted by date.
+    """
+    try:
+        resp = requests.get(f"{UPQ_CHAIN}/stock/daily", params={
+            "tickers": ticker,
+            "start": start_date,
+            "end": end_date,
+            "fields": "ticker,date,close",
+        }, timeout=30)
+        if resp.status_code == 200:
+            rows = resp.json()
+            return [{"date": r["date"][:10], "close": r["close"]} for r in rows]
+    except Exception:
+        pass
+    return []
+
+
+def compute_initial_cash(stock_price: float, stock_qty: int,
+                         cash_buffer_pct: float = 0.20) -> float:
+    """Compute initial cash = stock notional + cash buffer (paper spec).
+
+    E.g. QQQ $480 * 10,000 shares = $4.8M notional, 20% buffer = $960k,
+    total = $5.76M.
+    """
+    stock_notional = stock_price * stock_qty
+    cash_buffer = stock_notional * cash_buffer_pct
+    return stock_notional + cash_buffer
+
+
 def query_stock_price(underlying: str, date: str) -> float | None:
     """Get stock close price from UPQ for a specific date."""
     try:
