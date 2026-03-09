@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::RwLock;
+
+use crate::indicators::{compute_indicators, max_lookback, parse_indicators};
 use tokio::task::JoinSet;
 use tower_http::trace::{self, TraceLayer};
 use tracing::Level;
@@ -217,6 +219,7 @@ struct StockQuery {
     end: String,
     fields: Option<String>,
     limit: Option<usize>,
+    indicators: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -350,9 +353,34 @@ async fn stock_daily(
         return invalid_argument("tickers must not be empty");
     }
 
+    // Parse indicators (if any)
+    let indicator_list = match params.indicators.as_deref() {
+        Some(csv) => match parse_indicators(csv) {
+            Ok(list) => list,
+            Err(msg) => return invalid_argument(&msg),
+        },
+        None => vec![],
+    };
+
     let projection = match parse_stock_daily_projection(params.fields.as_deref()) {
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
+    };
+
+    // When indicators are requested, ensure close/ticker/date in SQL projection
+    let sql_projection = if !indicator_list.is_empty() {
+        ensure_fields_for_indicators(&projection)
+    } else {
+        projection.clone()
+    };
+
+    // Extend query start date backwards for indicator lookback warmup
+    let lookback_days = max_lookback(&indicator_list);
+    let query_start = if lookback_days > 0 {
+        let extended_days = (lookback_days as f64 * 1.5).ceil() as i64 + 5;
+        extend_date_backwards(&params.start, extended_days)
+    } else {
+        params.start.clone()
     };
 
     let dataset_dir = state.storage_root.join("stock_daily");
@@ -376,15 +404,28 @@ async fn stock_daily(
         "SELECT {projection} FROM read_parquet('{path}') \
          WHERE ticker IN ({tickers}) AND trade_date >= DATE '{start}' AND trade_date <= DATE '{end}' \
          ORDER BY ticker, trade_date",
+        projection = sql_projection,
         path = sql_escape_literal(&path_pattern),
         tickers = ticker_sql,
-        start = sql_escape_literal(&params.start),
+        start = sql_escape_literal(&query_start),
         end = sql_escape_literal(&params.end),
     );
 
     match run_sql_json_async(sql).await {
         Ok(mut rows) => {
             apply_split_adjustment(&state.split_calendar, &mut rows);
+
+            if !indicator_list.is_empty() {
+                compute_indicators(&mut rows, &indicator_list);
+                // Trim lookback rows: only return rows where date >= original start
+                rows.retain(|row| {
+                    row.get("date")
+                        .and_then(|v| v.as_str())
+                        .map(|d| d >= params.start.as_str())
+                        .unwrap_or(true)
+                });
+            }
+
             (StatusCode::OK, Json(Value::Array(rows))).into_response()
         }
         Err(error) => internal_error(error),
@@ -445,6 +486,32 @@ fn apply_split_adjustment(split_calendar: &SplitCalendar, rows: &mut [Value]) {
             }
         }
     }
+}
+
+/// Extend a YYYY-MM-DD date string backwards by N calendar days.
+fn extend_date_backwards(date_str: &str, days: i64) -> String {
+    let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2020, 1, 1).unwrap());
+    let extended = date - Duration::days(days);
+    extended.format("%Y-%m-%d").to_string()
+}
+
+/// Ensure the SQL projection includes `close`, `ticker`, and `date` fields
+/// when indicators are requested (needed for computation and trimming).
+fn ensure_fields_for_indicators(projection: &str) -> String {
+    let lower = projection.to_lowercase();
+    let mut result = projection.to_string();
+
+    if !lower.contains("close") {
+        result = format!("{result}, close");
+    }
+    if !lower.contains("ticker") {
+        result = format!("{result}, ticker");
+    }
+    if !lower.contains("date") && !lower.contains("trade_date") {
+        result = format!("{result}, trade_date AS date");
+    }
+    result
 }
 
 async fn option_ticker_query(

@@ -116,17 +116,20 @@ class UPQClient:
         start: str,
         end: str,
         fields: str = None,
+        indicators: str = None,
     ) -> list[dict]:
-        """Query stock daily bars.
+        """Query stock daily bars with optional technical indicators.
 
         Args:
             tickers: List of symbols, e.g. ["AAPL", "MSFT"]
             start: Date string, e.g. "2025-01-06"
             end: Date string, e.g. "2025-01-31"
             fields: Comma-separated fields to return (default: all)
+            indicators: Comma-separated indicators, e.g. "ma_5,ema_12,macd"
+                        Supported: ma_N (SMA), ema_N (EMA), macd (MACD 12/26/9).
 
         Returns:
-            List of dicts with ticker, date, open, high, low, close, volume, transactions.
+            List of dicts with ticker, date, OHLCV fields, plus indicator columns when requested.
         """
         params = {
             "tickers": ",".join(tickers),
@@ -135,6 +138,8 @@ class UPQClient:
         }
         if fields:
             params["fields"] = fields
+        if indicators:
+            params["indicators"] = indicators
         return self._get("/stock/daily", params)
 
     # ── Options ───────────────────────────────────────────────────

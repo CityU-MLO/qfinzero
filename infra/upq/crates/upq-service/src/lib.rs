@@ -1,4 +1,5 @@
 pub mod dividends;
+pub mod indicators;
 pub mod splits;
 
 pub mod app;

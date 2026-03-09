@@ -2585,3 +2585,153 @@ async fn test_dividends_query_empty_when_no_parquet() -> Result<(), Box<dyn std:
     assert_eq!(arr.len(), 0);
     Ok(())
 }
+
+// ── Indicator tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn test_stock_daily_with_ma_indicator() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    // Create 10 days of AAPL data: close = 100, 102, 104, ..., 118
+    for i in 0..10 {
+        let date = format!("2024-01-{:02}", i + 2); // 2024-01-02 through 2024-01-11
+        let close = 100.0 + (i as f64) * 2.0;
+        let daily_dir = tmp.path().join("stock_daily").join(format!("trade_date={date}"));
+        fs::create_dir_all(&daily_dir)?;
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(&format!(
+            "COPY (SELECT 'AAPL' AS ticker, {close}::DOUBLE AS open, {close}::DOUBLE AS high, \
+             {close}::DOUBLE AS low, {close}::DOUBLE AS close, BIGINT '1000' AS volume, \
+             BIGINT '10' AS transactions, DATE '{date}' AS trade_date) \
+             TO '{}' (FORMAT PARQUET)",
+            daily_dir.join("data.parquet").to_string_lossy().replace('\'', "''")
+        ))?;
+    }
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=AAPL&start=2024-01-02&end=2024-01-11&indicators=ma_3")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let arr: Vec<Value> = serde_json::from_slice(&bytes)?;
+    assert_eq!(arr.len(), 10);
+
+    // First 2 rows: ma_3 should be null
+    assert!(arr[0]["ma_3"].is_null());
+    assert!(arr[1]["ma_3"].is_null());
+
+    // Row 2 (third day): MA(3) of [100, 102, 104] = 102.0
+    let ma3 = arr[2]["ma_3"].as_f64().unwrap();
+    assert!((ma3 - 102.0).abs() < 0.01, "expected 102.0, got {ma3}");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stock_daily_with_macd_indicator() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    // Create 50 days of linear data
+    for i in 0..50 {
+        let day = i + 2;
+        let date = if day <= 31 {
+            format!("2024-01-{day:02}")
+        } else {
+            format!("2024-02-{:02}", day - 31)
+        };
+        let close = 100.0 + (i as f64);
+        let daily_dir = tmp.path().join("stock_daily").join(format!("trade_date={date}"));
+        fs::create_dir_all(&daily_dir)?;
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(&format!(
+            "COPY (SELECT 'TEST' AS ticker, {close}::DOUBLE AS open, {close}::DOUBLE AS high, \
+             {close}::DOUBLE AS low, {close}::DOUBLE AS close, BIGINT '1000' AS volume, \
+             BIGINT '10' AS transactions, DATE '{date}' AS trade_date) \
+             TO '{}' (FORMAT PARQUET)",
+            daily_dir.join("data.parquet").to_string_lossy().replace('\'', "''")
+        ))?;
+    }
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=TEST&start=2024-01-02&end=2024-02-20&indicators=macd")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let arr: Vec<Value> = serde_json::from_slice(&bytes)?;
+    assert_eq!(arr.len(), 50);
+
+    // All rows should have macd, macd_signal, macd_histogram keys
+    for row in &arr {
+        assert!(row.get("macd").is_some(), "missing macd key");
+        assert!(row.get("macd_signal").is_some(), "missing macd_signal key");
+        assert!(row.get("macd_histogram").is_some(), "missing macd_histogram key");
+    }
+
+    // Later rows should have non-null values
+    assert!(arr[40]["macd"].as_f64().is_some());
+    assert!(arr[40]["macd_signal"].as_f64().is_some());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stock_daily_invalid_indicator_returns_400() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let daily_dir = tmp.path().join("stock_daily").join("trade_date=2024-01-02");
+    fs::create_dir_all(&daily_dir)?;
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'AAPL' AS ticker, 100.0::DOUBLE AS open, 100.0::DOUBLE AS high, \
+         100.0::DOUBLE AS low, 100.0::DOUBLE AS close, BIGINT '1000' AS volume, \
+         BIGINT '10' AS transactions, DATE '2024-01-02' AS trade_date) \
+         TO '{}' (FORMAT PARQUET)",
+        daily_dir.join("data.parquet").to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=AAPL&start=2024-01-02&end=2024-01-02&indicators=rsi_14")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stock_daily_no_indicators_unchanged() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    let daily_dir = tmp.path().join("stock_daily").join("trade_date=2024-01-02");
+    fs::create_dir_all(&daily_dir)?;
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'AAPL' AS ticker, 150.0::DOUBLE AS open, 155.0::DOUBLE AS high, \
+         148.0::DOUBLE AS low, 152.0::DOUBLE AS close, BIGINT '5000' AS volume, \
+         BIGINT '100' AS transactions, DATE '2024-01-02' AS trade_date) \
+         TO '{}' (FORMAT PARQUET)",
+        daily_dir.join("data.parquet").to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    // Without indicators param — should return normal response
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=AAPL&start=2024-01-02&end=2024-01-02")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let arr: Vec<Value> = serde_json::from_slice(&bytes)?;
+    assert_eq!(arr.len(), 1);
+    // Should NOT have indicator columns
+    assert!(arr[0].get("ma_5").is_none());
+    assert!(arr[0].get("macd").is_none());
+
+    Ok(())
+}
