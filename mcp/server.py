@@ -227,6 +227,26 @@ def upq_option_contract(
 
 
 @mcp.tool()
+def upq_dividends(
+    tickers: list[str],
+    start: str,
+    end: str,
+) -> str:
+    """Query dividend history for stocks/ETFs.
+
+    Args:
+        tickers: Stock/ETF symbols, e.g. ["JEPQ", "AAPL"]
+        start: Start date "YYYY-MM-DD"
+        end: End date "YYYY-MM-DD"
+
+    Returns:
+        JSON list of dividend objects with ticker, ex_dividend_date, amount.
+    """
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.dividends(tickers=tickers, start=start, end=end))
+
+
+@mcp.tool()
 def upq_rates(
     start: str,
     end: str,

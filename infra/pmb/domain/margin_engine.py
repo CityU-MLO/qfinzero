@@ -96,6 +96,10 @@ class MarginEngine:
             self._margin_status = MarginStatus.NORMAL
         return None
 
+    def margin_for_spread(self, spread_width: float, qty: int, multiplier: int = 100) -> float:
+        """Margin for a spread = max loss = width × qty × multiplier."""
+        return spread_width * qty * multiplier
+
     def can_open_position(self) -> bool:
         """Whether new positions are allowed under current margin status."""
         return self._margin_status == MarginStatus.NORMAL

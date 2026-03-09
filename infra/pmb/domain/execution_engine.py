@@ -48,6 +48,9 @@ class ExecutionEngine:
     ) -> tuple[list[EventEnvelope], list[Trade]]:
         """Process all open orders against current bars.
 
+        Spread orders (linked by spread_id) are executed atomically:
+        both legs fill or both are rejected. Non-spread orders execute individually.
+
         Returns (events, trades) generated this step.
         """
         events: list[EventEnvelope] = []
@@ -55,19 +58,175 @@ class ExecutionEngine:
 
         open_orders = order_manager.get_open_orders()
 
+        # Separate spread orders from individual orders
+        spread_groups: dict[str, list[Order]] = {}
+        individual_orders: list[Order] = []
         for order in open_orders:
-            bar = self._get_bar_for_order(order, stock_bars, option_bars)
+            if order.spread_id:
+                spread_groups.setdefault(order.spread_id, []).append(order)
+            else:
+                individual_orders.append(order)
+
+        # Process spread groups atomically
+        for spread_id, legs in spread_groups.items():
+            spread_events, spread_trades = self._process_spread(
+                ts, legs, stock_bars, option_bars, order_manager, ledger, margin_engine
+            )
+            events.extend(spread_events)
+            trades.extend(spread_trades)
+
+        # Process individual orders
+        for order in individual_orders:
+            order_events, order_trades = self._process_single_order(
+                ts, order, stock_bars, option_bars, order_manager, ledger, margin_engine
+            )
+            events.extend(order_events)
+            trades.extend(order_trades)
+
+        return events, trades
+
+    def _process_spread(
+        self,
+        ts: str,
+        legs: list[Order],
+        stock_bars: dict[str, StockBar],
+        option_bars: dict[str, OptionBar],
+        order_manager: OrderManager,
+        ledger: Ledger,
+        margin_engine: MarginEngine,
+    ) -> tuple[list[EventEnvelope], list[Trade]]:
+        """Execute a spread atomically: all legs fill or all are rejected."""
+        events: list[EventEnvelope] = []
+        trades: list[Trade] = []
+
+        # Pre-check: all legs must have bars and fill prices
+        leg_fills: list[tuple[Order, float]] = []
+        for leg in legs:
+            bar = self._get_bar_for_order(leg, stock_bars, option_bars)
             if bar is None:
-                continue
-
-            fill_price = self._calculate_fill_price(bar, order)
+                return events, trades  # Can't execute — wait
+            fill_price = self._calculate_fill_price(bar, leg)
             if fill_price is None:
-                continue
+                return events, trades  # Can't execute — wait
+            leg_fills.append((leg, fill_price))
 
-            # Check if this is an opening position and margin allows it
-            is_opening = self._is_opening_trade(order, ledger)
-            if is_opening and not margin_engine.can_open_position():
-                order_manager.reject(order.order_id, "MARGIN_RESTRICTED", ts)
+        # Margin check not needed — spread margin is already handled at order submission
+        # But check margin status
+        if not margin_engine.can_open_position():
+            for leg in legs:
+                order_manager.reject(leg.order_id, "MARGIN_RESTRICTED", ts)
+                events.append(EventEnvelope(
+                    event_id=self._next_event_id(), ts=ts,
+                    type=EventType.ORDER_EVENT,
+                    payload=OrderEventPayload(
+                        order_id=leg.order_id, client_order_id=leg.client_order_id,
+                        status=OrderStatus.REJECTED.value,
+                        filled_qty=leg.filled_qty, remaining_qty=leg.remaining_qty,
+                        reason_code="MARGIN_RESTRICTED",
+                    ).model_dump(),
+                ))
+            return events, trades
+
+        # Execute all legs atomically
+        for leg, fill_price in leg_fills:
+            fill_qty = leg.remaining_qty
+            fees = self._calculate_fees(leg, fill_qty)
+            instrument_type = self._instrument_type(leg)
+
+            ledger.apply_fill(
+                instrument_id=leg.instrument_id,
+                instrument_type=instrument_type,
+                side=leg.side,
+                qty=fill_qty,
+                price=fill_price,
+                fees=fees,
+            )
+
+            order_manager.record_fill(leg.order_id, fill_qty, fill_price, ts)
+
+            trade_id = f"trd_{uuid.uuid4().hex[:8]}"
+            trade = Trade(
+                trade_id=trade_id, order_id=leg.order_id,
+                instrument_id=leg.instrument_id, side=leg.side,
+                qty=fill_qty, price=fill_price, fees=fees, ts=ts,
+            )
+            trades.append(trade)
+
+            events.append(EventEnvelope(
+                event_id=self._next_event_id(), ts=ts,
+                type=EventType.ORDER_EVENT,
+                payload=OrderEventPayload(
+                    order_id=leg.order_id, client_order_id=leg.client_order_id,
+                    status=leg.status.value,
+                    filled_qty=leg.filled_qty, remaining_qty=leg.remaining_qty,
+                    avg_fill_price=leg.avg_fill_price,
+                ).model_dump(),
+            ))
+            events.append(EventEnvelope(
+                event_id=self._next_event_id(), ts=ts,
+                type=EventType.TRADE_EVENT,
+                payload=TradeEventPayload(
+                    trade_id=trade_id, order_id=leg.order_id,
+                    instrument_id=leg.instrument_id, side=leg.side.value,
+                    qty=fill_qty, price=fill_price, fees=fees,
+                ).model_dump(),
+            ))
+
+        return events, trades
+
+    def _process_single_order(
+        self,
+        ts: str,
+        order: Order,
+        stock_bars: dict[str, StockBar],
+        option_bars: dict[str, OptionBar],
+        order_manager: OrderManager,
+        ledger: Ledger,
+        margin_engine: MarginEngine,
+    ) -> tuple[list[EventEnvelope], list[Trade]]:
+        """Process a single (non-spread) order."""
+        events: list[EventEnvelope] = []
+        trades: list[Trade] = []
+
+        bar = self._get_bar_for_order(order, stock_bars, option_bars)
+        if bar is None:
+            return events, trades
+
+        fill_price = self._calculate_fill_price(bar, order)
+        if fill_price is None:
+            return events, trades
+
+        # Check if this is an opening position and margin allows it
+        is_opening = self._is_opening_trade(order, ledger)
+        if is_opening and not margin_engine.can_open_position():
+            order_manager.reject(order.order_id, "MARGIN_RESTRICTED", ts)
+            events.append(
+                EventEnvelope(
+                    event_id=self._next_event_id(),
+                    ts=ts,
+                    type=EventType.ORDER_EVENT,
+                    payload=OrderEventPayload(
+                        order_id=order.order_id,
+                        client_order_id=order.client_order_id,
+                        status=OrderStatus.REJECTED.value,
+                        filled_qty=order.filled_qty,
+                        remaining_qty=order.remaining_qty,
+                        reason_code="MARGIN_RESTRICTED",
+                    ).model_dump(),
+                )
+            )
+            return events, trades
+
+        # Check buying power for this order
+        if is_opening:
+            order_cost = order.remaining_qty * fill_price
+            total_needed = order_cost if order.side == Side.BUY else 0
+            equity = ledger.total_equity()
+            im = margin_engine.total_initial_margin(ledger.positions)
+            bp = margin_engine.buying_power(equity, im)
+
+            if order.side == Side.BUY and total_needed > ledger.cash + bp:
+                order_manager.reject(order.order_id, "INSUFFICIENT_BUYING_POWER", ts)
                 events.append(
                     EventEnvelope(
                         event_id=self._next_event_id(),
@@ -79,109 +238,76 @@ class ExecutionEngine:
                             status=OrderStatus.REJECTED.value,
                             filled_qty=order.filled_qty,
                             remaining_qty=order.remaining_qty,
-                            reason_code="MARGIN_RESTRICTED",
+                            reason_code="INSUFFICIENT_BUYING_POWER",
                         ).model_dump(),
                     )
                 )
-                continue
+                return events, trades
 
-            # Check buying power for this order
-            if is_opening:
-                required_margin = margin_engine.initial_margin_for_order(
-                    order.side,
-                    self._instrument_type(order),
-                    order.remaining_qty,
-                    fill_price,
-                )
-                order_cost = order.remaining_qty * fill_price
-                total_needed = order_cost if order.side == Side.BUY else 0
-                equity = ledger.total_equity()
-                im = margin_engine.total_initial_margin(ledger.positions)
-                bp = margin_engine.buying_power(equity, im)
+        # Execute fill
+        fill_qty = order.remaining_qty
+        fees = self._calculate_fees(order, fill_qty)
 
-                if order.side == Side.BUY and total_needed > ledger.cash + bp:
-                    order_manager.reject(order.order_id, "INSUFFICIENT_BUYING_POWER", ts)
-                    events.append(
-                        EventEnvelope(
-                            event_id=self._next_event_id(),
-                            ts=ts,
-                            type=EventType.ORDER_EVENT,
-                            payload=OrderEventPayload(
-                                order_id=order.order_id,
-                                client_order_id=order.client_order_id,
-                                status=OrderStatus.REJECTED.value,
-                                filled_qty=order.filled_qty,
-                                remaining_qty=order.remaining_qty,
-                                reason_code="INSUFFICIENT_BUYING_POWER",
-                            ).model_dump(),
-                        )
-                    )
-                    continue
+        instrument_type = self._instrument_type(order)
 
-            # Execute fill
-            fill_qty = order.remaining_qty
-            fees = self._calculate_fees(order, fill_qty)
+        ledger.apply_fill(
+            instrument_id=order.instrument_id,
+            instrument_type=instrument_type,
+            side=order.side,
+            qty=fill_qty,
+            price=fill_price,
+            fees=fees,
+        )
 
-            instrument_type = self._instrument_type(order)
+        order_manager.record_fill(order.order_id, fill_qty, fill_price, ts)
 
-            realized_pnl = ledger.apply_fill(
-                instrument_id=order.instrument_id,
-                instrument_type=instrument_type,
-                side=order.side,
-                qty=fill_qty,
-                price=fill_price,
-                fees=fees,
-            )
+        trade_id = f"trd_{uuid.uuid4().hex[:8]}"
+        trade = Trade(
+            trade_id=trade_id,
+            order_id=order.order_id,
+            instrument_id=order.instrument_id,
+            side=order.side,
+            qty=fill_qty,
+            price=fill_price,
+            fees=fees,
+            ts=ts,
+        )
+        trades.append(trade)
 
-            order_manager.record_fill(order.order_id, fill_qty, fill_price, ts)
-
-            trade_id = f"trd_{uuid.uuid4().hex[:8]}"
-            trade = Trade(
-                trade_id=trade_id,
-                order_id=order.order_id,
-                instrument_id=order.instrument_id,
-                side=order.side,
-                qty=fill_qty,
-                price=fill_price,
-                fees=fees,
+        # Order event
+        events.append(
+            EventEnvelope(
+                event_id=self._next_event_id(),
                 ts=ts,
+                type=EventType.ORDER_EVENT,
+                payload=OrderEventPayload(
+                    order_id=order.order_id,
+                    client_order_id=order.client_order_id,
+                    status=order.status.value,
+                    filled_qty=order.filled_qty,
+                    remaining_qty=order.remaining_qty,
+                    avg_fill_price=order.avg_fill_price,
+                ).model_dump(),
             )
-            trades.append(trade)
+        )
 
-            # Order event
-            events.append(
-                EventEnvelope(
-                    event_id=self._next_event_id(),
-                    ts=ts,
-                    type=EventType.ORDER_EVENT,
-                    payload=OrderEventPayload(
-                        order_id=order.order_id,
-                        client_order_id=order.client_order_id,
-                        status=order.status.value,
-                        filled_qty=order.filled_qty,
-                        remaining_qty=order.remaining_qty,
-                        avg_fill_price=order.avg_fill_price,
-                    ).model_dump(),
-                )
+        # Trade event
+        events.append(
+            EventEnvelope(
+                event_id=self._next_event_id(),
+                ts=ts,
+                type=EventType.TRADE_EVENT,
+                payload=TradeEventPayload(
+                    trade_id=trade_id,
+                    order_id=order.order_id,
+                    instrument_id=order.instrument_id,
+                    side=order.side.value,
+                    qty=fill_qty,
+                    price=fill_price,
+                    fees=fees,
+                ).model_dump(),
             )
-
-            # Trade event
-            events.append(
-                EventEnvelope(
-                    event_id=self._next_event_id(),
-                    ts=ts,
-                    type=EventType.TRADE_EVENT,
-                    payload=TradeEventPayload(
-                        trade_id=trade_id,
-                        order_id=order.order_id,
-                        instrument_id=order.instrument_id,
-                        side=order.side.value,
-                        qty=fill_qty,
-                        price=fill_price,
-                        fees=fees,
-                    ).model_dump(),
-                )
-            )
+        )
 
         return events, trades
 

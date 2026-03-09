@@ -32,6 +32,7 @@ use upq_core::validation::{
 use crate::dividends::DividendCalendar;
 use crate::greeks::{compute_greeks, IvStatus};
 use crate::rates_curve::RatesCurve;
+use crate::splits::SplitCalendar;
 
 const MAX_LIMIT: usize = 100_000;
 const RATES_CACHE_CAPACITY: usize = 512;
@@ -41,6 +42,7 @@ pub struct AppState {
     storage_root: PathBuf,
     rates_cache: Arc<RwLock<RatesCache>>,
     dividend_calendar: Arc<DividendCalendar>,
+    split_calendar: Arc<SplitCalendar>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -166,10 +168,28 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         Arc::new(DividendCalendar::empty())
     };
 
+    let splits_path = storage_root.join("splits.json");
+    let split_calendar = if splits_path.is_file() {
+        match SplitCalendar::load(&splits_path) {
+            Ok(cal) => {
+                tracing::info!(path = %splits_path.display(), "loaded split calendar");
+                Arc::new(cal)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load splits, using empty calendar");
+                Arc::new(SplitCalendar::empty())
+            }
+        }
+    } else {
+        tracing::info!("no splits.json found, using empty split calendar");
+        Arc::new(SplitCalendar::empty())
+    };
+
     let state = AppState {
         storage_root,
         rates_cache: Arc::new(RwLock::new(RatesCache::default())),
         dividend_calendar,
+        split_calendar,
     };
 
     Router::new()
@@ -181,6 +201,7 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         .route("/option/ticker_query", get(option_ticker_query))
         .route("/option/chain_query", get(option_chain_query))
         .route("/rates/query", get(rates_query))
+        .route("/dividends/query", get(dividends_query))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
@@ -230,6 +251,13 @@ struct RatesQuery {
     start: String,
     end: String,
     tenors: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DividendsQuery {
+    tickers: String,
+    start: String,
+    end: String,
 }
 
 async fn stock(
@@ -301,7 +329,10 @@ async fn stock(
     );
 
     match run_sql_json_async(sql).await {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Ok(mut rows) => {
+            apply_split_adjustment(&state.split_calendar, &mut rows);
+            (StatusCode::OK, Json(Value::Array(rows))).into_response()
+        }
         Err(error) => internal_error(error),
     }
 }
@@ -352,8 +383,67 @@ async fn stock_daily(
     );
 
     match run_sql_json_async(sql).await {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Ok(mut rows) => {
+            apply_split_adjustment(&state.split_calendar, &mut rows);
+            (StatusCode::OK, Json(Value::Array(rows))).into_response()
+        }
         Err(error) => internal_error(error),
+    }
+}
+
+/// Apply split adjustments to JSON rows in-place.
+/// Each row must have a `ticker` field and either a `date` or `trade_date` field
+/// for the adjustment factor to be computed. Rows without these fields are skipped.
+fn apply_split_adjustment(split_calendar: &SplitCalendar, rows: &mut [Value]) {
+    for row in rows.iter_mut() {
+        let obj = match row.as_object_mut() {
+            Some(o) => o,
+            None => continue,
+        };
+
+        let ticker = match obj.get("ticker").and_then(|v| v.as_str()) {
+            Some(t) => t.to_string(),
+            None => continue,
+        };
+
+        if !split_calendar.has_splits(&ticker) {
+            continue;
+        }
+
+        // Extract trade_date from the "date" field (stock_daily uses "date" alias)
+        // or from "trade_date" field
+        let trade_date = obj
+            .get("date")
+            .or_else(|| obj.get("trade_date"))
+            .and_then(|v| v.as_str())
+            .map(|s| s[..10].to_string()); // Take first 10 chars (YYYY-MM-DD)
+
+        let trade_date = match trade_date {
+            Some(d) => d,
+            None => continue,
+        };
+
+        let factor = split_calendar.adjustment_factor(&ticker, &trade_date);
+        if (factor - 1.0).abs() < 1e-12 {
+            continue;
+        }
+
+        // Adjust price fields if present
+        for field in &["open", "high", "low", "close"] {
+            if let Some(val) = obj.get_mut(*field) {
+                if let Some(price) = val.as_f64() {
+                    *val = Value::from(price * factor);
+                }
+            }
+        }
+
+        // Adjust volume if present (inverse of price factor)
+        let vol_factor = (1.0 / factor).round() as i64;
+        if let Some(val) = obj.get_mut("volume") {
+            if let Some(vol) = val.as_i64() {
+                *val = Value::from(vol * vol_factor);
+            }
+        }
     }
 }
 
@@ -1050,6 +1140,51 @@ async fn rates_query(
     }
 
     (StatusCode::OK, Json(Value::Array(rows))).into_response()
+}
+
+async fn dividends_query(
+    State(state): State<AppState>,
+    Query(params): Query<DividendsQuery>,
+) -> axum::response::Response {
+    if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
+        return invalid_argument("start/end must be date: YYYY-MM-DD");
+    }
+
+    let tickers = parse_csv_list(&params.tickers);
+    if tickers.is_empty() {
+        return invalid_argument("tickers must not be empty");
+    }
+
+    let dividends_path = state
+        .storage_root
+        .join("dividends")
+        .join("dividends.parquet");
+    if !dividends_path.is_file() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+
+    let ticker_sql = tickers
+        .iter()
+        .map(|ticker| sql_quote(ticker))
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    let sql = format!(
+        "SELECT ticker, ex_dividend_date::VARCHAR AS ex_dividend_date, amount::DOUBLE AS amount \
+         FROM read_parquet('{path}') \
+         WHERE ticker IN ({tickers}) \
+         AND ex_dividend_date >= DATE '{start}' AND ex_dividend_date <= DATE '{end}' \
+         ORDER BY ticker, ex_dividend_date",
+        path = sql_escape_literal(&dividends_path.to_string_lossy()),
+        tickers = ticker_sql,
+        start = sql_escape_literal(&params.start),
+        end = sql_escape_literal(&params.end),
+    );
+
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
 }
 
 /// Check if a column list already contains a given column name (or alias).

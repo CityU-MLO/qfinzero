@@ -2354,3 +2354,234 @@ async fn option_chain_greeks_extreme_dividend_still_computes(
 
     Ok(())
 }
+
+// ============== Split Adjustment Tests ==============
+
+#[tokio::test]
+async fn test_stock_daily_applies_split_adjustment() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    // Write splits.json with NVDA 10:1 split on 2024-06-10
+    let splits_json = r#"{"splits":[{"ticker":"NVDA","effective_date":"2024-06-10","ratio":10}]}"#;
+    std::fs::write(tmp.path().join("splits.json"), splits_json)?;
+
+    // Create stock_daily parquet with pre-split NVDA price ($1200)
+    let daily_dir = tmp.path().join("stock_daily").join("trade_date=2024-06-07");
+    std::fs::create_dir_all(&daily_dir)?;
+    let conn = Connection::open_in_memory()?;
+    let parquet_path = daily_dir.join("data.parquet");
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'NVDA' AS ticker, 1200.0::DOUBLE AS open, 1220.0::DOUBLE AS high, \
+         1180.0::DOUBLE AS low, 1210.0::DOUBLE AS close, BIGINT '5000000' AS volume, \
+         BIGINT '100000' AS transactions, DATE '2024-06-07' AS trade_date) \
+         TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=NVDA&start=2024-06-07&end=2024-06-07&fields=ticker,date,close,volume")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+
+    let close = arr[0]["close"].as_f64().unwrap();
+    assert!(
+        (close - 121.0).abs() < 0.01,
+        "split-adjusted close should be ~121.0, got {}",
+        close
+    );
+
+    let volume = arr[0]["volume"].as_i64().unwrap();
+    assert_eq!(
+        volume, 50_000_000,
+        "split-adjusted volume should be 50M, got {}",
+        volume
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stock_daily_no_adjustment_for_post_split_dates(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    let splits_json = r#"{"splits":[{"ticker":"NVDA","effective_date":"2024-06-10","ratio":10}]}"#;
+    std::fs::write(tmp.path().join("splits.json"), splits_json)?;
+
+    let daily_dir = tmp.path().join("stock_daily").join("trade_date=2024-06-10");
+    std::fs::create_dir_all(&daily_dir)?;
+    let conn = Connection::open_in_memory()?;
+    let parquet_path = daily_dir.join("data.parquet");
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'NVDA' AS ticker, 120.0::DOUBLE AS open, 122.0::DOUBLE AS high, \
+         118.0::DOUBLE AS low, 121.0::DOUBLE AS close, BIGINT '50000000' AS volume, \
+         BIGINT '200000' AS transactions, DATE '2024-06-10' AS trade_date) \
+         TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=NVDA&start=2024-06-10&end=2024-06-10&fields=ticker,date,close,volume")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+
+    let close = arr[0]["close"].as_f64().unwrap();
+    assert!(
+        (close - 121.0).abs() < 0.01,
+        "post-split close should be unchanged at 121.0, got {}",
+        close
+    );
+
+    let volume = arr[0]["volume"].as_i64().unwrap();
+    assert_eq!(volume, 50_000_000, "post-split volume should be unchanged");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stock_daily_no_splits_json_returns_unadjusted(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    // No splits.json — should fall back to empty SplitCalendar
+
+    let daily_dir = tmp.path().join("stock_daily").join("trade_date=2024-06-07");
+    std::fs::create_dir_all(&daily_dir)?;
+    let conn = Connection::open_in_memory()?;
+    let parquet_path = daily_dir.join("data.parquet");
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'NVDA' AS ticker, 1200.0::DOUBLE AS open, 1220.0::DOUBLE AS high, \
+         1180.0::DOUBLE AS low, 1210.0::DOUBLE AS close, BIGINT '5000000' AS volume, \
+         BIGINT '100000' AS transactions, DATE '2024-06-07' AS trade_date) \
+         TO '{}' (FORMAT PARQUET)",
+        parquet_path.to_string_lossy().replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=NVDA&start=2024-06-07&end=2024-06-07&fields=ticker,date,close")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+
+    let close = arr[0]["close"].as_f64().unwrap();
+    assert!(
+        (close - 1210.0).abs() < 0.01,
+        "without splits.json, close should be unadjusted at 1210.0, got {}",
+        close
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_dividends_query_returns_data() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    // Create dividends parquet
+    let div_dir = tmp.path().join("dividends");
+    std::fs::create_dir_all(&div_dir)?;
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'JEPQ' AS ticker, DATE '2024-02-01' AS ex_dividend_date, 0.3417::DOUBLE AS amount \
+         UNION ALL \
+         SELECT 'JEPQ', DATE '2024-03-01', 0.3804::DOUBLE) \
+         TO '{}' (FORMAT PARQUET)",
+        div_dir
+            .join("dividends.parquet")
+            .to_string_lossy()
+            .replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/dividends/query?tickers=JEPQ&start=2024-01-01&end=2024-12-31")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["ticker"], "JEPQ");
+    assert!((arr[0]["amount"].as_f64().unwrap() - 0.3417).abs() < 0.001);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_dividends_query_filters_by_date_range() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+
+    let div_dir = tmp.path().join("dividends");
+    std::fs::create_dir_all(&div_dir)?;
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(&format!(
+        "COPY (SELECT 'JEPQ' AS ticker, DATE '2024-02-01' AS ex_dividend_date, 0.3417::DOUBLE AS amount \
+         UNION ALL \
+         SELECT 'JEPQ', DATE '2024-03-01', 0.3804::DOUBLE \
+         UNION ALL \
+         SELECT 'JEPQ', DATE '2024-06-01', 0.4500::DOUBLE) \
+         TO '{}' (FORMAT PARQUET)",
+        div_dir
+            .join("dividends.parquet")
+            .to_string_lossy()
+            .replace('\'', "''")
+    ))?;
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    // Only query Feb-Mar range
+    let request = Request::builder()
+        .uri("/dividends/query?tickers=JEPQ&start=2024-02-01&end=2024-03-31")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(
+        arr.len(),
+        2,
+        "should only return 2 dividends in Feb-Mar range, got {}",
+        arr.len()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_dividends_query_empty_when_no_parquet() -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = TempDir::new()?;
+    // No dividends parquet
+
+    let app = upq_service::app::build_router_with_storage_root(tmp.path());
+    let request = Request::builder()
+        .uri("/dividends/query?tickers=JEPQ&start=2024-01-01&end=2024-12-31")
+        .body(Body::empty())?;
+    let response = unwrap_infallible(app.oneshot(request).await);
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+    let payload: Value = serde_json::from_slice(&bytes)?;
+    let arr = payload.as_array().unwrap();
+    assert_eq!(arr.len(), 0);
+    Ok(())
+}

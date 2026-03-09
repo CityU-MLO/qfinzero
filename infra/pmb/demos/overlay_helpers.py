@@ -178,6 +178,30 @@ def get_etf_daily_prices(ticker: str, start_date: str, end_date: str) -> list[di
     return []
 
 
+def get_etf_total_return(ticker: str, start_date: str, end_date: str) -> float | None:
+    """Compute ETF total return (price + reinvested dividends).
+
+    Uses price return + cumulative dividends / start price.
+    """
+    prices = get_etf_daily_prices(ticker, start_date, end_date)
+    if len(prices) < 2:
+        return None
+    start_price = prices[0]["close"]
+    end_price = prices[-1]["close"]
+
+    # Query dividends
+    try:
+        resp = requests.get(f"{UPQ_CHAIN}/dividends/query", params={
+            "tickers": ticker, "start": start_date, "end": end_date,
+        }, timeout=30)
+        divs = resp.json() if resp.status_code == 200 else []
+    except Exception:
+        divs = []
+
+    total_divs = sum(d.get("amount", 0) for d in divs)
+    return (end_price - start_price + total_divs) / start_price
+
+
 def compute_initial_cash(stock_price: float, stock_qty: int,
                          cash_buffer_pct: float = 0.20) -> float:
     """Compute initial cash = stock notional + cash buffer (paper spec).
@@ -352,6 +376,43 @@ def get_positions(account_id: str) -> list[dict]:
 def get_account(account_id: str) -> dict:
     resp = requests.get(f"{PMB_BASE}/v1/accounts/{account_id}")
     return resp.json()
+
+
+def query_option_greeks(contract: str, date: str) -> dict | None:
+    """Get greeks for a specific option contract from UPQ."""
+    try:
+        resp = requests.get(f"{UPQ_CHAIN}/option/ticker_query", params={
+            "contract": contract, "start": date, "end": date,
+            "resolution": "day", "include_greeks": "true",
+            "fields": "ticker,close,delta",
+        }, timeout=10)
+        if resp.status_code == 200:
+            rows = resp.json()
+            if rows:
+                return rows[0]
+    except Exception:
+        pass
+    return None
+
+
+def compute_effective_delta(stock_qty: int, option_positions: list[dict]) -> float:
+    """Compute portfolio effective delta.
+
+    Args:
+        stock_qty: Number of shares held (positive = long)
+        option_positions: List of {contract, qty, delta} where qty is signed
+            (negative = short), delta is per-share delta from greeks
+
+    Returns:
+        Effective delta in share-equivalents.
+    """
+    delta = float(stock_qty)
+    for pos in option_positions:
+        # Each contract covers 100 shares
+        # qty is signed: -1 = short 1 contract
+        contract_delta = pos.get("delta", 0.0) * pos["qty"] * 100
+        delta += contract_delta
+    return delta
 
 
 def print_section(title: str):

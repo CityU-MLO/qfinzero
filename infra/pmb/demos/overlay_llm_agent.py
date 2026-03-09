@@ -36,6 +36,7 @@ from demos.overlay_helpers import (
     get_positions, get_account, print_section, query_stock_price,
     query_option_chain, select_contract, compute_initial_cash,
     get_etf_daily_prices, UPQ_CHAIN,
+    query_option_greeks, compute_effective_delta,
 )
 from demos.result_saver import ResultSaver
 
@@ -159,7 +160,8 @@ Available actions:
 
 def build_user_prompt(strategy: str, underlying: str, date: str,
                       price: float, cash: float, equity: float,
-                      active_options: list, chain: list[dict]) -> str:
+                      active_options: list, chain: list[dict],
+                      effective_delta: float | None = None) -> str:
     """Build the user prompt with current market state."""
     chain_summary = []
     for c in chain[:10]:  # Limit to 10 contracts to keep prompt short
@@ -171,12 +173,16 @@ def build_user_prompt(strategy: str, underlying: str, date: str,
     options_str = ", ".join(active_options) if active_options else "None"
     chain_str = "\n".join(chain_summary) if chain_summary else "  No contracts available"
 
+    delta_line = ""
+    if effective_delta is not None:
+        delta_line = f"\n- Current effective delta: {effective_delta:.0f} (target <= {STOCK_QTY:,})"
+
     return f"""Current state:
 - Date: {date}
 - {underlying} price: ${price:.2f}
 - Cash available: ${cash:,.2f}
 - Portfolio equity: ${equity:,.2f}
-- Active option positions: {options_str}
+- Active option positions: {options_str}{delta_line}
 
 Available option contracts:
 {chain_str}
@@ -184,7 +190,8 @@ Available option contracts:
 What action should I take? Respond with JSON:
 {{"action": "sell_call"|"buy_put"|"hold"|"close_position", "contract": "O:...", "reason": "..."}}
 
-If action is "hold" or "close_position", omit the "contract" field."""
+If action is "hold" or "close_position", omit the "contract" field.
+Constraint: effective delta must stay <= {STOCK_QTY:,} shares."""
 
 
 def is_rebalance_day(date_str: str) -> bool:
@@ -400,10 +407,29 @@ def run_llm_strategy(underlying: str, strategy: str):
             chain = [c for c in chain if c.get("ticker") in contract_lookup]
 
             active_list = [active_option] if active_option else []
+
+            # Compute effective delta for the prompt
+            eff_delta = None
+            try:
+                option_pos_list = []
+                for p in get_positions(account_id):
+                    if p.get("instrument_id", "").startswith("OPTION:"):
+                        p_greeks = query_option_greeks(
+                            p["instrument_id"].split(":", 1)[1], current_date)
+                        if p_greeks and p_greeks.get("delta"):
+                            option_pos_list.append({
+                                "delta": p_greeks["delta"],
+                                "qty": p["qty"],
+                            })
+                eff_delta = compute_effective_delta(STOCK_QTY, option_pos_list)
+            except Exception:
+                pass
+
             user_prompt = build_user_prompt(
                 strategy, underlying, current_date,
                 current_price, cash, equity,
                 active_list, chain,
+                effective_delta=eff_delta,
             )
 
             # Call LLM

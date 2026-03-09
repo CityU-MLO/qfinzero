@@ -243,6 +243,31 @@ class UPQClient:
             params["greek_price_field"] = greek_price_field
         return self._get("/option/chain_query", params)
 
+    # ── Dividends ──────────────────────────────────────────────────
+
+    def dividends(
+        self,
+        tickers: list[str],
+        start: str,
+        end: str,
+    ) -> list[dict]:
+        """Query dividend data for stocks/ETFs.
+
+        Args:
+            tickers: List of symbols, e.g. ["JEPQ", "AAPL"]
+            start: Date string, e.g. "2024-01-01"
+            end: Date string, e.g. "2024-12-31"
+
+        Returns:
+            List of dicts with ticker, ex_dividend_date, amount.
+        """
+        params = {
+            "tickers": ",".join(tickers),
+            "start": start,
+            "end": end,
+        }
+        return self._get("/dividends/query", params)
+
     # ── Rates ─────────────────────────────────────────────────────
 
     def rates(

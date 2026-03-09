@@ -26,7 +26,8 @@ from demos.overlay_helpers import (
     discover_contracts_weekly, create_account, create_session,
     place_order, step_session, get_summary, get_export,
     get_positions, get_account, print_section, query_stock_price,
-    compute_initial_cash, get_etf_daily_prices,
+    compute_initial_cash, get_etf_daily_prices, get_etf_total_return,
+    query_option_greeks, compute_effective_delta,
 )
 from demos.result_saver import ResultSaver
 
@@ -225,6 +226,30 @@ def run_single_ticker(underlying: str):
 
             if contract_idx < len(contracts):
                 c = contracts[contract_idx]
+
+                # Delta constraint: skip if adding short call would exceed stock delta
+                greeks = query_option_greeks(c["ticker"], current_date)
+                if greeks and greeks.get("delta"):
+                    # For a short call: delta contribution = -delta × 1 × 100
+                    # Current option positions from PMB
+                    option_pos_list = []
+                    for p in get_positions(account_id):
+                        if p.get("instrument_id", "").startswith("OPTION:"):
+                            p_greeks = query_option_greeks(
+                                p["instrument_id"].split(":", 1)[1], current_date)
+                            if p_greeks and p_greeks.get("delta"):
+                                option_pos_list.append({
+                                    "delta": p_greeks["delta"],
+                                    "qty": p["qty"],
+                                })
+                    eff_delta = compute_effective_delta(STOCK_QTY, option_pos_list)
+                    new_delta = eff_delta + (-greeks["delta"]) * 1 * 100  # short call
+                    if abs(new_delta) > STOCK_QTY:
+                        print(f"  DELTA CONSTRAINT: skip {c['ticker']}, "
+                              f"effective delta would be {new_delta:.0f} > {STOCK_QTY:,}")
+                        contract_idx += 1
+                        continue
+
                 order_seq += 1
                 resp = place_order(
                     session_id, account_id, f"sell_call_{order_seq}",
@@ -257,19 +282,11 @@ def run_single_ticker(underlying: str):
     benchmark_equity = (initial_cash - stock_cost) + final_price * STOCK_QTY
     benchmark_return = (benchmark_equity - initial_cash) / initial_cash
 
-    # ETF benchmark
-    etf_return = None
+    # ETF benchmark (total return: price + dividends)
+    etf_return = get_etf_total_return(etf_ticker, START_DATE, END_DATE)
     etf_final_equity = None
-    if etf_initial_price and etf_prices:
-        # Find last available ETF price
-        etf_final_price = None
-        for d in sorted(etf_prices.keys(), reverse=True):
-            if d <= END_DATE:
-                etf_final_price = etf_prices[d]
-                break
-        if etf_final_price:
-            etf_return = (etf_final_price - etf_initial_price) / etf_initial_price
-            etf_final_equity = initial_cash * (1 + etf_return)
+    if etf_return is not None:
+        etf_final_equity = initial_cash * (1 + etf_return)
 
     # Print results
     header = f"  {'Metric':<25} {'Covered Call':>15} {'Buy-Hold':>15}"

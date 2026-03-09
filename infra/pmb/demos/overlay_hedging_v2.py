@@ -26,7 +26,7 @@ from demos.overlay_helpers import (
     discover_contracts_weekly, create_account, create_session,
     place_order, step_session, get_summary, get_export,
     get_positions, get_account, print_section, query_stock_price,
-    compute_initial_cash,
+    compute_initial_cash, query_option_greeks, compute_effective_delta,
 )
 from demos.result_saver import ResultSaver
 
@@ -190,6 +190,28 @@ def run_single_ticker(underlying: str):
 
             if contract_idx < len(contracts):
                 c = contracts[contract_idx]
+
+                # Delta constraint: skip if adding long put would violate delta limit
+                greeks = query_option_greeks(c["ticker"], current_date)
+                if greeks and greeks.get("delta"):
+                    option_pos_list = []
+                    for p in get_positions(account_id):
+                        if p.get("instrument_id", "").startswith("OPTION:"):
+                            p_greeks = query_option_greeks(
+                                p["instrument_id"].split(":", 1)[1], current_date)
+                            if p_greeks and p_greeks.get("delta"):
+                                option_pos_list.append({
+                                    "delta": p_greeks["delta"],
+                                    "qty": p["qty"],
+                                })
+                    eff_delta = compute_effective_delta(STOCK_QTY, option_pos_list)
+                    new_delta = eff_delta + greeks["delta"] * 1 * 100  # long put
+                    if abs(new_delta) > STOCK_QTY:
+                        print(f"  DELTA CONSTRAINT: skip {c['ticker']}, "
+                              f"effective delta would be {new_delta:.0f} > {STOCK_QTY:,}")
+                        contract_idx += 1
+                        continue
+
                 order_seq += 1
                 resp = place_order(
                     session_id, account_id, f"buy_put_{order_seq}",
