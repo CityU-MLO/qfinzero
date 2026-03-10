@@ -87,7 +87,7 @@ class UPQClient:
     async def get_option_minute_bars(
         self, contract: str, start: str, end: str
     ) -> list[OptionBar]:
-        """GET /option/ticker_query with resolution=minute."""
+        """GET /option/ticker_query with resolution=minute and Greeks."""
         resp = await self._client.get(
             "/option/ticker_query",
             params={
@@ -95,7 +95,7 @@ class UPQClient:
                 "start": start,
                 "end": end,
                 "resolution": "minute",
-                "fields": "contract,window_start,open,high,low,close,volume",
+                "include_greeks": "true",
             },
         )
         resp.raise_for_status()
@@ -109,6 +109,13 @@ class UPQClient:
                 low=r["low"],
                 close=r["close"],
                 volume=r["volume"],
+                iv=r.get("iv"),
+                delta=r.get("delta"),
+                gamma=r.get("gamma"),
+                theta=r.get("theta"),
+                vega=r.get("vega"),
+                rho=r.get("rho"),
+                greek_status=r.get("greek_status"),
             )
             for r in rows
         ]
@@ -116,7 +123,7 @@ class UPQClient:
     async def get_option_daily_bars(
         self, contract: str, start: str, end: str
     ) -> list[OptionBar]:
-        """GET /option/ticker_query with resolution=day."""
+        """GET /option/ticker_query with resolution=day and Greeks."""
         resp = await self._client.get(
             "/option/ticker_query",
             params={
@@ -124,6 +131,7 @@ class UPQClient:
                 "start": start,
                 "end": end,
                 "resolution": "day",
+                "include_greeks": "true",
             },
         )
         resp.raise_for_status()
@@ -143,6 +151,13 @@ class UPQClient:
                     expiry=r.get("expiry"),
                     strike=r.get("strike"),
                     right=r.get("type", r.get("right")),
+                    iv=r.get("iv"),
+                    delta=r.get("delta"),
+                    gamma=r.get("gamma"),
+                    theta=r.get("theta"),
+                    vega=r.get("vega"),
+                    rho=r.get("rho"),
+                    greek_status=r.get("greek_status"),
                 )
             )
         return bars
