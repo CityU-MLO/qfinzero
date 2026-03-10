@@ -2,11 +2,75 @@
 Shared helpers for overlay strategy demos.
 """
 
+import json
+import subprocess
+
 import requests
 from datetime import datetime, timedelta
 
 PMB_BASE = "http://127.0.0.1:19701"
 UPQ_CHAIN = "http://127.0.0.1:19703"
+QLIB_CONTEXT_DIR = "/home/qlib/news/llm_context_2025"
+
+
+def load_remote_json(remote_path: str) -> dict | None:
+    """Load a JSON file from qlib via SSH.
+
+    Runs ``ssh qlib "cat <path>"`` and parses stdout as JSON.
+    Returns the parsed dict on success, or None on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["ssh", "qlib", f"cat {remote_path}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            print(f"  [WARN] load_remote_json: ssh failed for {remote_path}: {result.stderr.strip()}")
+            return None
+        return json.loads(result.stdout)
+    except subprocess.TimeoutExpired:
+        print(f"  [WARN] load_remote_json: timeout reading {remote_path}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"  [WARN] load_remote_json: invalid JSON in {remote_path}: {e}")
+        return None
+    except Exception as e:
+        print(f"  [WARN] load_remote_json: {e}")
+        return None
+
+
+def load_macro_context(current_month: str) -> dict:
+    """Load macro context files for a given month.
+
+    Args:
+        current_month: Month string like "2025-01".
+
+    Returns:
+        {"last_month_review": {...}, "next_month_upcoming": {...}}
+        Values are None if the corresponding file could not be loaded.
+    """
+    # Compute previous month
+    year, month = int(current_month[:4]), int(current_month[5:7])
+    if month == 1:
+        prev_month = f"{year - 1}-12"
+    else:
+        prev_month = f"{year}-{month - 1:02d}"
+
+    review_path = f"{QLIB_CONTEXT_DIR}/macro/{prev_month}_review.json"
+    upcoming_path = f"{QLIB_CONTEXT_DIR}/macro/{current_month}_upcoming.json"
+
+    return {
+        "last_month_review": load_remote_json(review_path),
+        "next_month_upcoming": load_remote_json(upcoming_path),
+    }
+
+
+def load_semi_earnings() -> dict | None:
+    """Load semiconductor earnings context from qlib.
+
+    Returns the parsed dict, or None if loading fails.
+    """
+    return load_remote_json(f"{QLIB_CONTEXT_DIR}/semi_earnings_2025.json")
 
 
 def query_option_chain(underlying: str, date: str, option_type: str,
