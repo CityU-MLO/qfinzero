@@ -140,6 +140,8 @@ fn opt_f64_value(v: Option<f64>) -> Value {
     }
 }
 
+/// Group row indices by ticker. Assumes rows are already sorted so that
+/// rows for the same ticker are consecutive (as guaranteed by ORDER BY ticker).
 fn group_by_ticker(rows: &[Value]) -> Vec<(String, Vec<usize>)> {
     let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
     for (i, row) in rows.iter().enumerate() {

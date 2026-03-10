@@ -499,16 +499,21 @@ fn extend_date_backwards(date_str: &str, days: i64) -> String {
 /// Ensure the SQL projection includes `close`, `ticker`, and `date` fields
 /// when indicators are requested (needed for computation and trimming).
 fn ensure_fields_for_indicators(projection: &str) -> String {
-    let lower = projection.to_lowercase();
-    let mut result = projection.to_string();
+    // Split into individual fields for exact matching (avoids substring false positives)
+    let fields: Vec<String> = projection
+        .split(',')
+        .map(|f| f.trim().to_lowercase())
+        .collect();
+    let has = |name: &str| fields.iter().any(|f| f == name || f.starts_with(&format!("{name} ")));
 
-    if !lower.contains("close") {
+    let mut result = projection.to_string();
+    if !has("close") {
         result = format!("{result}, close");
     }
-    if !lower.contains("ticker") {
+    if !has("ticker") {
         result = format!("{result}, ticker");
     }
-    if !lower.contains("date") && !lower.contains("trade_date") {
+    if !has("trade_date") && !has("trade_date as date") {
         result = format!("{result}, trade_date AS date");
     }
     result
