@@ -83,6 +83,7 @@ def query_option_chain(underlying: str, date: str, option_type: str,
         "type": option_type,
         "strike_min": strike_min,
         "strike_max": strike_max,
+        "include_greeks": "true",
     }
     if expiry_min:
         params["expiry_min"] = expiry_min
@@ -386,6 +387,7 @@ def create_session(account_id: str, start_ts: str, end_ts: str,
         "universe": {"stocks": stocks, "options": options},
         "execution_config": {
             "slippage_bps": 2.0,
+            "option_spread_pct": 0.05,
             "fee_model": {
                 "stock_fee_per_share": 0.005,
                 "option_fee_per_contract": 0.65,
