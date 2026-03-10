@@ -29,7 +29,7 @@ import json
 import time
 import httpx
 import yaml
-from datetime import datetime
+from datetime import datetime, timedelta
 from demos.overlay_helpers import (
     create_account, create_session,
     place_order, step_session, get_summary, get_export,
@@ -208,7 +208,6 @@ def is_rebalance_day(date_str: str) -> bool:
 
 def _date_offset(date_str: str, days: int) -> str:
     """Return date_str offset by N days."""
-    from datetime import timedelta
     dt = datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=days)
     return dt.strftime("%Y-%m-%d")
 
@@ -416,7 +415,6 @@ def run_llm_strategy(underlying: str, strategy: str):
                     print(f"  [CTX] Loaded macro context for {month_str}: {n} review events")
 
             # Query option chain for LLM to choose from
-            from datetime import timedelta
             dt = datetime.strptime(current_date, "%Y-%m-%d")
             expiry_min = (dt + timedelta(days=cfg["dte_min"])).strftime("%Y-%m-%d")
             expiry_max = (dt + timedelta(days=cfg["dte_max"])).strftime("%Y-%m-%d")
