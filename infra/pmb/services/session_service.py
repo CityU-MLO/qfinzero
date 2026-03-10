@@ -1,5 +1,6 @@
 import uuid
 import logging
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 
 from models.enums import Frequency, EventType, SessionStatus
@@ -100,6 +101,11 @@ class SessionService:
                         contract, start_date, end_date
                     )
                 cache.load_option_bars(contract, opt_bars)
+
+        # For daily sessions, patch bar.open with 15:50 ET minute bar open price
+        # to eliminate look-ahead bias (MARKET orders fill at bar.open).
+        if req.frequency == Frequency.DAILY:
+            await self._patch_daily_open_with_minute_price(req, cache)
 
         timestamps = cache.get_all_timestamps()
         clock = SessionClock(timestamps, req.frequency, req.end_ts)
@@ -431,3 +437,135 @@ class SessionService:
             "end_ts": state.clock.end_ts,
             "status": state.status.value,
         }
+
+    async def _patch_daily_open_with_minute_price(
+        self, req: CreateSessionRequest, cache: MarketDataCache
+    ) -> None:
+        """Replace daily bar.open with 15:50 ET minute bar open to fix look-ahead bias.
+
+        Fallback chain: 15:50 bar → latest bar in 15:40-15:49 → daily bar close.
+        """
+        from zoneinfo import ZoneInfo
+
+        ET = ZoneInfo("America/New_York")
+
+        # --- Patch stock bars ---
+        for symbol, daily_bars_by_ns in cache._stock_bars.items():
+            dates = set()
+            for ns in daily_bars_by_ns:
+                dt_utc = datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+                dates.add(dt_utc.strftime("%Y-%m-%d"))
+
+            if not dates:
+                continue
+
+            min_date = min(dates)
+            max_date = max(dates)
+            # Query 19:40-20:51 UTC to cover both EDT and EST
+            start_ts = f"{min_date}T19:40:00+00:00"
+            end_ts = f"{max_date}T20:51:00+00:00"
+
+            try:
+                minute_bars = await self._upq.get_stock_minute_bars(
+                    [symbol], start_ts, end_ts
+                )
+            except Exception:
+                logger.warning("Failed to fetch minute bars for %s, skipping patch", symbol)
+                continue
+
+            # Group minute bars by date
+            minute_by_date: dict[str, list] = {}
+            for mb in minute_bars:
+                dt_utc = datetime.fromtimestamp(mb.window_start_ns / 1e9, tz=timezone.utc)
+                date_key = dt_utc.strftime("%Y-%m-%d")
+                minute_by_date.setdefault(date_key, []).append(mb)
+
+            patched = 0
+            for ns, daily_bar in daily_bars_by_ns.items():
+                dt_utc = datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+                date_key = dt_utc.strftime("%Y-%m-%d")
+
+                bars_for_day = minute_by_date.get(date_key, [])
+                patch_price = self._pick_near_close_price(bars_for_day, ET)
+
+                if patch_price is not None:
+                    daily_bar.open = patch_price
+                    patched += 1
+                else:
+                    daily_bar.open = daily_bar.close
+
+            logger.debug("Patched %d/%d daily bars for %s", patched, len(daily_bars_by_ns), symbol)
+
+        # --- Patch option bars ---
+        for contract, daily_bars_by_ns in cache._option_bars.items():
+            dates = set()
+            for ns in daily_bars_by_ns:
+                dt_utc = datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+                dates.add(dt_utc.strftime("%Y-%m-%d"))
+
+            if not dates:
+                continue
+
+            min_date = min(dates)
+            max_date = max(dates)
+            start_ts = f"{min_date}T19:40:00+00:00"
+            end_ts = f"{max_date}T20:51:00+00:00"
+
+            try:
+                minute_bars = await self._upq.get_option_minute_bars(
+                    contract, start_ts, end_ts
+                )
+            except Exception:
+                logger.warning("Failed to fetch minute bars for %s, skipping patch", contract)
+                continue
+
+            minute_by_date: dict[str, list] = {}
+            for mb in minute_bars:
+                dt_utc = datetime.fromtimestamp(mb.window_start_ns / 1e9, tz=timezone.utc)
+                date_key = dt_utc.strftime("%Y-%m-%d")
+                minute_by_date.setdefault(date_key, []).append(mb)
+
+            for ns, daily_bar in daily_bars_by_ns.items():
+                dt_utc = datetime.fromtimestamp(ns / 1e9, tz=timezone.utc)
+                date_key = dt_utc.strftime("%Y-%m-%d")
+
+                bars_for_day = minute_by_date.get(date_key, [])
+                patch_price = self._pick_near_close_price(bars_for_day, ET)
+
+                if patch_price is not None:
+                    daily_bar.open = patch_price
+                else:
+                    daily_bar.open = daily_bar.close
+
+    @staticmethod
+    def _pick_near_close_price(minute_bars: list, et_tz) -> float | None:
+        """Pick best minute bar open price from the 15:40-15:50 ET window.
+
+        Priority: 15:50 bar → latest bar in 15:40-15:49 window.
+        Returns None if no bars in the window.
+        """
+        if not minute_bars:
+            return None
+
+        target_bar = None
+        best_fallback = None
+        best_fallback_ns = -1
+
+        for bar in minute_bars:
+            dt_utc = datetime.fromtimestamp(bar.window_start_ns / 1e9, tz=timezone.utc)
+            dt_et = dt_utc.astimezone(et_tz)
+
+            if dt_et.hour == 15 and dt_et.minute == 50:
+                target_bar = bar
+                break
+
+            if dt_et.hour == 15 and 40 <= dt_et.minute <= 49:
+                if bar.window_start_ns > best_fallback_ns:
+                    best_fallback = bar
+                    best_fallback_ns = bar.window_start_ns
+
+        if target_bar is not None:
+            return target_bar.open
+        if best_fallback is not None:
+            return best_fallback.open
+        return None
