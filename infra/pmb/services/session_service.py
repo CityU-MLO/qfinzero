@@ -119,6 +119,7 @@ class SessionService:
                 seed=repro.seed if repro else None,
                 slippage_bps=exec_config.slippage_bps,
                 fee_model=exec_config.fee_model,
+                option_spread_pct=exec_config.option_spread_pct,
             ),
             margin_engine=MarginEngine(account.margin_config),
             history=HistoryStore(),
@@ -203,17 +204,30 @@ class SessionService:
 
         options_payload = []
         for contract, bar in option_bars.items():
-            options_payload.append(
-                {
-                    "contract": contract,
-                    "window_start_ns": bar.window_start_ns,
-                    "open": bar.open,
-                    "high": bar.high,
-                    "low": bar.low,
-                    "close": bar.close,
-                    "volume": bar.volume,
-                }
-            )
+            opt_entry = {
+                "contract": contract,
+                "window_start_ns": bar.window_start_ns,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+            }
+            if bar.iv is not None:
+                opt_entry["iv"] = bar.iv
+            if bar.delta is not None:
+                opt_entry["delta"] = bar.delta
+            if bar.gamma is not None:
+                opt_entry["gamma"] = bar.gamma
+            if bar.theta is not None:
+                opt_entry["theta"] = bar.theta
+            if bar.vega is not None:
+                opt_entry["vega"] = bar.vega
+            if bar.rho is not None:
+                opt_entry["rho"] = bar.rho
+            if bar.greek_status is not None:
+                opt_entry["greek_status"] = bar.greek_status
+            options_payload.append(opt_entry)
 
         market_event = EventEnvelope(
             event_id=state.next_event_id(),

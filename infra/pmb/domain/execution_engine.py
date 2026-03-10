@@ -26,9 +26,11 @@ class ExecutionEngine:
         seed: int | None,
         slippage_bps: float,
         fee_model: FeeModel,
+        option_spread_pct: float = 0.0,
     ):
         self._rng = random.Random(seed)
         self._slippage_bps = slippage_bps
+        self._option_spread_pct = option_spread_pct
         self._fee_model = fee_model
         self._event_seq = 0
 
@@ -330,7 +332,13 @@ class ExecutionEngine:
         is_buy = order.side == Side.BUY
 
         if order.order_type == OrderType.MARKET:
-            return self._apply_slippage(bar.open, is_buy)
+            price = self._apply_slippage(bar.open, is_buy)
+            # Apply bid-ask spread cost for options (half-spread adverse to trader)
+            if self._option_spread_pct > 0 and order.instrument_id.startswith("OPTION:"):
+                half_spread = bar.open * self._option_spread_pct / 2
+                price = price + half_spread if is_buy else price - half_spread
+                price = max(price, 0.0001)  # floor at minimum tick
+            return round(price, 4)
 
         if order.order_type == OrderType.LIMIT:
             if is_buy and bar.low <= order.limit_price:
