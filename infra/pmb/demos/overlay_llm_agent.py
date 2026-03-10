@@ -397,10 +397,8 @@ def run_llm_strategy(underlying: str, strategy: str):
                 print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
                       f"{'RE-BUY ' + str(rebuy_qty) + ' shares':^45} | ${equity:13,.2f}")
 
-            # LLM rebalance on Mondays (or first day) when no active option
+            # LLM rebalance on Mondays
             if not is_rebalance_day(current_date):
-                continue
-            if active_option is not None:
                 continue
             if current_price <= 0:
                 continue
@@ -493,7 +491,8 @@ def run_llm_strategy(underlying: str, strategy: str):
                     for e in recent:
                         surprise = ""
                         if e.get("eps_surprise_percent") is not None:
-                            surprise = f" surprise={e['eps_surprise_percent']:.1%}"
+                            pct = float(e["eps_surprise_percent"]) * 100
+                            surprise = f" surprise={pct:+.1f}%"
                         ctx_parts.append(
                             f"  {e['date']} {e['ticker']} {e['fiscal_period']}/{e['fiscal_year']}: "
                             f"EPS actual={e['actual_eps']} est={e['estimated_eps']}{surprise}"
@@ -541,7 +540,36 @@ def run_llm_strategy(underlying: str, strategy: str):
                 contract_ticker = action.get("contract", "")
                 reason = action.get("reason", "")[:40]
 
-                if action_type in ("sell_call", "buy_put") and contract_ticker:
+                if action_type == "close_position" and active_option:
+                    # Close existing option position
+                    close_side = "BUY" if strategy == "profit" else "SELL"
+                    order_seq += 1
+                    resp = place_order(
+                        session_id, account_id, f"llm_close_{order_seq}",
+                        {"type": "OPTION", "contract": active_option},
+                        close_side, 1,
+                    )
+                    if resp.get("ok"):
+                        action_str = f"LLM CLOSE {active_option[-21:]} ({reason})"
+                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                              f"{action_str:^45} | ${equity:13,.2f}")
+                        options_log.append({
+                            "date": current_date, "action": "close_position",
+                            "contract": active_option, "reason": reason,
+                            "source": "llm",
+                        })
+                        active_option = None
+                    else:
+                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                              f"{'LLM close rejected':^45} | ${equity:13,.2f}")
+
+                elif action_type in ("sell_call", "buy_put") and contract_ticker:
+                    if active_option is not None:
+                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                              f"{'LLM: already holding, skipping open':^45} | ${equity:13,.2f}")
+                        time.sleep(call_latency)
+                        continue
+
                     # Verify contract is in our universe
                     if contract_ticker not in contract_lookup:
                         print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
