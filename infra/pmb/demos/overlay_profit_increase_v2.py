@@ -7,7 +7,7 @@ Paper parameters:
   - Rebalance: Weekly (every Monday)
   - DTE: 7-45 days
   - Strategy: Covered call (sell OTM call ~5% above current price)
-  - Period: 2024-01-02 to 2024-12-31
+  - Period: 2025-01-02 to 2025-12-31
 
 Prerequisites:
   - UPQ running on http://127.0.0.1:19703
@@ -35,8 +35,8 @@ from demos.result_saver import ResultSaver
 # --- Paper Spec Config ---
 PAPER_TICKERS = ["QQQ", "NVDA", "USO"]
 ETF_BENCHMARKS = {"QQQ": "JEPQ", "NVDA": "NVDY", "USO": "USOY"}
-START_DATE = "2024-01-02"
-END_DATE = "2024-12-31"
+START_DATE = "2025-01-02"
+END_DATE = "2025-12-31"
 STOCK_QTY = 10_000
 CASH_BUFFER_PCT = 0.20
 OTM_PCT = 0.05
@@ -110,7 +110,7 @@ def run_single_ticker(underlying: str):
         stocks=[underlying],
         options=option_tickers,
         seed=501,
-        run_id=f"overlay_cc_v2_{underlying.lower()}_2024",
+        run_id=f"overlay_cc_v2_{underlying.lower()}_2025",
     )
     session_id = sess["session_id"]
     print(f"  Session: {session_id}")
