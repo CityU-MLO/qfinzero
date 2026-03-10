@@ -430,6 +430,35 @@ def place_order(session_id: str, account_id: str, client_order_id: str,
     return resp.json()
 
 
+def place_spread(session_id: str, account_id: str, client_order_id: str,
+                 legs: list[dict], spread_id: str | None = None) -> list[dict]:
+    """Place a multi-leg spread order via PMB.
+
+    Each leg is: {"instrument": {...}, "side": str, "qty": int}
+    All legs share the same spread_id for atomic execution.
+    spread_id is a top-level field on CreateOrderRequest (not inside OrderSpec).
+    """
+    import uuid
+    sid = spread_id or str(uuid.uuid4())[:8]
+    responses = []
+    for i, leg in enumerate(legs):
+        resp = requests.post(f"{PMB_BASE}/v1/orders", json={
+            "session_id": session_id,
+            "account_id": account_id,
+            "client_order_id": f"{client_order_id}_leg{i}",
+            "spread_id": sid,
+            "order": {
+                "instrument": leg["instrument"],
+                "side": leg["side"],
+                "order_type": "MARKET",
+                "qty": leg["qty"],
+                "time_in_force": "GTC",
+            },
+        })
+        responses.append(resp.json())
+    return responses
+
+
 def step_session(session_id: str, n: int = 1) -> dict:
     """Step the session forward by n ticks."""
     resp = requests.post(f"{PMB_BASE}/v1/sessions/{session_id}/step",

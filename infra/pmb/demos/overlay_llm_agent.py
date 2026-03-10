@@ -48,10 +48,11 @@ END_DATE = "2025-12-31"
 STOCK_QTY = 10_000
 CASH_BUFFER_PCT = 0.20
 OTM_PCT = 0.05
+OPTION_QTY = STOCK_QTY // 100  # 100 contracts = 10,000 shares
 
 STRATEGY_CONFIG = {
     "profit": {
-        "name": "Profit Increase (Covered Call)",
+        "name": "Profit Increase (Covered Call + Cash-Secured Put)",
         "option_type": "C",
         "dte_min": 7,
         "dte_max": 45,
@@ -126,21 +127,25 @@ def parse_llm_action(content: str) -> dict | None:
 
 # --- Prompts ---
 
-PROFIT_SYSTEM_PROMPT = """You are an options overlay trading agent. Your objective is to enhance portfolio income via covered calls on a stock position.
+PROFIT_SYSTEM_PROMPT = """You are an options overlay trading agent. Your objective is to enhance portfolio income via covered calls AND cash-secured puts on a stock position.
 
 Rules:
 - You manage a portfolio of {qty:,} shares of {underlying}
 - You may SELL covered calls (short call) to collect premium
-- Each call contract covers 100 shares
+- You may SELL cash-secured puts (short put) to collect premium
+- Each option contract covers 100 shares
 - Only sell calls with strikes above the current price (OTM)
+- Only sell puts with strikes below the current price (OTM)
+- Cash-secured put requires: strike × 100 × contracts ≤ available cash
 - Option maturities must be between {dte_min} and {dte_max} days to expiry
-- Maximum 1 active call position at a time
+- Maximum 1 active call + 1 active put position at a time
 - You MUST respond with valid JSON only
 
 Available actions:
 - "sell_call": sell a call contract from the available chain
+- "sell_put": sell a cash-secured put from the available chain
 - "hold": take no action this period
-- "close_position": buy back existing short call (if any)"""
+- "close_position": buy back existing short option (specify contract in field)"""
 
 HEDGE_SYSTEM_PROMPT = """You are a risk management agent. Your objective is to protect a stock portfolio from downside risk using put options while controlling hedging cost.
 
@@ -198,7 +203,7 @@ Available option contracts:
 {chain_str}
 
 What action should I take? Respond with JSON:
-{{"action": "sell_call"|"buy_put"|"hold"|"close_position", "contract": "O:...", "reason": "..."}}
+{{"action": "sell_call"|"sell_put"|"buy_put"|"hold"|"close_position", "contract": "O:...", "reason": "..."}}
 
 If action is "hold" or "close_position", omit the "contract" field.
 Constraint: effective delta must stay <= {STOCK_QTY:,} shares.{context_section}"""
@@ -275,7 +280,24 @@ def run_llm_strategy(underlying: str, strategy: str):
 
     option_tickers = [c["ticker"] for c in all_contracts]
     contract_lookup = {c["ticker"]: c for c in all_contracts}
-    print(f"  Universe: {len(all_contracts)} contracts")
+    print(f"  Universe: {len(all_contracts)} {cfg['option_type']} contracts")
+
+    # For profit strategy, also discover put contracts
+    if strategy == "profit":
+        put_contracts = discover_contracts_weekly(
+            underlying=underlying,
+            start_date=START_DATE,
+            end_date=END_DATE,
+            option_type="P",
+            otm_pct=OTM_PCT,
+            ref_price=ref_price,
+            dte_min=cfg["dte_min"],
+            dte_max=cfg["dte_max"],
+        )
+        if put_contracts:
+            option_tickers.extend(c["ticker"] for c in put_contracts)
+            contract_lookup.update({c["ticker"]: c for c in put_contracts})
+            print(f"  + {len(put_contracts)} P contracts for cash-secured puts")
 
     # ETF benchmark
     etf_prices = {}
@@ -326,7 +348,8 @@ def run_llm_strategy(underlying: str, strategy: str):
     # 4. Trading loop
     print_section(f"Phase 3: LLM Trading — {underlying}")
 
-    active_option = None
+    active_call = None
+    active_put = None
     options_log = []
     llm_calls = []  # Track latency + tokens
     day_count = 2
@@ -390,7 +413,12 @@ def run_llm_strategy(underlying: str, strategy: str):
                         "date": current_date, "action": f"EXPIRY_{outcome}",
                         "contract": contract, "source": "expiry",
                     })
-                    active_option = None
+                    # Determine call vs put from OPRA ticker
+                    opra = contract.split(":")[-1] if ":" in contract else contract
+                    if "P" in opra[len(opra)-9:]:
+                        active_put = None
+                    else:
+                        active_call = None
 
             # Re-buy stock if called away (profit strategy)
             if strategy == "profit" and stock_pos < STOCK_QTY and current_price > 0:
@@ -435,10 +463,22 @@ def run_llm_strategy(underlying: str, strategy: str):
                 expiry_min=expiry_min, expiry_max=expiry_max,
             )
 
+            # For profit strategy, also query put chain
+            if strategy == "profit":
+                p_s_min = current_price * (1 - OTM_PCT * 2.0)
+                p_s_max = current_price * (1 - OTM_PCT * 0.5)
+                put_chain = query_option_chain(
+                    underlying=underlying, date=current_date,
+                    option_type="P",
+                    strike_min=p_s_min, strike_max=p_s_max,
+                    expiry_min=expiry_min, expiry_max=expiry_max,
+                )
+                chain.extend(put_chain)
+
             # Filter chain to only contracts in our universe
             chain = [c for c in chain if c.get("ticker") in contract_lookup]
 
-            active_list = [active_option] if active_option else []
+            active_list = [c for c in [active_call, active_put] if c is not None]
 
             # Compute effective delta for the prompt
             eff_delta = None
@@ -544,33 +584,48 @@ def run_llm_strategy(underlying: str, strategy: str):
                 contract_ticker = action.get("contract", "")
                 reason = action.get("reason", "")[:40]
 
-                if action_type == "close_position" and active_option:
-                    # Close existing option position
-                    close_side = "BUY" if strategy == "profit" else "SELL"
-                    order_seq += 1
-                    resp = place_order(
-                        session_id, account_id, f"llm_close_{order_seq}",
-                        {"type": "OPTION", "contract": active_option},
-                        close_side, 1,
-                    )
-                    if resp.get("ok"):
-                        action_str = f"LLM CLOSE {active_option[-21:]} ({reason})"
-                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
-                              f"{action_str:^45} | ${equity:13,.2f}")
-                        options_log.append({
-                            "date": current_date, "action": "close_position",
-                            "contract": active_option, "reason": reason,
-                            "source": "llm",
-                        })
-                        active_option = None
-                    else:
-                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
-                              f"{'LLM close rejected':^45} | ${equity:13,.2f}")
+                if action_type == "close_position":
+                    # Determine which position to close
+                    close_contract = contract_ticker or active_call or active_put
+                    if close_contract:
+                        # Short positions (calls/puts we sold) → BUY to close
+                        # Long positions (puts we bought) → SELL to close
+                        close_side = "BUY" if close_contract == active_call else "SELL"
+                        if strategy == "profit":
+                            close_side = "BUY"  # profit sells both calls and puts
+                        order_seq += 1
+                        resp = place_order(
+                            session_id, account_id, f"llm_close_{order_seq}",
+                            {"type": "OPTION", "contract": close_contract},
+                            close_side, OPTION_QTY,
+                        )
+                        if resp.get("ok"):
+                            action_str = f"LLM CLOSE {close_contract[-21:]} ({reason})"
+                            print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                                  f"{action_str:^45} | ${equity:13,.2f}")
+                            options_log.append({
+                                "date": current_date, "action": "close_position",
+                                "contract": close_contract, "reason": reason,
+                                "source": "llm",
+                            })
+                            if close_contract == active_call:
+                                active_call = None
+                            else:
+                                active_put = None
+                        else:
+                            print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                                  f"{'LLM close rejected':^45} | ${equity:13,.2f}")
 
-                elif action_type in ("sell_call", "buy_put") and contract_ticker:
-                    if active_option is not None:
+                elif action_type in ("sell_call", "sell_put", "buy_put") and contract_ticker:
+                    # Check appropriate position slot
+                    if action_type == "sell_call" and active_call is not None:
                         print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
-                              f"{'LLM: already holding, skipping open':^45} | ${equity:13,.2f}")
+                              f"{'LLM: already holding call, skip':^45} | ${equity:13,.2f}")
+                        time.sleep(call_latency)
+                        continue
+                    if action_type in ("sell_put", "buy_put") and active_put is not None:
+                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                              f"{'LLM: already holding put, skip':^45} | ${equity:13,.2f}")
                         time.sleep(call_latency)
                         continue
 
@@ -581,15 +636,33 @@ def run_llm_strategy(underlying: str, strategy: str):
                         time.sleep(call_latency)
                         continue
 
-                    side = "SELL" if action_type == "sell_call" else "BUY"
+                    # Hard delta constraint via compute_effective_delta
+                    greeks = query_option_greeks(contract_ticker, current_date)
+                    if greeks and greeks.get("delta") and eff_delta is not None:
+                        if action_type in ("sell_call", "sell_put"):
+                            proposed_qty = -OPTION_QTY
+                        else:  # buy_put
+                            proposed_qty = OPTION_QTY
+                        proposed = option_pos_list + [{"delta": greeks["delta"], "qty": proposed_qty}]
+                        proposed_delta = compute_effective_delta(STOCK_QTY, proposed)
+                        if abs(proposed_delta) > STOCK_QTY:
+                            print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                                  f"{'DELTA REJECT: ' + action_type:^45} | ${equity:13,.2f}")
+                            time.sleep(call_latency)
+                            continue
+
+                    side = "SELL" if action_type in ("sell_call", "sell_put") else "BUY"
                     order_seq += 1
                     resp = place_order(
                         session_id, account_id, f"llm_{order_seq}",
                         {"type": "OPTION", "contract": contract_ticker},
-                        side, 1,
+                        side, OPTION_QTY,
                     )
                     if resp.get("ok"):
-                        active_option = contract_ticker
+                        if action_type == "sell_call":
+                            active_call = contract_ticker
+                        else:
+                            active_put = contract_ticker
                         c = contract_lookup[contract_ticker]
                         action_str = f"LLM {side} {contract_ticker[-21:]} ({reason})"
                         print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "

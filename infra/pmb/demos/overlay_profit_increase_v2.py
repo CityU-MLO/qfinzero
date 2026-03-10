@@ -42,6 +42,7 @@ CASH_BUFFER_PCT = 0.20
 OTM_PCT = 0.05
 DTE_MIN = 7
 DTE_MAX = 45
+OPTION_QTY = STOCK_QTY // 100  # 100 contracts = 10,000 shares
 
 
 def run_single_ticker(underlying: str):
@@ -49,7 +50,7 @@ def run_single_ticker(underlying: str):
 
     etf_ticker = ETF_BENCHMARKS.get(underlying)
 
-    print_section(f"Overlay v2: Covered Call — {underlying}")
+    print_section(f"Overlay v2: Covered Call + Cash-Secured Put — {underlying}")
     print(f"  Period: {START_DATE} to {END_DATE}")
     print(f"  Stock Position: {STOCK_QTY:,} shares")
     print(f"  Cash Buffer: {CASH_BUFFER_PCT*100:.0f}%")
@@ -87,8 +88,25 @@ def run_single_ticker(underlying: str):
         print(f"  ERROR: No option contracts found for {underlying}.")
         return
 
-    print(f"\n  Discovered {len(contracts)} contracts for the year")
+    print(f"\n  Discovered {len(contracts)} call contracts for the year")
     option_tickers = [c["ticker"] for c in contracts]
+
+    # Pre-discover all weekly put contracts (for cash-secured puts)
+    put_contracts = discover_contracts_weekly(
+        underlying=underlying,
+        start_date=START_DATE,
+        end_date=END_DATE,
+        option_type="P",
+        otm_pct=OTM_PCT,
+        ref_price=ref_price,
+        dte_min=DTE_MIN,
+        dte_max=DTE_MAX,
+    )
+    if put_contracts:
+        print(f"  Discovered {len(put_contracts)} put contracts for the year")
+        option_tickers.extend(c["ticker"] for c in put_contracts)
+    else:
+        put_contracts = []
 
     # 3. Fetch ETF benchmark data
     etf_prices = {}
@@ -135,7 +153,9 @@ def run_single_ticker(underlying: str):
 
     # Track state
     active_call_contract = None
+    active_put_contract = None
     contract_idx = 0
+    put_contract_idx = 0
     options_log = []
     day_count = 2
     benchmark_initial_price = initial_price
@@ -168,13 +188,15 @@ def run_single_ticker(underlying: str):
         if market_tick and market_tick["payload"]["stocks"]:
             current_price = market_tick["payload"]["stocks"][0]["close"]
 
-        # Extract equity and stock position
+        # Extract equity, cash, and stock position
         account_snap = next((e for e in events if e["type"] == "ACCOUNT_SNAPSHOT"), None)
         equity = 0
+        cash = 0
         stock_pos = 0
         if account_snap:
             snap = account_snap["payload"]
             equity = snap["equity"]
+            cash = snap.get("cash", 0)
             for pos in snap.get("positions", []):
                 if pos.get("instrument_id", "").startswith("STOCK:"):
                     stock_pos = pos["qty"]
@@ -193,7 +215,7 @@ def run_single_ticker(underlying: str):
                     options_log.append({
                         "date": current_date, "action": "EXPIRY_ITM",
                         "contract": contract, "strike": assignment["strike"],
-                        "outcome": f"call-away {assignment['qty']} shares",
+                        "outcome": f"{assignment['side']} {assignment['qty']} shares",
                     })
                 else:
                     action_str = f"EXPIRY OTM: {contract[-21:]} worthless"
@@ -204,7 +226,13 @@ def run_single_ticker(underlying: str):
 
                 print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
                       f"{action_str:^40} | ${equity:13,.2f}")
-                active_call_contract = None
+
+                # Determine call vs put from OPRA ticker (P or C before 8-digit strike)
+                opra = contract.split(":")[-1] if ":" in contract else contract
+                if "P" in opra[len(opra)-9:]:
+                    active_put_contract = None
+                else:
+                    active_call_contract = None
 
         # Re-buy stock if called away
         if stock_pos < STOCK_QTY and current_price > 0:
@@ -243,7 +271,8 @@ def run_single_ticker(underlying: str):
                                     "qty": p["qty"],
                                 })
                     eff_delta = compute_effective_delta(STOCK_QTY, option_pos_list)
-                    new_delta = eff_delta + (-greeks["delta"]) * 1 * 100  # short call
+                    proposed = option_pos_list + [{"delta": greeks["delta"], "qty": -OPTION_QTY}]
+                    new_delta = compute_effective_delta(STOCK_QTY, proposed)
                     if abs(new_delta) > STOCK_QTY:
                         print(f"  DELTA CONSTRAINT: skip {c['ticker']}, "
                               f"effective delta would be {new_delta:.0f} > {STOCK_QTY:,}")
@@ -254,12 +283,12 @@ def run_single_ticker(underlying: str):
                 resp = place_order(
                     session_id, account_id, f"sell_call_{order_seq}",
                     {"type": "OPTION", "contract": c["ticker"]},
-                    "SELL", 1,
+                    "SELL", OPTION_QTY,
                 )
                 if resp.get("ok"):
                     active_call_contract = c["ticker"]
                     contract_idx += 1
-                    action_str = f"SELL {c['ticker'][-21:]} @${c['strike']:.2f}"
+                    action_str = f"SELL CALL {c['ticker'][-21:]} @${c['strike']:.2f}"
                     print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
                           f"{action_str:^40} | ${equity:13,.2f}")
                     options_log.append({
@@ -267,6 +296,59 @@ def run_single_ticker(underlying: str):
                         "contract": c["ticker"], "strike": c["strike"],
                         "expiry": c["expiry"], "premium": c["close"],
                     })
+
+        # Sell cash-secured put if no active put position
+        if active_put_contract is None and put_contract_idx < len(put_contracts):
+            while put_contract_idx < len(put_contracts):
+                pc = put_contracts[put_contract_idx]
+                if pc["expiry"] >= current_date:
+                    break
+                put_contract_idx += 1
+
+            if put_contract_idx < len(put_contracts):
+                pc = put_contracts[put_contract_idx]
+
+                # Dynamic qty: limited by available cash
+                put_qty = min(OPTION_QTY, int(cash // (pc["strike"] * 100))) if pc["strike"] > 0 else 0
+                if put_qty > 0:
+                    # Delta constraint via compute_effective_delta
+                    greeks = query_option_greeks(pc["ticker"], current_date)
+                    skip = False
+                    if greeks and greeks.get("delta"):
+                        option_pos_list = []
+                        for p in get_positions(account_id):
+                            if p.get("instrument_id", "").startswith("OPTION:"):
+                                p_greeks = query_option_greeks(
+                                    p["instrument_id"].split(":", 1)[1], current_date)
+                                if p_greeks and p_greeks.get("delta"):
+                                    option_pos_list.append({
+                                        "delta": p_greeks["delta"],
+                                        "qty": p["qty"],
+                                    })
+                        proposed = option_pos_list + [{"delta": greeks["delta"], "qty": -put_qty}]
+                        new_delta = compute_effective_delta(STOCK_QTY, proposed)
+                        if abs(new_delta) > STOCK_QTY:
+                            skip = True
+
+                    if not skip:
+                        order_seq += 1
+                        resp = place_order(
+                            session_id, account_id, f"sell_put_{order_seq}",
+                            {"type": "OPTION", "contract": pc["ticker"]},
+                            "SELL", put_qty,
+                        )
+                        if resp.get("ok"):
+                            active_put_contract = pc["ticker"]
+                            put_contract_idx += 1
+                            action_str = f"SELL PUT x{put_qty} {pc['ticker'][-21:]} @${pc['strike']:.2f}"
+                            print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                                  f"{action_str:^40} | ${equity:13,.2f}")
+                            options_log.append({
+                                "date": current_date, "action": "SELL_PUT",
+                                "contract": pc["ticker"], "strike": pc["strike"],
+                                "expiry": pc["expiry"], "premium": pc["close"],
+                                "qty": put_qty,
+                            })
 
     # 6. Final results
     print_section(f"Results: Covered Call vs Benchmarks — {underlying}")
@@ -312,16 +394,20 @@ def run_single_ticker(underlying: str):
     print(f"  Trades: {summary['num_trades']}")
 
     # Premium summary
-    sell_actions = [o for o in options_log if o["action"] == "SELL_CALL"]
-    total_premium = sum(o.get("premium", 0) for o in sell_actions)
+    sell_call_actions = [o for o in options_log if o["action"] == "SELL_CALL"]
+    sell_put_actions = [o for o in options_log if o["action"] == "SELL_PUT"]
+    total_call_premium = sum(o.get("premium", 0) for o in sell_call_actions)
+    total_put_premium = sum(o.get("premium", 0) * o.get("qty", OPTION_QTY) for o in sell_put_actions)
     itm_count = sum(1 for o in options_log if o["action"] == "EXPIRY_ITM")
     otm_count = sum(1 for o in options_log if o["action"] == "EXPIRY_OTM")
 
     print(f"\n  Option Activity:")
-    print(f"    Calls sold: {len(sell_actions)}")
-    print(f"    Est. total premium: ${total_premium * 100:,.2f} (x100 multiplier)")
+    print(f"    Calls sold: {len(sell_call_actions)}")
+    print(f"    Est. call premium: ${total_call_premium * 100:,.2f} (x100 multiplier)")
+    print(f"    Puts sold: {len(sell_put_actions)}")
+    print(f"    Est. put premium: ${total_put_premium * 100:,.2f} (x100 multiplier)")
     print(f"    Expired OTM (profit): {otm_count}")
-    print(f"    Expired ITM (call-away): {itm_count}")
+    print(f"    Expired ITM (assigned): {itm_count}")
 
     # Final positions
     print(f"\n  Final Positions:")
@@ -353,10 +439,12 @@ def run_single_ticker(underlying: str):
     saver.add_summary_line(f"  Fees Paid: ${summary['fees_paid']:,.2f}")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"Option Activity:")
-    saver.add_summary_line(f"  Calls sold: {len(sell_actions)}")
-    saver.add_summary_line(f"  Est. premium collected: ${total_premium * 100:,.2f}")
+    saver.add_summary_line(f"  Calls sold: {len(sell_call_actions)}")
+    saver.add_summary_line(f"  Est. call premium: ${total_call_premium * 100:,.2f}")
+    saver.add_summary_line(f"  Puts sold: {len(sell_put_actions)}")
+    saver.add_summary_line(f"  Est. put premium: ${total_put_premium * 100:,.2f}")
     saver.add_summary_line(f"  Expired OTM: {otm_count}")
-    saver.add_summary_line(f"  Expired ITM (call-away): {itm_count}")
+    saver.add_summary_line(f"  Expired ITM (assigned): {itm_count}")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"Options Log:")
     for o in options_log:
@@ -375,8 +463,9 @@ def run_single_ticker(underlying: str):
         "benchmark_return": benchmark_return,
         "etf_return": etf_return,
         "etf_ticker": etf_ticker,
-        "premium_collected": total_premium * 100,
-        "calls_sold": len(sell_actions),
+        "premium_collected": (total_call_premium + total_put_premium) * 100,
+        "calls_sold": len(sell_call_actions),
+        "puts_sold": len(sell_put_actions),
         "itm_expiries": itm_count,
         "otm_expiries": otm_count,
     }

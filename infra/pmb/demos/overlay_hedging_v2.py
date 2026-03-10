@@ -1,12 +1,12 @@
 """
-Overlay Strategy Demo v2: Hedging (Protective Put) — Paper Spec
+Overlay Strategy Demo v2: Hedging (Put Spread) — Paper Spec
 
 Paper parameters:
   - Underlyings: QQQ, NVDA
   - Position: 10,000 shares + 20% cash buffer
   - Rebalance: Weekly (every Monday)
   - DTE: 7-60 days
-  - Strategy: Protective put (buy OTM put ~5% below current price)
+  - Strategy: Put spread (buy near-ATM put + sell further-OTM put)
   - Period: 2025-01-02 to 2025-12-31
 
 Prerequisites:
@@ -22,11 +22,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
+from collections import defaultdict
 from demos.overlay_helpers import (
     discover_contracts_weekly, create_account, create_session,
-    place_order, step_session, get_summary, get_export,
+    place_order, place_spread, step_session, get_summary, get_export,
     get_positions, get_account, print_section, query_stock_price,
     compute_initial_cash, query_option_greeks, compute_effective_delta,
+    query_option_chain,
 )
 from demos.result_saver import ResultSaver
 
@@ -37,19 +39,51 @@ START_DATE = "2025-01-02"
 END_DATE = "2025-12-31"
 STOCK_QTY = 10_000
 CASH_BUFFER_PCT = 0.20
-OTM_PCT = 0.05
 DTE_MIN = 7
 DTE_MAX = 60
+OPTION_QTY = STOCK_QTY // 100  # 100 contracts = 10,000 shares
+NEAR_OTM_PCT = 0.03   # Long leg: 3% OTM
+FAR_OTM_PCT = 0.08    # Short leg: 8% OTM
+
+
+def pair_spread_contracts(contracts: list[dict], ref_price: float) -> list[dict]:
+    """Pair contracts into spreads by expiry.
+
+    For each expiry, find:
+      - near leg: strike closest to ref_price × (1 - NEAR_OTM_PCT)
+      - far leg: strike closest to ref_price × (1 - FAR_OTM_PCT)
+
+    Returns list of {"expiry": ..., "near": {...}, "far": {...}} dicts.
+    Only includes pairs where both legs exist and near.strike > far.strike.
+    """
+    by_expiry = defaultdict(list)
+    for c in contracts:
+        by_expiry[c["expiry"]].append(c)
+
+    near_target = ref_price * (1 - NEAR_OTM_PCT)
+    far_target = ref_price * (1 - FAR_OTM_PCT)
+
+    pairs = []
+    for expiry in sorted(by_expiry.keys()):
+        cs = by_expiry[expiry]
+        if len(cs) < 2:
+            continue
+        near = min(cs, key=lambda c: abs(c["strike"] - near_target))
+        far = min(cs, key=lambda c: abs(c["strike"] - far_target))
+        if near["ticker"] != far["ticker"] and near["strike"] > far["strike"]:
+            pairs.append({"expiry": expiry, "near": near, "far": far})
+    return pairs
 
 
 def run_single_ticker(underlying: str):
-    """Run protective put strategy for a single underlying."""
+    """Run put spread hedging strategy for a single underlying."""
 
-    print_section(f"Overlay v2: Protective Put — {underlying}")
+    print_section(f"Overlay v2: Put Spread Hedge — {underlying}")
     print(f"  Period: {START_DATE} to {END_DATE}")
     print(f"  Stock Position: {STOCK_QTY:,} shares")
     print(f"  Cash Buffer: {CASH_BUFFER_PCT*100:.0f}%")
     print(f"  DTE Window: {DTE_MIN}-{DTE_MAX} days")
+    print(f"  Spread: Buy {NEAR_OTM_PCT*100:.0f}% OTM put + Sell {FAR_OTM_PCT*100:.0f}% OTM put")
     print(f"  Rebalance: Weekly")
 
     # 1. Get reference price and compute initial cash
@@ -65,24 +99,62 @@ def run_single_ticker(underlying: str):
     print(f"    Stock notional: ${ref_price * STOCK_QTY:,.2f}")
     print(f"    Cash buffer: ${initial_cash - ref_price * STOCK_QTY:,.2f}")
 
-    # 2. Pre-discover all weekly put contracts
+    # 2. Pre-discover put contracts with wide strike range (covers 3%-8% OTM)
+    # We discover at 5% OTM center, which should give us a range of strikes
     contracts = discover_contracts_weekly(
         underlying=underlying,
         start_date=START_DATE,
         end_date=END_DATE,
         option_type="P",
-        otm_pct=OTM_PCT,
+        otm_pct=0.05,
         ref_price=ref_price,
         dte_min=DTE_MIN,
         dte_max=DTE_MAX,
     )
 
+    # Also discover at 3% and 8% to ensure we have wider coverage
+    for pct in [NEAR_OTM_PCT, FAR_OTM_PCT]:
+        extra = discover_contracts_weekly(
+            underlying=underlying,
+            start_date=START_DATE,
+            end_date=END_DATE,
+            option_type="P",
+            otm_pct=pct,
+            ref_price=ref_price,
+            dte_min=DTE_MIN,
+            dte_max=DTE_MAX,
+        )
+        if extra:
+            existing_tickers = {c["ticker"] for c in contracts}
+            for c in extra:
+                if c["ticker"] not in existing_tickers:
+                    contracts.append(c)
+
     if not contracts:
         print(f"  ERROR: No option contracts found for {underlying}.")
         return
 
-    print(f"\n  Discovered {len(contracts)} contracts for the year")
-    option_tickers = [c["ticker"] for c in contracts]
+    print(f"\n  Discovered {len(contracts)} put contracts for the year")
+
+    # Pair contracts into spreads by expiry
+    spread_pairs = pair_spread_contracts(contracts, ref_price)
+    print(f"  Paired into {len(spread_pairs)} spread pairs")
+
+    if not spread_pairs:
+        print(f"  ERROR: Could not pair any spreads for {underlying}.")
+        return
+
+    for sp in spread_pairs[:3]:
+        print(f"    {sp['expiry']}: BUY ${sp['near']['strike']:.2f} / SELL ${sp['far']['strike']:.2f}")
+    if len(spread_pairs) > 3:
+        print(f"    ... and {len(spread_pairs) - 3} more")
+
+    # Collect all unique contracts for the universe
+    all_tickers = set()
+    for sp in spread_pairs:
+        all_tickers.add(sp["near"]["ticker"])
+        all_tickers.add(sp["far"]["ticker"])
+    option_tickers = list(all_tickers)
 
     # 3. Create account + session
     print_section("Phase 2: Session Setup")
@@ -103,7 +175,7 @@ def run_single_ticker(underlying: str):
     print(f"  Session: {session_id}")
 
     # 4. Trading loop
-    print_section(f"Phase 3: Running Protective Put — {underlying}")
+    print_section(f"Phase 3: Running Put Spread Hedge — {underlying}")
 
     # Step to first day and buy stock
     step_data = step_session(session_id)
@@ -121,15 +193,15 @@ def run_single_ticker(underlying: str):
     step_session(session_id)
 
     # Track state
-    active_put_contract = None
-    contract_idx = 0
+    active_spread = None  # {"near_contract": ..., "far_contract": ...}
+    spread_idx = 0
     options_log = []
     day_count = 2
     benchmark_initial_price = initial_price
     order_seq = 0
 
-    print(f"\n  {'Day':>4} | {'Date':^10} | {underlying:>8} | {'Action':^40} | {'Equity':>14}")
-    print("  " + "-" * 95)
+    print(f"\n  {'Day':>4} | {'Date':^10} | {underlying:>8} | {'Action':^50} | {'Equity':>14}")
+    print("  " + "-" * 105)
 
     while True:
         step_data = step_session(session_id)
@@ -164,36 +236,45 @@ def run_single_ticker(underlying: str):
                 is_itm = payload.get("is_itm", False)
 
                 if is_itm:
-                    action_str = f"PUT EXPIRY ITM: {contract[-21:]} (protected)"
+                    action_str = f"SPREAD EXPIRY ITM: {contract[-21:]}"
                     options_log.append({
                         "date": current_date, "action": "EXPIRY_ITM",
                         "contract": contract, "outcome": "closed at intrinsic",
                     })
                 else:
-                    action_str = f"PUT EXPIRY OTM: {contract[-21:]} worthless"
+                    action_str = f"SPREAD EXPIRY OTM: {contract[-21:]}"
                     options_log.append({
                         "date": current_date, "action": "EXPIRY_OTM",
                         "contract": contract, "outcome": "expired worthless",
                     })
 
                 print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
-                      f"{action_str:^40} | ${equity:13,.2f}")
-                active_put_contract = None
+                      f"{action_str:^50} | ${equity:13,.2f}")
 
-        # Open new put if no active position
-        if active_put_contract is None and contract_idx < len(contracts):
-            while contract_idx < len(contracts):
-                c = contracts[contract_idx]
-                if c["expiry"] >= current_date:
+                # Clear active spread if one of its legs expired
+                if active_spread and (
+                    contract == active_spread["near_contract"]
+                    or contract == active_spread["far_contract"]
+                ):
+                    active_spread = None
+
+        # Open new put spread if no active position
+        if active_spread is None and spread_idx < len(spread_pairs):
+            while spread_idx < len(spread_pairs):
+                sp = spread_pairs[spread_idx]
+                if sp["expiry"] >= current_date:
                     break
-                contract_idx += 1
+                spread_idx += 1
 
-            if contract_idx < len(contracts):
-                c = contracts[contract_idx]
+            if spread_idx < len(spread_pairs):
+                sp = spread_pairs[spread_idx]
 
-                # Delta constraint: skip if adding long put would violate delta limit
-                greeks = query_option_greeks(c["ticker"], current_date)
-                if greeks and greeks.get("delta"):
+                # Delta constraint check
+                greeks_near = query_option_greeks(sp["near"]["ticker"], current_date)
+                greeks_far = query_option_greeks(sp["far"]["ticker"], current_date)
+                skip = False
+
+                if greeks_near and greeks_near.get("delta") and greeks_far and greeks_far.get("delta"):
                     option_pos_list = []
                     for p in get_positions(account_id):
                         if p.get("instrument_id", "").startswith("OPTION:"):
@@ -204,34 +285,53 @@ def run_single_ticker(underlying: str):
                                     "delta": p_greeks["delta"],
                                     "qty": p["qty"],
                                 })
-                    eff_delta = compute_effective_delta(STOCK_QTY, option_pos_list)
-                    new_delta = eff_delta + greeks["delta"] * 1 * 100  # long put
+                    # Long near put (qty=+OPTION_QTY) + short far put (qty=-OPTION_QTY)
+                    proposed = option_pos_list + [
+                        {"delta": greeks_near["delta"], "qty": OPTION_QTY},
+                        {"delta": greeks_far["delta"], "qty": -OPTION_QTY},
+                    ]
+                    new_delta = compute_effective_delta(STOCK_QTY, proposed)
                     if abs(new_delta) > STOCK_QTY:
-                        print(f"  DELTA CONSTRAINT: skip {c['ticker']}, "
+                        print(f"  DELTA CONSTRAINT: skip spread, "
                               f"effective delta would be {new_delta:.0f} > {STOCK_QTY:,}")
-                        contract_idx += 1
-                        continue
+                        spread_idx += 1
+                        skip = True
 
-                order_seq += 1
-                resp = place_order(
-                    session_id, account_id, f"buy_put_{order_seq}",
-                    {"type": "OPTION", "contract": c["ticker"]},
-                    "BUY", 1,
-                )
-                if resp.get("ok"):
-                    active_put_contract = c["ticker"]
-                    contract_idx += 1
-                    action_str = f"BUY PUT {c['ticker'][-21:]} @${c['strike']:.2f}"
-                    print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
-                          f"{action_str:^40} | ${equity:13,.2f}")
-                    options_log.append({
-                        "date": current_date, "action": "BUY_PUT",
-                        "contract": c["ticker"], "strike": c["strike"],
-                        "expiry": c["expiry"], "premium": c["close"],
-                    })
+                if not skip:
+                    order_seq += 1
+                    responses = place_spread(
+                        session_id, account_id, f"put_spread_{order_seq}",
+                        legs=[
+                            {"instrument": {"type": "OPTION", "contract": sp["near"]["ticker"]},
+                             "side": "BUY", "qty": OPTION_QTY},
+                            {"instrument": {"type": "OPTION", "contract": sp["far"]["ticker"]},
+                             "side": "SELL", "qty": OPTION_QTY},
+                        ],
+                    )
+
+                    if all(r.get("ok") for r in responses):
+                        active_spread = {
+                            "near_contract": sp["near"]["ticker"],
+                            "far_contract": sp["far"]["ticker"],
+                        }
+                        spread_idx += 1
+                        near_s = sp["near"]["strike"]
+                        far_s = sp["far"]["strike"]
+                        action_str = f"BUY SPREAD ${near_s:.0f}/${far_s:.0f} exp={sp['expiry']}"
+                        print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
+                              f"{action_str:^50} | ${equity:13,.2f}")
+                        options_log.append({
+                            "date": current_date, "action": "BUY_SPREAD",
+                            "near_contract": sp["near"]["ticker"],
+                            "far_contract": sp["far"]["ticker"],
+                            "near_strike": near_s, "far_strike": far_s,
+                            "expiry": sp["expiry"],
+                            "near_premium": sp["near"].get("close", 0),
+                            "far_premium": sp["far"].get("close", 0),
+                        })
 
     # 5. Final results
-    print_section(f"Results: Protective Put vs Buy-and-Hold — {underlying}")
+    print_section(f"Results: Put Spread Hedge vs Buy-and-Hold — {underlying}")
 
     summary = get_summary(session_id)
     positions = get_positions(account_id)
@@ -244,7 +344,7 @@ def run_single_ticker(underlying: str):
     benchmark_equity = (initial_cash - stock_cost) + final_price * STOCK_QTY
     benchmark_return = (benchmark_equity - initial_cash) / initial_cash
 
-    print(f"\n  {'Metric':<25} {'Protective Put':>15} {'Buy-Hold':>15}")
+    print(f"\n  {'Metric':<25} {'Put Spread':>15} {'Buy-Hold':>15}")
     print("  " + "-" * 55)
     print(f"  {'Total Return':<25} {overlay_return*100:>14.2f}% {benchmark_return*100:>14.2f}%")
     print(f"  {'Final Equity':<25} ${summary['final_equity']:>13,.2f} ${benchmark_equity:>13,.2f}")
@@ -255,14 +355,17 @@ def run_single_ticker(underlying: str):
     print(f"  Trades: {summary['num_trades']}")
 
     # Premium summary
-    buy_actions = [o for o in options_log if o["action"] == "BUY_PUT"]
-    total_premium = sum(o.get("premium", 0) for o in buy_actions)
+    spread_actions = [o for o in options_log if o["action"] == "BUY_SPREAD"]
+    net_premium = sum(
+        (o.get("near_premium", 0) - o.get("far_premium", 0))
+        for o in spread_actions
+    )
     itm_count = sum(1 for o in options_log if o["action"] == "EXPIRY_ITM")
     otm_count = sum(1 for o in options_log if o["action"] == "EXPIRY_OTM")
 
     print(f"\n  Option Activity:")
-    print(f"    Puts bought: {len(buy_actions)}")
-    print(f"    Est. total premium paid: ${total_premium * 100:,.2f} (x100 multiplier)")
+    print(f"    Spreads bought: {len(spread_actions)}")
+    print(f"    Est. net premium paid: ${net_premium * OPTION_QTY * 100:,.2f} (x{OPTION_QTY}x100)")
     print(f"    Expired OTM (lost premium): {otm_count}")
     print(f"    Expired ITM (protection used): {itm_count}")
 
@@ -277,31 +380,37 @@ def run_single_ticker(underlying: str):
     export_data = get_export(session_id)
     saver = ResultSaver(f"overlay_hedging_v2_{underlying.lower()}")
 
-    saver.add_summary_line(f"Overlay Strategy v2: Protective Put (Hedging)")
+    saver.add_summary_line(f"Overlay Strategy v2: Put Spread Hedge")
     saver.add_summary_line(f"{'='*70}")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"Underlying: {underlying}")
     saver.add_summary_line(f"Period: {START_DATE} to {END_DATE}")
     saver.add_summary_line(f"Position: {STOCK_QTY:,} shares")
     saver.add_summary_line(f"Initial Capital: ${initial_cash:,.2f}")
+    saver.add_summary_line(f"Spread: Buy {NEAR_OTM_PCT*100:.0f}% / Sell {FAR_OTM_PCT*100:.0f}% OTM")
     saver.add_summary_line(f"Rebalance: Weekly, DTE {DTE_MIN}-{DTE_MAX}")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"Performance:")
-    saver.add_summary_line(f"  Protective Put Return: {overlay_return*100:+.2f}%")
+    saver.add_summary_line(f"  Put Spread Return: {overlay_return*100:+.2f}%")
     saver.add_summary_line(f"  Buy-and-Hold Return: {benchmark_return*100:+.2f}%")
     saver.add_summary_line(f"  Hedge Cost: {(overlay_return - benchmark_return)*100:+.2f}%")
     saver.add_summary_line(f"  Max Drawdown: {summary['max_drawdown']*100:.2f}%")
     saver.add_summary_line(f"  Fees Paid: ${summary['fees_paid']:,.2f}")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"Option Activity:")
-    saver.add_summary_line(f"  Puts bought: {len(buy_actions)}")
-    saver.add_summary_line(f"  Est. premium paid: ${total_premium * 100:,.2f}")
+    saver.add_summary_line(f"  Spreads: {len(spread_actions)}")
+    saver.add_summary_line(f"  Est. net premium: ${net_premium * OPTION_QTY * 100:,.2f}")
     saver.add_summary_line(f"  Expired OTM: {otm_count}")
     saver.add_summary_line(f"  Expired ITM: {itm_count}")
     saver.add_summary_line(f"")
-    saver.add_summary_line(f"Options Log:")
+    saver.add_summary_line(f"Spread Log:")
     for o in options_log:
-        saver.add_summary_line(f"  {o['date']}: {o['action']} {o.get('contract', '')}")
+        if o["action"] == "BUY_SPREAD":
+            saver.add_summary_line(
+                f"  {o['date']}: BUY ${o['near_strike']:.0f}/${o['far_strike']:.0f} "
+                f"exp={o['expiry']}")
+        else:
+            saver.add_summary_line(f"  {o['date']}: {o['action']} {o.get('contract', '')}")
 
     saver.save_summary(summary)
     saver.save_holdings(positions)
@@ -314,15 +423,15 @@ def run_single_ticker(underlying: str):
         "underlying": underlying,
         "overlay_return": overlay_return,
         "benchmark_return": benchmark_return,
-        "premium_paid": total_premium * 100,
-        "puts_bought": len(buy_actions),
+        "net_premium_paid": net_premium * OPTION_QTY * 100,
+        "spreads_bought": len(spread_actions),
         "itm_expiries": itm_count,
         "otm_expiries": otm_count,
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Overlay v2: Protective Put (Paper Spec)")
+    parser = argparse.ArgumentParser(description="Overlay v2: Put Spread Hedge (Paper Spec)")
     parser.add_argument("--ticker", type=str, default=None,
                         help="Single ticker to run (default: run all paper tickers)")
     args = parser.parse_args()
@@ -336,14 +445,14 @@ def main():
             results.append(result)
 
     if len(results) > 1:
-        print_section("Cross-Ticker Summary: Protective Put v2")
-        print(f"\n  {'Ticker':<8} {'PP Return':>12} {'Buy-Hold':>12} {'Alpha':>10} {'Puts':>8} {'Premium':>12}")
-        print("  " + "-" * 68)
+        print_section("Cross-Ticker Summary: Put Spread Hedge v2")
+        print(f"\n  {'Ticker':<8} {'Spread Return':>14} {'Buy-Hold':>12} {'Alpha':>10} {'Spreads':>8} {'Net Prem':>12}")
+        print("  " + "-" * 70)
         for r in results:
-            print(f"  {r['underlying']:<8} {r['overlay_return']*100:>11.2f}% "
+            print(f"  {r['underlying']:<8} {r['overlay_return']*100:>13.2f}% "
                   f"{r['benchmark_return']*100:>11.2f}% "
                   f"{(r['overlay_return']-r['benchmark_return'])*100:>9.2f}% "
-                  f"{r['puts_bought']:>8} ${r['premium_paid']:>10,.2f}")
+                  f"{r['spreads_bought']:>8} ${r['net_premium_paid']:>10,.2f}")
 
 
 if __name__ == "__main__":
