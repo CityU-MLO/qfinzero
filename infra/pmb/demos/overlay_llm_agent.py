@@ -349,7 +349,9 @@ def run_llm_strategy(underlying: str, strategy: str):
     print_section(f"Phase 3: LLM Trading — {underlying}")
 
     active_call = None
+    active_call_expiry = None
     active_put = None
+    active_put_expiry = None
     options_log = []
     llm_calls = []  # Track latency + tokens
     day_count = 2
@@ -396,6 +398,14 @@ def run_llm_strategy(underlying: str, strategy: str):
                     if pos.get("instrument_id", "").startswith("STOCK:"):
                         stock_pos = pos["qty"]
 
+            # Clear expired positions by date (fallback if EXPIRY event doesn't fire)
+            if active_call and active_call_expiry and current_date > active_call_expiry:
+                active_call = None
+                active_call_expiry = None
+            if active_put and active_put_expiry and current_date > active_put_expiry:
+                active_put = None
+                active_put_expiry = None
+
             # Handle option expiry
             for evt in events:
                 if evt.get("type") == "OPTION_EXPIRY_EVENT":
@@ -417,8 +427,10 @@ def run_llm_strategy(underlying: str, strategy: str):
                     opra = contract.split(":")[-1] if ":" in contract else contract
                     if "P" in opra[len(opra)-9:]:
                         active_put = None
+                        active_put_expiry = None
                     else:
                         active_call = None
+                        active_call_expiry = None
 
             # Re-buy stock if called away (profit strategy)
             if strategy == "profit" and stock_pos < STOCK_QTY and current_price > 0:
@@ -610,8 +622,10 @@ def run_llm_strategy(underlying: str, strategy: str):
                             })
                             if close_contract == active_call:
                                 active_call = None
+                                active_call_expiry = None
                             else:
                                 active_put = None
+                                active_put_expiry = None
                         else:
                             print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
                                   f"{'LLM close rejected':^45} | ${equity:13,.2f}")
@@ -659,11 +673,13 @@ def run_llm_strategy(underlying: str, strategy: str):
                         side, OPTION_QTY,
                     )
                     if resp.get("ok"):
+                        c = contract_lookup[contract_ticker]
                         if action_type == "sell_call":
                             active_call = contract_ticker
+                            active_call_expiry = c.get("expiry")
                         else:
                             active_put = contract_ticker
-                        c = contract_lookup[contract_ticker]
+                            active_put_expiry = c.get("expiry")
                         action_str = f"LLM {side} {contract_ticker[-21:]} ({reason})"
                         print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
                               f"{action_str:^45} | ${equity:13,.2f}")

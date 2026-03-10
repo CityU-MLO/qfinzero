@@ -153,7 +153,9 @@ def run_single_ticker(underlying: str):
 
     # Track state
     active_call_contract = None
+    active_call_expiry = None
     active_put_contract = None
+    active_put_expiry = None
     contract_idx = 0
     put_contract_idx = 0
     options_log = []
@@ -201,6 +203,14 @@ def run_single_ticker(underlying: str):
                 if pos.get("instrument_id", "").startswith("STOCK:"):
                     stock_pos = pos["qty"]
 
+        # Clear expired positions by date (fallback if EXPIRY event doesn't fire)
+        if active_call_contract and active_call_expiry and current_date > active_call_expiry:
+            active_call_contract = None
+            active_call_expiry = None
+        if active_put_contract and active_put_expiry and current_date > active_put_expiry:
+            active_put_contract = None
+            active_put_expiry = None
+
         # Handle option expiry events
         for evt in events:
             if evt.get("type") == "OPTION_EXPIRY_EVENT":
@@ -231,8 +241,10 @@ def run_single_ticker(underlying: str):
                 opra = contract.split(":")[-1] if ":" in contract else contract
                 if "P" in opra[len(opra)-9:]:
                     active_put_contract = None
+                    active_put_expiry = None
                 else:
                     active_call_contract = None
+                    active_call_expiry = None
 
         # Re-buy stock if called away
         if stock_pos < STOCK_QTY and current_price > 0:
@@ -287,6 +299,7 @@ def run_single_ticker(underlying: str):
                 )
                 if resp.get("ok"):
                     active_call_contract = c["ticker"]
+                    active_call_expiry = c["expiry"]
                     contract_idx += 1
                     action_str = f"SELL CALL {c['ticker'][-21:]} @${c['strike']:.2f}"
                     print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "
@@ -339,6 +352,7 @@ def run_single_ticker(underlying: str):
                         )
                         if resp.get("ok"):
                             active_put_contract = pc["ticker"]
+                            active_put_expiry = pc["expiry"]
                             put_contract_idx += 1
                             action_str = f"SELL PUT x{put_qty} {pc['ticker'][-21:]} @${pc['strike']:.2f}"
                             print(f"  {day_count:4d} | {current_date:^10} | ${current_price:7.2f} | "

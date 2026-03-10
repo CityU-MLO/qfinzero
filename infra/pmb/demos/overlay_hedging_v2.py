@@ -193,7 +193,7 @@ def run_single_ticker(underlying: str):
     step_session(session_id)
 
     # Track state
-    active_spread = None  # {"near_contract": ..., "far_contract": ...}
+    active_spread = None  # {"near_contract": ..., "far_contract": ..., "expiry": ...}
     spread_idx = 0
     options_log = []
     day_count = 2
@@ -227,6 +227,10 @@ def run_single_ticker(underlying: str):
         equity = 0
         if account_snap:
             equity = account_snap["payload"]["equity"]
+
+        # Clear expired spread by date (fallback if EXPIRY event doesn't fire)
+        if active_spread and current_date > active_spread.get("expiry", ""):
+            active_spread = None
 
         # Handle option expiry events
         for evt in events:
@@ -313,6 +317,7 @@ def run_single_ticker(underlying: str):
                         active_spread = {
                             "near_contract": sp["near"]["ticker"],
                             "far_contract": sp["far"]["ticker"],
+                            "expiry": sp["expiry"],
                         }
                         spread_idx += 1
                         near_s = sp["near"]["strike"]
