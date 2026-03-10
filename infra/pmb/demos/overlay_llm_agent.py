@@ -37,13 +37,14 @@ from demos.overlay_helpers import (
     query_option_chain, select_contract, compute_initial_cash,
     get_etf_daily_prices, UPQ_CHAIN,
     query_option_greeks, compute_effective_delta,
+    load_macro_context, load_semi_earnings,
 )
 from demos.result_saver import ResultSaver
 
 
 # --- Config ---
-START_DATE = "2024-01-02"
-END_DATE = "2024-12-31"
+START_DATE = "2025-01-02"
+END_DATE = "2025-12-31"
 STOCK_QTY = 10_000
 CASH_BUFFER_PCT = 0.20
 OTM_PCT = 0.05
@@ -161,7 +162,8 @@ Available actions:
 def build_user_prompt(strategy: str, underlying: str, date: str,
                       price: float, cash: float, equity: float,
                       active_options: list, chain: list[dict],
-                      effective_delta: float | None = None) -> str:
+                      effective_delta: float | None = None,
+                      context: str = "") -> str:
     """Build the user prompt with current market state."""
     chain_summary = []
     for c in chain[:10]:  # Limit to 10 contracts to keep prompt short
@@ -177,6 +179,10 @@ def build_user_prompt(strategy: str, underlying: str, date: str,
     if effective_delta is not None:
         delta_line = f"\n- Current effective delta: {effective_delta:.0f} (target <= {STOCK_QTY:,})"
 
+    context_section = ""
+    if context:
+        context_section = f"\n\nMarket Context:\n{context}"
+
     return f"""Current state:
 - Date: {date}
 - {underlying} price: ${price:.2f}
@@ -191,13 +197,20 @@ What action should I take? Respond with JSON:
 {{"action": "sell_call"|"buy_put"|"hold"|"close_position", "contract": "O:...", "reason": "..."}}
 
 If action is "hold" or "close_position", omit the "contract" field.
-Constraint: effective delta must stay <= {STOCK_QTY:,} shares."""
+Constraint: effective delta must stay <= {STOCK_QTY:,} shares.{context_section}"""
 
 
 def is_rebalance_day(date_str: str) -> bool:
     """Check if date is a Monday (weekly rebalance)."""
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     return dt.weekday() == 0  # 0 = Monday
+
+
+def _date_offset(date_str: str, days: int) -> str:
+    """Return date_str offset by N days."""
+    from datetime import timedelta
+    dt = datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=days)
+    return dt.strftime("%Y-%m-%d")
 
 
 def run_llm_strategy(underlying: str, strategy: str):
@@ -216,6 +229,14 @@ def run_llm_strategy(underlying: str, strategy: str):
     # Load LLM config
     model_cfg = load_deepseek_config()
     call_latency = model_cfg.get("call_latency_s", 1.0)
+
+    # Load context data
+    semi_earnings = load_semi_earnings()
+    if semi_earnings:
+        print(f"  Loaded semiconductor earnings: {len(semi_earnings['earnings'])} records")
+    else:
+        print("  [WARN] Could not load semiconductor earnings context")
+        semi_earnings = {"tickers": [], "earnings": []}
 
     # 1. Get reference price and compute initial cash
     print_section("Phase 1: Setup")
@@ -270,7 +291,7 @@ def run_llm_strategy(underlying: str, strategy: str):
         stocks=[underlying],
         options=option_tickers,
         seed=701,
-        run_id=f"overlay_llm_{strategy}_{underlying.lower()}_2024",
+        run_id=f"overlay_llm_{strategy}_{underlying.lower()}_2025",
     )
     session_id = sess["session_id"]
     print(f"  Account: {account_id}")
@@ -314,6 +335,8 @@ def run_llm_strategy(underlying: str, strategy: str):
     print("  " + "-" * 100)
 
     http_client = httpx.Client()
+    current_macro_month = ""
+    macro_context = {}
 
     try:
         while True:
@@ -383,6 +406,15 @@ def run_llm_strategy(underlying: str, strategy: str):
             if current_price <= 0:
                 continue
 
+            # Load macro context when month changes
+            month_str = current_date[:7]
+            if month_str != current_macro_month:
+                current_macro_month = month_str
+                macro_context = load_macro_context(month_str)
+                if macro_context.get("last_month_review"):
+                    n = len(macro_context["last_month_review"].get("events", []))
+                    print(f"  [CTX] Loaded macro context for {month_str}: {n} review events")
+
             # Query option chain for LLM to choose from
             from datetime import timedelta
             dt = datetime.strptime(current_date, "%Y-%m-%d")
@@ -425,11 +457,66 @@ def run_llm_strategy(underlying: str, strategy: str):
             except Exception:
                 pass
 
+            # Build context string for LLM
+            ctx_parts = []
+
+            # Macro: last month review
+            review = macro_context.get("last_month_review")
+            if review and review.get("events"):
+                ctx_parts.append(f"Last month ({review['month']}) key macro events:")
+                for ev in review["events"]:
+                    line = f"  {ev['date']} {ev['event']}"
+                    if ev.get("actual"):
+                        line += f": actual={ev['actual']}"
+                        if ev.get("consensus"):
+                            line += f" vs consensus={ev['consensus']}"
+                        if ev.get("previous"):
+                            line += f" (prev={ev['previous']})"
+                    ctx_parts.append(line)
+
+            # Macro: next month upcoming
+            upcoming = macro_context.get("next_month_upcoming")
+            if upcoming and upcoming.get("events"):
+                ctx_parts.append(f"\nUpcoming macro events next month ({upcoming['month']}):")
+                for ev in upcoming["events"]:
+                    ctx_parts.append(f"  {ev['date']} {ev['event']}")
+
+            # Semiconductor earnings: recent results + upcoming
+            if semi_earnings and semi_earnings.get("earnings"):
+                recent = [e for e in semi_earnings["earnings"]
+                          if e["date"] >= _date_offset(current_date, -14)
+                          and e["date"] < current_date and e.get("actual_eps") is not None]
+                upcoming_earn = [e for e in semi_earnings["earnings"]
+                                 if e["date"] >= current_date
+                                 and e["date"] <= _date_offset(current_date, 14)]
+
+                if recent:
+                    ctx_parts.append("\nRecent semiconductor earnings (last 14 days):")
+                    for e in recent:
+                        surprise = ""
+                        if e.get("eps_surprise_percent") is not None:
+                            surprise = f" surprise={e['eps_surprise_percent']:.1%}"
+                        ctx_parts.append(
+                            f"  {e['date']} {e['ticker']} {e['fiscal_period']}/{e['fiscal_year']}: "
+                            f"EPS actual={e['actual_eps']} est={e['estimated_eps']}{surprise}"
+                        )
+
+                if upcoming_earn:
+                    ctx_parts.append("\nUpcoming semiconductor earnings (next 14 days):")
+                    for e in upcoming_earn:
+                        ctx_parts.append(
+                            f"  {e['date']} {e['ticker']} {e['fiscal_period']}/{e['fiscal_year']}: "
+                            f"est EPS={e['estimated_eps']}"
+                        )
+
+            context_str = "\n".join(ctx_parts)
+
             user_prompt = build_user_prompt(
                 strategy, underlying, current_date,
                 current_price, cash, equity,
                 active_list, chain,
                 effective_delta=eff_delta,
+                context=context_str,
             )
 
             # Call LLM
