@@ -167,9 +167,13 @@ def build_user_prompt(strategy: str, underlying: str, date: str,
     """Build the user prompt with current market state."""
     chain_summary = []
     for c in chain[:10]:  # Limit to 10 contracts to keep prompt short
+        iv_str = ""
+        iv_val = c.get("iv")
+        if iv_val is not None:
+            iv_str = f" iv={iv_val:.2f}"
         chain_summary.append(
             f"  {c['ticker']} strike=${c['strike']:.2f} "
-            f"expiry={c.get('expiry', 'N/A')} premium=${c.get('close', 0):.2f}"
+            f"expiry={c.get('expiry', 'N/A')} premium=${c.get('close', 0):.2f}{iv_str}"
         )
 
     options_str = ", ".join(active_options) if active_options else "None"
