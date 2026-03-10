@@ -14,11 +14,24 @@ QLIB_CONTEXT_DIR = "/home/qlib/news/llm_context_2025"
 
 
 def load_remote_json(remote_path: str) -> dict | None:
-    """Load a JSON file from qlib via SSH.
+    """Load a JSON file — local first, then SSH fallback.
 
-    Runs ``ssh qlib "cat <path>"`` and parses stdout as JSON.
+    If the file exists locally (e.g. running on qlib), reads it directly.
+    Otherwise falls back to ``ssh qlib "cat <path>"``.
     Returns the parsed dict on success, or None on failure.
     """
+    import os
+
+    # Try local file first (works when running on qlib itself)
+    if os.path.isfile(remote_path):
+        try:
+            with open(remote_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"  [WARN] load_remote_json: local read failed for {remote_path}: {e}")
+            return None
+
+    # Fallback to SSH (works when running from local machine)
     try:
         result = subprocess.run(
             ["ssh", "qlib", f"cat {remote_path}"],
