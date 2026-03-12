@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# test-env.sh — Manage feat/data-platform-frontend test services on the remote qlib server
+# test-env.sh — Manage qfinzero test services on the remote qlib server
 #
 # Usage:
 #   ./scripts/test-env.sh start   [pmb|npp|upq|web|playground]   — git pull, build if needed, then start
 #   ./scripts/test-env.sh stop    [pmb|npp|upq|web|playground]   — stop service(s)
 #   ./scripts/test-env.sh restart [pmb|npp|upq|web|playground]   — stop then start
 #   ./scripts/test-env.sh status                                  — show all services status
+#
+# Options:
+#   -b <branch>   — use specific branch instead of default (main)
 #
 # Services run on the remote host accessible via `ssh qlib`.
 #   PMB         19701  /home/qlib/qfinzero/infra/pmb          (Python)
@@ -20,7 +23,8 @@ set -euo pipefail
 
 SSH_HOST="qlib"
 REMOTE_ROOT="/home/qlib/qfinzero"
-REMOTE_BRANCH="feat/data-platform-frontend"
+DEFAULT_REMOTE_BRANCH="main"
+WEB_REMOTE_BRANCH="main"
 
 LOG_DIR="/tmp/efan"
 PID_DIR="/tmp/efan"
@@ -67,18 +71,32 @@ remote_run() {
 
 # ── Git pull ──────────────────────────────────────────────────────────────────
 
+resolve_remote_branch() {
+    local svcs="$1"
+    if [ -n "$BRANCH_OVERRIDE" ]; then
+        echo "$BRANCH_OVERRIDE"
+    elif echo "$svcs" | grep -qw web; then
+        echo "$WEB_REMOTE_BRANCH"
+    else
+        echo "$DEFAULT_REMOTE_BRANCH"
+    fi
+}
+
 remote_git_pull() {
-    section "Git pull on remote ($REMOTE_BRANCH)"
+    local target_branch="$1"
+    section "Git pull on remote ($target_branch)"
     remote_run <<EOF
 set -e
 cd '${REMOTE_ROOT}'
+echo 'Fetching all branches from origin...'
+git fetch origin
 current_branch=\$(git rev-parse --abbrev-ref HEAD)
-if [ "\$current_branch" != '${REMOTE_BRANCH}' ]; then
-    echo "WARNING: remote HEAD is on '\$current_branch', not '${REMOTE_BRANCH}'."
-    git checkout '${REMOTE_BRANCH}'
+if [ "\$current_branch" != '${target_branch}' ]; then
+    echo "Switching from '\$current_branch' to '${target_branch}'..."
+    git checkout '${target_branch}' 2>/dev/null || git checkout -b '${target_branch}' 'origin/${target_branch}'
 fi
-echo 'Pulling latest from origin/${REMOTE_BRANCH}...'
-git pull origin '${REMOTE_BRANCH}'
+echo 'Pulling latest from origin/${target_branch}...'
+git pull origin '${target_branch}'
 echo "Now at: \$(git log --oneline -1)"
 EOF
 }
@@ -430,7 +448,10 @@ EOF
 
 usage() {
     echo ""
-    echo "Usage: $0 <command> [service]"
+    echo "Usage: $0 [-b <branch>] <command> [service]"
+    echo ""
+    echo "Options:"
+    echo "  -b <branch>   Use specific git branch (default: main)"
     echo ""
     echo "Commands:"
     echo "  start   [pmb|npp|upq|playground|web]   — git pull, build if needed, then start"
@@ -439,6 +460,10 @@ usage() {
     echo "  status                                  — show all services status"
     echo ""
     echo "Omit [service] to target all five services."
+    echo ""
+    echo "Examples:"
+    echo "  $0 restart upq                          — restart UPQ on main branch"
+    echo "  $0 -b dev/tools-unit-tests restart upq  — restart UPQ on specific branch"
     echo ""
 }
 
@@ -450,13 +475,25 @@ resolve_services() {
     esac
 }
 
+# ── Parse options ─────────────────────────────────────────────────────────────
+
+BRANCH_OVERRIDE=""
+while getopts "b:" opt; do
+    case "$opt" in
+        b) BRANCH_OVERRIDE="$OPTARG" ;;
+        *) usage; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
 CMD="${1:-}"
 SVC_ARG="${2:-}"
 
 case "$CMD" in
     start)
         SVCS=$(resolve_services "$SVC_ARG")
-        remote_git_pull
+        TARGET_BRANCH=$(resolve_remote_branch "$SVCS")
+        remote_git_pull "$TARGET_BRANCH"
         if echo "$SVCS" | grep -qw upq; then remote_build_upq_if_needed; fi
         if echo "$SVCS" | grep -qw web; then remote_build_web_if_needed; fi
         for svc in $SVCS; do start_service "$svc"; done
@@ -468,7 +505,8 @@ case "$CMD" in
     restart)
         SVCS=$(resolve_services "$SVC_ARG")
         for svc in $SVCS; do stop_service "$svc"; done
-        remote_git_pull
+        TARGET_BRANCH=$(resolve_remote_branch "$SVCS")
+        remote_git_pull "$TARGET_BRANCH"
         if echo "$SVCS" | grep -qw upq; then remote_build_upq_if_needed; fi
         if echo "$SVCS" | grep -qw web; then remote_build_web_if_needed; fi
         for svc in $SVCS; do start_service "$svc"; done

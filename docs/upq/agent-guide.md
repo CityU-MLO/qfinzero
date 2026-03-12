@@ -99,7 +99,7 @@ dt = UPQClient.ns_to_datetime(1736155800000000000)
 
 ### 3. `option_chain` — Query Option Chain
 
-Find option contracts for an underlying stock on a given date. Supports filtering by strike range, expiry range, and call/put type.
+Find option contracts for an underlying stock on a given date. Supports filtering by strike range, expiry range, and call/put type. Optionally compute BSM-European Greeks for each row.
 
 **Parameters:**
 
@@ -113,6 +113,9 @@ Find option contracts for an underlying stock on a given date. Supports filterin
 | `expiry_min` | `str` | No | Earliest expiration date `YYYY-MM-DD` |
 | `expiry_max` | `str` | No | Latest expiration date `YYYY-MM-DD` |
 | `fields` | `str` | No | Comma-separated fields |
+| `include_greeks` | `bool` | No | When `True`, append BSM-European Greeks to each row (default `False`) |
+| `greek_model` | `str` | No | Pricing model — only `"bsm"` supported in V1 |
+| `greek_price_field` | `str` | No | Price field for IV inversion — only `"close"` supported in V1 |
 
 **Example:**
 ```python
@@ -150,7 +153,7 @@ contract_id = best["ticker"]  # -> "O:NVDA250117C00136000"
 
 ### 4. `option_contract` — Get Option Contract Price Data
 
-Fetch daily or minute-level price data for a specific option contract.
+Fetch daily or minute-level price data for a specific option contract. Optionally compute BSM-European Greeks for each row.
 
 **Parameters:**
 
@@ -161,6 +164,9 @@ Fetch daily or minute-level price data for a specific option contract.
 | `end` | `str` | Yes | End date or datetime |
 | `resolution` | `str` | No | `"day"` (default) or `"minute"` |
 | `fields` | `str` | No | Comma-separated fields |
+| `include_greeks` | `bool` | No | When `True`, append BSM-European Greeks to each row (default `False`) |
+| `greek_model` | `str` | No | Pricing model — only `"bsm"` supported in V1 |
+| `greek_price_field` | `str` | No | Price field for IV inversion — only `"close"` supported in V1 |
 
 **Example (daily):**
 ```python
@@ -246,6 +252,92 @@ for row in yields:
 ```python
 status = upq.health()
 # -> {"status": "ok"}
+```
+
+---
+
+## Greeks Parameters
+
+Both `option_chain` and `option_contract` accept three optional Greeks parameters.
+
+### `include_greeks` — Enable Greeks Computation
+
+When set to `True`, each returned row is enriched with BSM-European Greeks fields: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`, `greek_status`, and `greek_meta`.
+
+**Warning:** Greeks use European-style BSM approximation. This is an approximation for American-style options.
+
+**Expiry Fallback & Greeks:** When an exact-expiry chain query triggers fallback, Greeks are computed using the actual returned expiry, not the requested date. Always check the `expiry` field in response rows.
+
+### `greek_model` — Pricing Model
+
+Selects the pricing model. Only `"bsm"` (Black-Scholes-Merton European) is supported in V1. Passing any other value returns a `400 invalid_argument` error.
+
+### `greek_price_field` — Price Field for IV Inversion
+
+Selects which option price field to use for implied volatility inversion. Only `"close"` is supported in V1. Passing any other value returns a `400 invalid_argument` error.
+
+### Greek Status Values
+
+The `greek_status` field in each enriched row indicates the outcome of the computation:
+
+| Value | Meaning |
+|-------|---------|
+| `ok` | Computation succeeded |
+| `below_intrinsic` | Option price is below intrinsic value, IV cannot be computed |
+| `no_bracket` | IV solver could not bracket a solution |
+| `no_convergence` | IV solver did not converge within iteration limit |
+| `non_finite_input` | Input values contain NaN or infinity |
+| `near_expiry_approx` | Near-expiry approximation used (may be less accurate) |
+| `missing_spot` | Spot price not available for this row |
+| `missing_rate` | Risk-free rate not available for this date |
+| `model_error` | General model computation error |
+
+### Conventions (from `greek_meta`)
+
+| Field | Value |
+|-------|-------|
+| `theta_unit` | `per_day` |
+| `vega_unit` | `per_1pct_vol` (per 1 percentage point of vol) |
+| `rho_unit` | `per_1pct_rate` (per 1 percentage point of rate) |
+| `t_convention` | `calendar_days_over_365` (day-level) or `minute_precise` for minute resolution |
+| `expiry_anchor` | `expiry_date_16_00_ET` (4:00 PM Eastern Time on expiry date) |
+
+### Example
+
+```python
+with UPQClient() as upq:
+    chain = upq.option_chain("NVDA", "2025-01-06", type="C",
+                              strike_min=130, strike_max=150,
+                              include_greeks=True)
+    for row in chain:
+        print(row["strike"], row.get("iv"), row.get("delta"), row.get("greek_status"))
+```
+
+### Greek Status Handling Pattern
+
+When using Greeks, always check `greek_status` before using computed values:
+
+```python
+with UPQClient() as upq:
+    chain = upq.option_chain("NVDA", "2025-01-15", type="C",
+                              include_greeks=True)
+    for row in chain:
+        status = row.get("greek_status")
+        if status == "ok":
+            # Safe to use all Greek values
+            iv = row["iv"]
+            delta = row["delta"]
+            theta = row["theta"]
+        elif status in ("missing_spot", "missing_rate"):
+            # Data gap — Greeks unavailable for this row
+            print(f"Data gap: {status} for {row['ticker']}")
+        elif status == "below_intrinsic":
+            # Price below intrinsic — IV cannot be computed
+            print(f"Below intrinsic: {row['ticker']}")
+        else:
+            # Other statuses: no_bracket, non_finite_input,
+            # near_expiry_approx, model_error
+            print(f"Status={status} for {row['ticker']}")
 ```
 
 ---

@@ -53,6 +53,7 @@ class EventType(str, Enum):
     ACCOUNT_SNAPSHOT = "ACCOUNT_SNAPSHOT"
     RISK_EVENT = "RISK_EVENT"
     ERROR_EVENT = "ERROR_EVENT"
+    OPTION_EXPIRY_EVENT = "OPTION_EXPIRY_EVENT"
 
 
 class SessionStatus(str, Enum):

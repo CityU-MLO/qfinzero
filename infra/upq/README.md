@@ -96,6 +96,7 @@ Expected output:
 - Option day files: 543
 - Option minute files: 543
 - Treasury yields: 1
+- Dividends SQLite: 1
 
 ## Run Service
 ```bash
@@ -177,6 +178,7 @@ In this workspace, sample data is expected under `./raw_sample`:
 - `raw_sample/options/day/*.csv.gz`
 - `raw_sample/options/minute/*.csv.gz`
 - `raw_sample/assets/treasury_yields.csv`
+- `raw_sample/dividends/massive_dividends.sqlite`
 
 Run ingest:
 ```bash

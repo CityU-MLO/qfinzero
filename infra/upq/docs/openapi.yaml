@@ -244,6 +244,11 @@ paths:
       description: |
         Query option chain by underlying asset with optional filters.
         Returns all options for a given underlying on a specific date.
+        For exact expiry queries (`expiry_min == expiry_max`), if no rows match,
+        the service automatically falls back to the nearest available expiry:
+        first within ±7 calendar days, then (if still empty) within the same calendar month.
+        Fallback candidate search stays within the same underlying/type/strike filter context.
+        Nearest is selected by absolute day difference; ties pick the earlier expiry.
       operationId: getOptionChain
       parameters:
         - name: underlying
@@ -264,14 +269,20 @@ paths:
         - name: expiry_min
           in: query
           required: false
-          description: Minimum expiration date filter
+          description: |
+            Minimum expiration date filter.
+            If `expiry_min` equals `expiry_max` and no exact rows exist,
+            nearest-expiry fallback may apply.
           schema:
             type: string
             format: date
         - name: expiry_max
           in: query
           required: false
-          description: Maximum expiration date filter
+          description: |
+            Maximum expiration date filter.
+            If `expiry_min` equals `expiry_max` and no exact rows exist,
+            nearest-expiry fallback may apply.
           schema:
             type: string
             format: date

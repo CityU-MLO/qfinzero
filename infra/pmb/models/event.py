@@ -64,3 +64,19 @@ class ErrorEventPayload(BaseModel):
     error_code: str
     message: str
     details: dict = {}
+
+
+class AssignmentPayload(BaseModel):
+    underlying: str
+    side: str   # "BUY" or "SELL"
+    qty: int
+    strike: float
+
+
+class OptionExpiryEventPayload(BaseModel):
+    contract: str
+    is_itm: bool
+    intrinsic_value: float
+    option_qty: int  # signed position qty: negative = short, positive = long
+    realized_pnl: float
+    assignment: Optional[AssignmentPayload] = None

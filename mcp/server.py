@@ -104,8 +104,8 @@ def upq_stock_minute(
 
     Args:
         tickers: Stock symbols, e.g. ["AAPL", "NVDA"]
-        start: Start datetime "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T09:30:00"
-        end: End datetime "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T16:00:00"
+        start: Start datetime in UTC "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T14:30:00" (09:30 ET)
+        end: End datetime in UTC "YYYY-MM-DDTHH:MM:SS", e.g. "2024-01-15T21:00:00" (16:00 ET)
         fields: Comma-separated fields, e.g. "ticker,window_start,close,volume"
                 Available: ticker, window_start, open, high, low, close, volume, transactions
         limit: Max rows to return (default 10000, max 100000)
@@ -130,6 +130,9 @@ def upq_option_chain(
     strike_max: Optional[float] = None,
     option_type: Optional[str] = None,
     fields: Optional[str] = None,
+    include_greeks: bool = False,
+    greek_model: Optional[str] = None,
+    greek_price_field: Optional[str] = None,
 ) -> str:
     """Query the full option chain for an underlying stock on a given date.
 
@@ -142,9 +145,21 @@ def upq_option_chain(
         strike_max: Max strike price filter
         option_type: "C" for calls, "P" for puts (omit for both)
         fields: Comma-separated fields to return
+        include_greeks: When True, append BSM-European Greeks (iv, delta,
+            gamma, theta, vega, rho, greek_status, greek_meta) to each row.
+            Greeks use European-style approximation for American options.
+        greek_model: Pricing model — only "bsm" supported in V1
+        greek_price_field: Price field for IV inversion — only "close" in V1
 
     Returns:
-        JSON list of option contract objects with pricing and Greeks.
+        JSON list of option contract objects. When include_greeks=True,
+        each row includes iv, delta, gamma, theta, vega, rho, greek_status,
+        and greek_meta fields. Check greek_status for computation outcome.
+
+    Notes:
+        If `expiry_min` equals `expiry_max` (exact expiry) and no exact rows exist,
+        UPQ automatically falls back to nearest available expiry (±7 days first,
+        then same calendar month) within the same underlying/type/strike filter context.
     """
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
@@ -157,6 +172,9 @@ def upq_option_chain(
                 strike_max=strike_max,
                 type=option_type,
                 fields=fields,
+                include_greeks=include_greeks,
+                greek_model=greek_model,
+                greek_price_field=greek_price_field,
             )
         )
 
@@ -168,25 +186,42 @@ def upq_option_contract(
     end: str,
     resolution: Literal["day", "minute"] = "day",
     fields: Optional[str] = None,
+    include_greeks: bool = False,
+    greek_model: Optional[str] = None,
+    greek_price_field: Optional[str] = None,
 ) -> str:
     """Query price history for a specific option contract.
 
     Args:
         contract: OPRA contract string, e.g. "O:NVDA250117C00136000"
                   Use upq_make_opra() to build the contract string.
-        start: Start date/datetime string
-        end: End date/datetime string
+        start: Start date/datetime in UTC, e.g. "2024-01-15" or "2024-01-15T14:30:00" (09:30 ET)
+        end: End date/datetime in UTC, e.g. "2024-01-17" or "2024-01-15T21:00:00" (16:00 ET)
         resolution: "day" (default) or "minute"
         fields: Comma-separated fields to return
+        include_greeks: When True, append BSM-European Greeks (iv, delta,
+            gamma, theta, vega, rho, greek_status, greek_meta) to each row.
+            Greeks use European-style approximation for American options.
+        greek_model: Pricing model — only "bsm" supported in V1
+        greek_price_field: Price field for IV inversion — only "close" in V1
 
     Returns:
         JSON list of price bars for the contract.
         Day resolution also includes underlying, expiry, strike, type.
+        When include_greeks=True, each row includes iv, delta, gamma, theta,
+        vega, rho, greek_status, and greek_meta fields.
     """
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
             client.option_contract(
-                contract=contract, start=start, end=end, resolution=resolution, fields=fields
+                contract=contract,
+                start=start,
+                end=end,
+                resolution=resolution,
+                fields=fields,
+                include_greeks=include_greeks,
+                greek_model=greek_model,
+                greek_price_field=greek_price_field,
             )
         )
 

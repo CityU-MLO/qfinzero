@@ -43,6 +43,7 @@ enum DatasetKind {
     OptionDay,
     OptionMinute,
     Rates,
+    Dividends,
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +159,14 @@ fn discover_input_files(raw_root: &Path) -> Result<Vec<SourceFile>, IngestError>
         });
     }
 
+    let dividends_sqlite = raw_root.join("dividends/massive_dividends.sqlite");
+    if dividends_sqlite.is_file() {
+        out.push(SourceFile {
+            dataset: DatasetKind::Dividends,
+            path: dividends_sqlite,
+        });
+    }
+
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
@@ -201,6 +210,7 @@ fn ingest_file(
         DatasetKind::OptionDay => ingest_option(conn, storage_root, source, "option_day"),
         DatasetKind::OptionMinute => ingest_option(conn, storage_root, source, "option_minute"),
         DatasetKind::Rates => ingest_rates(conn, storage_root, source),
+        DatasetKind::Dividends => ingest_dividends(conn, storage_root, source),
     }
 }
 
@@ -298,6 +308,37 @@ fn ingest_rates(
             CAST(yield_30_year AS DOUBLE) AS yield_30_year \
          FROM read_csv_auto('{source}', header=true) \
          ORDER BY date",
+        source = source_literal,
+    );
+
+    write_parquet(conn, &select_sql, &output_literal, &output)?;
+    row_count(conn, &output)
+}
+
+fn ingest_dividends(
+    conn: &Connection,
+    storage_root: &Path,
+    source: &SourceFile,
+) -> Result<i64, IngestError> {
+    let source_literal = sql_escape_literal(source.path.to_string_lossy().as_ref());
+    let output_dir = storage_root.join("dividends");
+    fs::create_dir_all(&output_dir)?;
+    let output = output_dir.join("dividends.parquet");
+    let output_literal = sql_escape_literal(output.to_string_lossy().as_ref());
+
+    conn.execute_batch("INSTALL sqlite_scanner; LOAD sqlite_scanner;")?;
+
+    let select_sql = format!(
+        "SELECT \
+            ticker, \
+            CAST(ex_dividend_date AS DATE) AS ex_dividend_date, \
+            CAST(split_adjusted_cash_amount AS DOUBLE) AS amount \
+         FROM sqlite_scan('{source}', 'dividends') \
+         WHERE currency = 'USD' \
+           AND ticker IS NOT NULL \
+           AND ex_dividend_date IS NOT NULL \
+           AND split_adjusted_cash_amount > 0 \
+         ORDER BY ticker, ex_dividend_date",
         source = source_literal,
     );
 

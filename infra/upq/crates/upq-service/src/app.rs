@@ -10,16 +10,17 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use tower_http::trace::{self, TraceLayer};
-use tracing::Level;
-use chrono::{Duration, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
+use chrono_tz::America::New_York;
 use duckdb::types::{TimeUnit, ValueRef};
 use duckdb::Connection;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
+use tower_http::trace::{self, TraceLayer};
+use tracing::Level;
 use upq_core::rates::map_tenor_aliases;
 use upq_core::rates::split_by_month;
 use upq_core::sql_builder::build_tenor_projection;
@@ -28,6 +29,10 @@ use upq_core::validation::{
     validate_resolution,
 };
 
+use crate::dividends::DividendCalendar;
+use crate::greeks::{compute_greeks, IvStatus};
+use crate::rates_curve::RatesCurve;
+
 const MAX_LIMIT: usize = 100_000;
 const RATES_CACHE_CAPACITY: usize = 512;
 
@@ -35,6 +40,7 @@ const RATES_CACHE_CAPACITY: usize = 512;
 pub struct AppState {
     storage_root: PathBuf,
     rates_cache: Arc<RwLock<RatesCache>>,
+    dividend_calendar: Arc<DividendCalendar>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -91,6 +97,50 @@ enum ServiceError {
     Connection(String),
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GreekStatus {
+    Ok,
+    BelowIntrinsic,
+    NoBracket,
+    NoConvergence,
+    NonFiniteInput,
+    NearExpiryApprox,
+    MissingSpot,
+    MissingRate,
+    ModelError,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GreekMeta {
+    pub model: &'static str,
+    pub style_assumption: &'static str,
+    pub dividend_assumption: &'static str,
+    pub theta_unit: &'static str,
+    pub vega_unit: &'static str,
+    pub rho_unit: &'static str,
+    pub spot_source: &'static str,
+    pub rate_source: &'static str,
+    pub t_convention: &'static str,
+    pub expiry_anchor: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot_original: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dividend_pv: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GreekResult {
+    pub iv: Option<f64>,
+    pub delta: Option<f64>,
+    pub gamma: Option<f64>,
+    pub theta: Option<f64>,
+    pub vega: Option<f64>,
+    pub rho: Option<f64>,
+    pub greek_status: GreekStatus,
+    pub greek_meta: GreekMeta,
+}
+
 pub fn build_router() -> Router {
     let storage_root = env::var("STORAGE_ROOT").unwrap_or_else(|_| "./storage".to_string());
     eprintln!("upq-service storage_root={storage_root}");
@@ -98,9 +148,28 @@ pub fn build_router() -> Router {
 }
 
 pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Router {
+    let storage_root: PathBuf = storage_root.into();
+    let dividend_path = storage_root.join("dividends/dividends.parquet");
+    let dividend_calendar = if dividend_path.is_file() {
+        match DividendCalendar::load(&dividend_path) {
+            Ok(cal) => {
+                tracing::info!(path = %dividend_path.display(), "loaded dividend calendar");
+                Arc::new(cal)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load dividends, using empty calendar");
+                Arc::new(DividendCalendar::empty())
+            }
+        }
+    } else {
+        tracing::warn!("no dividends parquet found, using empty calendar");
+        Arc::new(DividendCalendar::empty())
+    };
+
     let state = AppState {
-        storage_root: storage_root.into(),
+        storage_root,
         rates_cache: Arc::new(RwLock::new(RatesCache::default())),
+        dividend_calendar,
     };
 
     Router::new()
@@ -136,6 +205,9 @@ struct OptionTickerQuery {
     end: String,
     resolution: Option<String>,
     fields: Option<String>,
+    include_greeks: Option<bool>,
+    greek_model: Option<String>,
+    greek_price_field: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +220,9 @@ struct OptionChainQuery {
     strike_max: Option<f64>,
     r#type: Option<String>,
     fields: Option<String>,
+    include_greeks: Option<bool>,
+    greek_model: Option<String>,
+    greek_price_field: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -304,9 +379,33 @@ async fn option_ticker_query(
         return invalid_argument("start/end must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS");
     }
 
+    let include_greeks = params.include_greeks.unwrap_or(false);
+    if include_greeks {
+        if let Some(ref model) = params.greek_model {
+            if model != "bsm" {
+                return invalid_argument("greek_model must be bsm");
+            }
+        }
+        if let Some(ref price_field) = params.greek_price_field {
+            if price_field != "close" {
+                return invalid_argument("greek_price_field must be close");
+            }
+        }
+    }
+
     let projection = match parse_option_ticker_projection(params.fields.as_deref(), &resolution) {
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
+    };
+
+    // When Greeks are enabled for day resolution, ensure extra columns
+    let greeks_projection = if include_greeks && resolution == "day" {
+        ensure_greeks_columns_ticker_day(&projection)
+    } else if include_greeks && resolution == "minute" {
+        // For minute, we need close, and we also need trade_date to look up rates/spot
+        ensure_greeks_columns_ticker_minute(&projection)
+    } else {
+        projection.clone()
     };
 
     let start_ns = match parse_date_or_datetime_ns(&params.start, false) {
@@ -343,7 +442,7 @@ async fn option_ticker_query(
         .to_string();
 
     let sql = format!(
-        "SELECT {projection} FROM read_parquet('{path}') \
+        "SELECT {greeks_projection} FROM read_parquet('{path}') \
          WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
          AND ticker = {contract} AND window_start >= {start_ns} AND window_start <= {end_ns} \
          ORDER BY window_start",
@@ -354,7 +453,31 @@ async fn option_ticker_query(
     );
 
     match run_sql_json_async(sql).await {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Ok(mut rows) => {
+            if include_greeks {
+                let storage_root = state.storage_root.clone();
+                let dividend_calendar = Arc::clone(&state.dividend_calendar);
+                let contract = params.contract.clone();
+                let resolution_clone = resolution.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    enrich_ticker_rows(
+                        &storage_root,
+                        &contract,
+                        &resolution_clone,
+                        &dividend_calendar,
+                        &mut rows,
+                    );
+                    rows
+                })
+                .await;
+                match result {
+                    Ok(enriched) => (StatusCode::OK, Json(Value::Array(enriched))).into_response(),
+                    Err(join_error) => internal_error(ServiceError::Join(join_error.to_string())),
+                }
+            } else {
+                (StatusCode::OK, Json(Value::Array(rows))).into_response()
+            }
+        }
         Err(error) => internal_error(error),
     }
 }
@@ -371,7 +494,11 @@ async fn option() -> axum::response::Response {
 }
 
 async fn health() -> axum::response::Response {
-    (StatusCode::OK, Json(json!({ "status": "ok", "version": "0.1.0" }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "version": "0.1.0" })),
+    )
+        .into_response()
 }
 
 async fn health_freshness(State(state): State<AppState>) -> axum::response::Response {
@@ -451,18 +578,14 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 if *has_window_start {
                     if let Some(latest_ts) = row.get("latest_timestamp") {
                         if !latest_ts.is_null() {
-                            source_info
-                                .insert("latest_timestamp".to_string(), latest_ts.clone());
+                            source_info.insert("latest_timestamp".to_string(), latest_ts.clone());
                         }
                     }
                 }
             }
         }
 
-        source_info.insert(
-            "unique_key_label".to_string(),
-            json!(unique_key_label),
-        );
+        source_info.insert("unique_key_label".to_string(), json!(unique_key_label));
         source_info.insert("partition_count".to_string(), json!(partition_count));
 
         sources.insert(dataset_name.to_string(), Value::Object(source_info));
@@ -484,10 +607,7 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
                 }
                 // 7 standard tenors: 1M, 3M, 1Y, 2Y, 5Y, 10Y, 30Y
                 rates_info.insert("unique_keys".to_string(), json!(7));
-                rates_info.insert(
-                    "unique_key_label".to_string(),
-                    json!("tenors"),
-                );
+                rates_info.insert("unique_key_label".to_string(), json!("tenors"));
                 sources.insert("rates".to_string(), Value::Object(rates_info));
             }
         }
@@ -566,9 +686,30 @@ async fn option_chain_query(
         }
     }
 
+    let include_greeks = params.include_greeks.unwrap_or(false);
+    if include_greeks {
+        if let Some(ref model) = params.greek_model {
+            if model != "bsm" {
+                return invalid_argument("greek_model must be bsm");
+            }
+        }
+        if let Some(ref price_field) = params.greek_price_field {
+            if price_field != "close" {
+                return invalid_argument("greek_price_field must be close");
+            }
+        }
+    }
+
     let projection = match parse_option_chain_projection(params.fields.as_deref()) {
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
+    };
+
+    // When Greeks are enabled, we need certain columns even if user didn't request them.
+    let greeks_projection = if include_greeks {
+        ensure_greeks_columns_chain(&projection)
+    } else {
+        projection.clone()
     };
 
     let partition_dir = state
@@ -584,42 +725,239 @@ async fn option_chain_query(
         .to_string_lossy()
         .to_string();
 
-    let mut filters = vec![format!("underlying = {}", sql_quote(&params.underlying))];
-    if let Some(expiry_min) = params.expiry_min.as_deref() {
-        filters.push(format!(
-            "expiry >= DATE '{}'",
-            sql_escape_literal(expiry_min)
-        ));
-    }
-    if let Some(expiry_max) = params.expiry_max.as_deref() {
-        filters.push(format!(
-            "expiry <= DATE '{}'",
-            sql_escape_literal(expiry_max)
-        ));
-    }
+    let mut base_filters = vec![format!("underlying = {}", sql_quote(&params.underlying))];
     if let Some(strike_min) = params.strike_min {
-        filters.push(format!("strike >= {strike_min}"));
+        base_filters.push(format!("strike >= {strike_min}"));
     }
     if let Some(strike_max) = params.strike_max {
-        filters.push(format!("strike <= {strike_max}"));
+        base_filters.push(format!("strike <= {strike_max}"));
     }
     if let Some(option_type) = params.r#type.as_deref() {
-        filters.push(format!(
+        base_filters.push(format!(
             "\"right\" = '{}'",
             sql_escape_literal(&option_type.trim().to_ascii_uppercase())
         ));
     }
 
-    let sql = format!(
-        "SELECT {projection} FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry, strike",
-        path = sql_escape_literal(&path_pattern),
-        filters = filters.join(" AND "),
-    );
+    let mut exact_filters = base_filters.clone();
+    if let Some(expiry_min) = params.expiry_min.as_deref() {
+        exact_filters.push(format!(
+            "expiry >= DATE '{}'",
+            sql_escape_literal(expiry_min)
+        ));
+    }
+    if let Some(expiry_max) = params.expiry_max.as_deref() {
+        exact_filters.push(format!(
+            "expiry <= DATE '{}'",
+            sql_escape_literal(expiry_max)
+        ));
+    }
 
-    match run_sql_json_async(sql).await {
-        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+    // Helper: optionally enrich rows with Greeks and return response.
+    let maybe_enrich = |mut rows: Vec<Value>| async {
+        if include_greeks {
+            let storage_root = state.storage_root.clone();
+            let dividend_calendar = Arc::clone(&state.dividend_calendar);
+            let date = params.date.clone();
+            let underlying = params.underlying.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                enrich_chain_rows_day(
+                    &storage_root,
+                    &date,
+                    &underlying,
+                    &dividend_calendar,
+                    &mut rows,
+                );
+                rows
+            })
+            .await;
+            match result {
+                Ok(enriched) => (StatusCode::OK, Json(Value::Array(enriched))).into_response(),
+                Err(join_error) => internal_error(ServiceError::Join(join_error.to_string())),
+            }
+        } else {
+            (StatusCode::OK, Json(Value::Array(rows))).into_response()
+        }
+    };
+
+    match run_option_chain_rows(&path_pattern, &greeks_projection, &exact_filters).await {
+        Ok(rows) if !rows.is_empty() => maybe_enrich(rows).await,
+        Ok(_) => {
+            // Fallback only applies to exact-expiry requests. Range filters keep legacy behavior.
+            let Some(exact_expiry) =
+                exact_expiry_target(params.expiry_min.as_deref(), params.expiry_max.as_deref())
+            else {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            };
+
+            // If base filters have no rows at all (same underlying/type/strike context),
+            // fallback cannot produce meaningful results and should exit early.
+            let base_has_rows = match option_chain_base_has_rows(&path_pattern, &base_filters).await
+            {
+                Ok(value) => value,
+                Err(error) => return internal_error(error),
+            };
+            if !base_has_rows {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            }
+
+            let target_expiry = match NaiveDate::parse_from_str(exact_expiry, "%Y-%m-%d") {
+                Ok(value) => value,
+                Err(_) => return invalid_argument("expiry_min/expiry_max must be YYYY-MM-DD"),
+            };
+
+            // Two-stage fallback:
+            // 1) nearest expiry within ±7 days of requested expiry
+            // 2) if still empty, nearest expiry within requested expiry's calendar month
+            let fallback_expiry =
+                match find_nearest_fallback_expiry(&path_pattern, &base_filters, target_expiry)
+                    .await
+                {
+                    Ok(value) => value,
+                    Err(error) => return internal_error(error),
+                };
+
+            let Some(selected_expiry) = fallback_expiry else {
+                return (StatusCode::OK, Json(json!([]))).into_response();
+            };
+
+            let mut fallback_filters = base_filters;
+            let selected_expiry_str = selected_expiry.format("%Y-%m-%d").to_string();
+            fallback_filters.push(format!(
+                "expiry >= DATE '{}'",
+                sql_escape_literal(&selected_expiry_str)
+            ));
+            fallback_filters.push(format!(
+                "expiry <= DATE '{}'",
+                sql_escape_literal(&selected_expiry_str)
+            ));
+
+            match run_option_chain_rows(&path_pattern, &greeks_projection, &fallback_filters).await
+            {
+                Ok(fallback_rows) => maybe_enrich(fallback_rows).await,
+                Err(error) => internal_error(error),
+            }
+        }
         Err(error) => internal_error(error),
     }
+}
+
+fn exact_expiry_target<'a>(
+    expiry_min: Option<&'a str>,
+    expiry_max: Option<&'a str>,
+) -> Option<&'a str> {
+    match (expiry_min, expiry_max) {
+        (Some(min), Some(max)) if min == max => Some(min),
+        _ => None,
+    }
+}
+
+fn build_option_chain_sql(path_pattern: &str, projection: &str, filters: &[String]) -> String {
+    format!(
+        "SELECT {projection} FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry, strike",
+        path = sql_escape_literal(path_pattern),
+        filters = filters.join(" AND "),
+    )
+}
+
+async fn run_option_chain_rows(
+    path_pattern: &str,
+    projection: &str,
+    filters: &[String],
+) -> Result<Vec<Value>, ServiceError> {
+    let sql = build_option_chain_sql(path_pattern, projection, filters);
+    run_sql_json_async(sql).await
+}
+
+async fn option_chain_base_has_rows(
+    path_pattern: &str,
+    base_filters: &[String],
+) -> Result<bool, ServiceError> {
+    let sql = format!(
+        "SELECT 1 AS has_row FROM read_parquet('{path}') WHERE {filters} LIMIT 1",
+        path = sql_escape_literal(path_pattern),
+        filters = base_filters.join(" AND "),
+    );
+    let rows = run_sql_json_async(sql).await?;
+    Ok(!rows.is_empty())
+}
+
+async fn find_nearest_fallback_expiry(
+    path_pattern: &str,
+    base_filters: &[String],
+    target_expiry: NaiveDate,
+) -> Result<Option<NaiveDate>, ServiceError> {
+    let week_start = target_expiry - Duration::days(7);
+    let week_end = target_expiry + Duration::days(7);
+
+    let weekly_candidates =
+        query_distinct_expiries_in_window(path_pattern, base_filters, week_start, week_end).await?;
+    if let Some(expiry) = select_nearest_expiry(target_expiry, &weekly_candidates) {
+        return Ok(Some(expiry));
+    }
+
+    let month_start = match NaiveDate::from_ymd_opt(target_expiry.year(), target_expiry.month(), 1)
+    {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let (next_year, next_month) = if target_expiry.month() == 12 {
+        (target_expiry.year() + 1, 1)
+    } else {
+        (target_expiry.year(), target_expiry.month() + 1)
+    };
+    let month_end = match NaiveDate::from_ymd_opt(next_year, next_month, 1) {
+        Some(next_month_start) => next_month_start - Duration::days(1),
+        None => return Ok(None),
+    };
+
+    let monthly_candidates =
+        query_distinct_expiries_in_window(path_pattern, base_filters, month_start, month_end)
+            .await?;
+    Ok(select_nearest_expiry(target_expiry, &monthly_candidates))
+}
+
+async fn query_distinct_expiries_in_window(
+    path_pattern: &str,
+    base_filters: &[String],
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+) -> Result<Vec<NaiveDate>, ServiceError> {
+    let mut filters = base_filters.to_vec();
+    filters.push(format!(
+        "expiry >= DATE '{}'",
+        sql_escape_literal(&window_start.format("%Y-%m-%d").to_string())
+    ));
+    filters.push(format!(
+        "expiry <= DATE '{}'",
+        sql_escape_literal(&window_end.format("%Y-%m-%d").to_string())
+    ));
+
+    let sql = format!(
+        "SELECT DISTINCT expiry FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry",
+        path = sql_escape_literal(path_pattern),
+        filters = filters.join(" AND "),
+    );
+    let rows = run_sql_json_async(sql).await?;
+
+    let expiries = rows
+        .iter()
+        .filter_map(|row| row.get("expiry").and_then(Value::as_str))
+        .filter_map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+        .collect::<Vec<NaiveDate>>();
+
+    Ok(expiries)
+}
+
+fn select_nearest_expiry(target_expiry: NaiveDate, candidates: &[NaiveDate]) -> Option<NaiveDate> {
+    candidates
+        .iter()
+        .min_by_key(|candidate| {
+            // Tie-break by earlier expiry when distances are equal.
+            let distance = (**candidate - target_expiry).num_days().abs();
+            (distance, **candidate)
+        })
+        .copied()
 }
 
 async fn rates_query(
@@ -712,6 +1050,911 @@ async fn rates_query(
     }
 
     (StatusCode::OK, Json(Value::Array(rows))).into_response()
+}
+
+/// Check if a column list already contains a given column name (or alias).
+fn projection_has_column(cols: &[String], name: &str) -> bool {
+    cols.iter().any(|c| {
+        let lower = c.to_lowercase();
+        lower == name
+            || lower.contains(&format!("as {name}"))
+            || lower.starts_with(&format!("{name} "))
+    })
+}
+
+/// Ensure the chain query projection includes columns needed for Greeks computation.
+fn ensure_greeks_columns_chain(base_projection: &str) -> String {
+    let mut cols: Vec<String> = base_projection.split(", ").map(String::from).collect();
+
+    if !projection_has_column(&cols, "strike") {
+        cols.push("strike".to_string());
+    }
+    if !projection_has_column(&cols, "close") {
+        cols.push("close".to_string());
+    }
+    if !projection_has_column(&cols, "expiry") {
+        cols.push("expiry".to_string());
+    }
+    if !projection_has_column(&cols, "type") && !projection_has_column(&cols, "right") {
+        cols.push("\"right\" AS type".to_string());
+    }
+
+    cols.join(", ")
+}
+
+/// Ensure the ticker query day-resolution projection includes columns needed for Greeks.
+fn ensure_greeks_columns_ticker_day(base_projection: &str) -> String {
+    let mut cols: Vec<String> = base_projection.split(", ").map(String::from).collect();
+
+    if !projection_has_column(&cols, "strike") {
+        cols.push("strike".to_string());
+    }
+    if !projection_has_column(&cols, "close") {
+        cols.push("close".to_string());
+    }
+    if !projection_has_column(&cols, "expiry") {
+        cols.push("expiry".to_string());
+    }
+    if !projection_has_column(&cols, "type") && !projection_has_column(&cols, "right") {
+        cols.push("\"right\" AS type".to_string());
+    }
+    if !projection_has_column(&cols, "underlying") {
+        cols.push("underlying".to_string());
+    }
+    if !projection_has_column(&cols, "window_start") {
+        cols.push("window_start".to_string());
+    }
+
+    cols.join(", ")
+}
+
+/// Enrich chain query rows (day-level) with Greeks.
+fn enrich_chain_rows_day(
+    storage_root: &Path,
+    date: &str,
+    underlying: &str,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
+    // Per-request caches
+    let spot = fetch_spot_daily(storage_root, underlying, date);
+    let rates_row = fetch_rates_row(storage_root, date);
+
+    let curve = rates_row
+        .as_ref()
+        .and_then(|r| RatesCurve::from_json_row(r).ok());
+
+    let observation_date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
+
+    for row_val in rows.iter_mut() {
+        let row = match row_val.as_object_mut() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let spot_val = match spot {
+            Some(s) => s,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let curve_ref = match curve.as_ref() {
+            Some(c) => c,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let is_call = match row_is_call(row) {
+            Some(v) => v,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // Parse expiry from row
+        let expiry_str = match row.get("expiry").and_then(Value::as_str) {
+            Some(e) => e.to_string(),
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let expiry_date = match NaiveDate::parse_from_str(&expiry_str, "%Y-%m-%d").ok() {
+            Some(d) => d,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let obs_date = match observation_date {
+            Some(d) => d,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // T = calendar days / 365, floored at a small positive value
+        let days_to_expiry = (expiry_date - obs_date).num_days();
+        let t_years = if days_to_expiry <= 0 {
+            1.0 / (365.0 * 24.0 * 60.0) // ~1 minute floor
+        } else {
+            days_to_expiry as f64 / 365.0
+        };
+
+        let obs_date_days = date_to_epoch_days(&obs_date);
+        let expiry_days = date_to_epoch_days(&expiry_date);
+
+        enrich_row_with_greeks(
+            row,
+            spot_val,
+            curve_ref,
+            t_years,
+            is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
+            "stock_daily",
+            "calendar_days_over_365",
+            "expiry_date_eod",
+        );
+    }
+}
+
+/// Ensure minute-resolution ticker query has columns needed for Greeks.
+fn ensure_greeks_columns_ticker_minute(base_projection: &str) -> String {
+    let mut cols: Vec<String> = base_projection.split(", ").map(String::from).collect();
+
+    if !projection_has_column(&cols, "close") {
+        cols.push("close".to_string());
+    }
+    if !projection_has_column(&cols, "window_start") {
+        cols.push("window_start".to_string());
+    }
+
+    cols.join(", ")
+}
+
+/// Enrich ticker query rows with Greeks.
+/// For day resolution: similar to chain but needs to parse underlying/expiry from the OPRA contract.
+/// For minute resolution: uses window_start for T calculation.
+fn enrich_ticker_rows(
+    storage_root: &Path,
+    contract: &str,
+    resolution: &str,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
+    // Parse the OPRA contract to extract underlying, expiry, and right
+    let parsed = parse_opra_contract(contract);
+    let opra = match parsed {
+        Some(p) => p,
+        None => {
+            // Can't parse contract — mark all rows as model_error
+            for row_val in rows.iter_mut() {
+                if let Some(row) = row_val.as_object_mut() {
+                    let t_conv = if resolution == "minute" {
+                        "minute_precise"
+                    } else {
+                        "calendar_days_over_365"
+                    };
+                    let anchor = if resolution == "minute" {
+                        "expiry_date_16_00_ET"
+                    } else {
+                        "expiry_date_eod"
+                    };
+                    let result = null_greek_result(
+                        GreekStatus::ModelError,
+                        "q0",
+                        "stock_daily",
+                        t_conv,
+                        anchor,
+                    );
+                    merge_greek_result(row, &result);
+                }
+            }
+            return;
+        }
+    };
+
+    if resolution == "day" {
+        enrich_ticker_rows_day(
+            storage_root,
+            &opra.underlying,
+            &opra.expiry,
+            opra.is_call,
+            dividend_calendar,
+            rows,
+        );
+    } else {
+        enrich_ticker_rows_minute(
+            storage_root,
+            &opra.underlying,
+            &opra.expiry,
+            opra.is_call,
+            opra.strike,
+            dividend_calendar,
+            rows,
+        );
+    }
+}
+
+/// Parsed OPRA contract fields.
+struct OpraContract {
+    underlying: String,
+    expiry: NaiveDate,
+    is_call: bool,
+    strike: f64,
+}
+
+/// Parse an OPRA contract string like "O:NVDA250117C00136000" into its components.
+fn parse_opra_contract(contract: &str) -> Option<OpraContract> {
+    let stripped = contract.strip_prefix("O:")?;
+    // Find the date portion — it's 6 digits after the ticker letters
+    let alpha_end = stripped.find(|c: char| c.is_ascii_digit())?;
+    let underlying = stripped[..alpha_end].to_string();
+    let remainder = &stripped[alpha_end..];
+    if remainder.len() < 15 {
+        return None; // Need 6 date digits + C/P + 8 strike digits
+    }
+    let date_str = &remainder[..6];
+    let right_char = remainder.as_bytes().get(6)?;
+    let is_call = match *right_char {
+        b'C' => true,
+        b'P' => false,
+        _ => return None,
+    };
+    let expiry = NaiveDate::parse_from_str(date_str, "%y%m%d").ok()?;
+    let strike_str = &remainder[7..15];
+    let strike_millis: u64 = strike_str.parse().ok()?;
+    let strike = strike_millis as f64 / 1000.0;
+    Some(OpraContract {
+        underlying,
+        expiry,
+        is_call,
+        strike,
+    })
+}
+
+/// Enrich ticker query rows at day resolution.
+fn enrich_ticker_rows_day(
+    storage_root: &Path,
+    underlying: &str,
+    expiry_date: &NaiveDate,
+    is_call: bool,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
+    // Per-request caches for spot and rates by date
+    let mut spot_cache: HashMap<String, Option<f64>> = HashMap::new();
+    let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
+
+    let expiry_days = date_to_epoch_days(expiry_date);
+
+    for row_val in rows.iter_mut() {
+        let row = match row_val.as_object_mut() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        // Extract trade_date from the row (may come as "trade_date" field from partition)
+        // For day resolution, we use window_start to infer the date, or if trade_date is present
+        // Since we're querying over date ranges, we need the observation date.
+        // The chain query uses a single date param, but ticker_query spans a range.
+        // We need to extract the date from each row somehow.
+        // The day-resolution default projection doesn't include trade_date, but we can derive from window_start.
+        let obs_date_str = extract_trade_date_from_row(row);
+        let obs_date_str = match obs_date_str {
+            Some(d) => d,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let obs_date = match NaiveDate::parse_from_str(&obs_date_str, "%Y-%m-%d").ok() {
+            Some(d) => d,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let spot_val = *spot_cache
+            .entry(obs_date_str.clone())
+            .or_insert_with(|| fetch_spot_daily(storage_root, underlying, &obs_date_str));
+
+        let spot = match spot_val {
+            Some(s) => s,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let curve = rates_cache.entry(obs_date_str.clone()).or_insert_with(|| {
+            fetch_rates_row(storage_root, &obs_date_str)
+                .and_then(|r| RatesCurve::from_json_row(&r).ok())
+        });
+
+        let curve_ref = match curve.as_ref() {
+            Some(c) => c,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "q0",
+                    "stock_daily",
+                    "calendar_days_over_365",
+                    "expiry_date_eod",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let days_to_expiry = (*expiry_date - obs_date).num_days();
+        let t_years = if days_to_expiry <= 0 {
+            1.0 / (365.0 * 24.0 * 60.0)
+        } else {
+            days_to_expiry as f64 / 365.0
+        };
+
+        let obs_date_days = date_to_epoch_days(&obs_date);
+
+        enrich_row_with_greeks(
+            row,
+            spot,
+            curve_ref,
+            t_years,
+            is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
+            "stock_daily",
+            "calendar_days_over_365",
+            "expiry_date_eod",
+        );
+    }
+}
+
+/// Enrich ticker query rows at minute resolution.
+fn enrich_ticker_rows_minute(
+    storage_root: &Path,
+    underlying: &str,
+    expiry_date: &NaiveDate,
+    is_call: bool,
+    strike: f64,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
+    // Per-request caches
+    let mut spot_cache: HashMap<String, Option<f64>> = HashMap::new();
+    let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
+
+    let expiry_days = date_to_epoch_days(expiry_date);
+
+    // Expiry anchor: 16:00 ET → UTC via chrono-tz (handles DST automatically)
+    let expiry_dt = expiry_date
+        .and_hms_opt(16, 0, 0)
+        .and_then(|ndt| New_York.from_local_datetime(&ndt).single())
+        .and_then(|et_dt| et_dt.with_timezone(&chrono::Utc).timestamp_nanos_opt());
+
+    let expiry_ns = match expiry_dt {
+        Some(ns) => ns,
+        None => {
+            for row_val in rows.iter_mut() {
+                if let Some(row) = row_val.as_object_mut() {
+                    let result = null_greek_result(
+                        GreekStatus::ModelError,
+                        "q0",
+                        "stock_daily",
+                        "minute_precise",
+                        "expiry_date_16_00_ET",
+                    );
+                    merge_greek_result(row, &result);
+                }
+            }
+            return;
+        }
+    };
+
+    for row_val in rows.iter_mut() {
+        let row = match row_val.as_object_mut() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        // Get window_start as nanoseconds
+        let window_start_ns = match row.get("window_start").and_then(Value::as_i64) {
+            Some(ns) => ns,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // T in years = (expiry_ns - window_start_ns) / (365 * 24 * 3600 * 1e9)
+        let ns_diff = expiry_ns - window_start_ns;
+        let t_years = if ns_diff <= 0 {
+            1.0 / (365.0 * 24.0 * 60.0) // floor at ~1 minute
+        } else {
+            ns_diff as f64 / (365.0 * 24.0 * 3600.0 * 1_000_000_000.0)
+        };
+
+        // Extract trade date from window_start for spot/rates lookup
+        let trade_date_str = ns_to_date_string(window_start_ns);
+        let trade_date_str = match trade_date_str {
+            Some(d) => d,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // Derive obs_date_days from trade_date_str for dividend PV calculation
+        let obs_date_days = match NaiveDate::parse_from_str(&trade_date_str, "%Y-%m-%d") {
+            Ok(d) => date_to_epoch_days(&d),
+            Err(_) => {
+                let result = null_greek_result(
+                    GreekStatus::ModelError,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // For minute resolution, spot fallback: stock daily close
+        let spot_val = *spot_cache
+            .entry(trade_date_str.clone())
+            .or_insert_with(|| fetch_spot_daily(storage_root, underlying, &trade_date_str));
+
+        let spot = match spot_val {
+            Some(s) => s,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingSpot,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        let curve = rates_cache
+            .entry(trade_date_str.clone())
+            .or_insert_with(|| {
+                fetch_rates_row(storage_root, &trade_date_str)
+                    .and_then(|r| RatesCurve::from_json_row(&r).ok())
+            });
+
+        let curve_ref = match curve.as_ref() {
+            Some(c) => c,
+            None => {
+                let result = null_greek_result(
+                    GreekStatus::MissingRate,
+                    "q0",
+                    "stock_daily",
+                    "minute_precise",
+                    "expiry_date_16_00_ET",
+                );
+                merge_greek_result(row, &result);
+                continue;
+            }
+        };
+
+        // Inject strike from OPRA contract (minute parquet doesn't have strike column)
+        row.insert("strike".to_string(), json!(strike));
+
+        enrich_row_with_greeks(
+            row,
+            spot,
+            curve_ref,
+            t_years,
+            is_call,
+            dividend_calendar,
+            underlying,
+            obs_date_days,
+            expiry_days,
+            "stock_daily",
+            "minute_precise",
+            "expiry_date_16_00_ET",
+        );
+    }
+}
+
+/// Extract trade date string from a row. Tries "trade_date" field first, then derives from window_start.
+fn extract_trade_date_from_row(row: &Map<String, Value>) -> Option<String> {
+    // Try trade_date field directly
+    if let Some(td) = row.get("trade_date").and_then(Value::as_str) {
+        return Some(td.to_string());
+    }
+    // Try expiry field (not ideal but as a fallback...)
+    // Better: derive from window_start
+    if let Some(ns) = row.get("window_start").and_then(Value::as_i64) {
+        return ns_to_date_string(ns);
+    }
+    None
+}
+
+/// Convert nanoseconds since epoch to a YYYY-MM-DD date string in US Eastern Time.
+///
+/// US equity markets operate in ET. A UTC timestamp near midnight could map to a
+/// different calendar date in ET, so we apply the IANA `America/New_York` offset
+/// (via `chrono-tz`) before extracting the date.
+fn ns_to_date_string(ns: i64) -> Option<String> {
+    let secs = ns / 1_000_000_000;
+    let utc_dt = chrono::DateTime::from_timestamp(secs, 0)?;
+    let et_dt = utc_dt.with_timezone(&New_York);
+    Some(et_dt.format("%Y-%m-%d").to_string())
+}
+
+/// Fetch the spot (close) price for a given ticker on a given date from stock_daily.
+fn fetch_spot_daily(storage_root: &Path, ticker: &str, date: &str) -> Option<f64> {
+    let dataset_dir = storage_root.join("stock_daily");
+    let partition_dir = dataset_dir.join(format!("trade_date={date}"));
+    if !has_any_parquet_file(&partition_dir) {
+        return None;
+    }
+    let path_pattern = partition_dir
+        .join("*.parquet")
+        .to_string_lossy()
+        .to_string();
+    let sql = format!(
+        "SELECT close FROM read_parquet('{path}') WHERE ticker = {ticker} LIMIT 1",
+        path = sql_escape_literal(&path_pattern),
+        ticker = sql_quote(ticker),
+    );
+    let rows = run_sql_json(&sql).ok()?;
+    rows.first()?.get("close")?.as_f64()
+}
+
+/// Fetch the full rates row for a given date from rates.parquet.
+fn fetch_rates_row(storage_root: &Path, date: &str) -> Option<Value> {
+    let rates_path = storage_root.join("rates").join("rates.parquet");
+    if !rates_path.exists() {
+        return None;
+    }
+    let sql = format!(
+        "SELECT * FROM read_parquet('{path}') WHERE date = DATE '{date}' LIMIT 1",
+        path = sql_escape_literal(&rates_path.to_string_lossy()),
+        date = sql_escape_literal(date),
+    );
+    let rows = run_sql_json(&sql).ok()?;
+    rows.into_iter().next()
+}
+
+/// Convert a NaiveDate to epoch days (days since 1970-01-01).
+fn date_to_epoch_days(d: &NaiveDate) -> i32 {
+    // NaiveDate::num_days_from_ce() counts from year 1 CE
+    // Unix epoch (1970-01-01) is day 719,163 from CE
+    d.num_days_from_ce() - 719_163
+}
+
+/// Convert an IvStatus to our API GreekStatus.
+fn iv_status_to_greek_status(status: &IvStatus) -> GreekStatus {
+    match status {
+        IvStatus::Ok => GreekStatus::Ok,
+        IvStatus::BelowIntrinsic => GreekStatus::BelowIntrinsic,
+        IvStatus::NoBracket => GreekStatus::NoBracket,
+        IvStatus::NoConvergence => GreekStatus::NoConvergence,
+        IvStatus::NonFiniteInput => GreekStatus::NonFiniteInput,
+        IvStatus::NearExpiryApprox => GreekStatus::NearExpiryApprox,
+    }
+}
+
+/// Build a GreekResult with null fields and the given status.
+fn null_greek_result(
+    status: GreekStatus,
+    dividend_assumption: &'static str,
+    spot_source: &'static str,
+    t_convention: &'static str,
+    expiry_anchor: &'static str,
+) -> GreekResult {
+    GreekResult {
+        iv: None,
+        delta: None,
+        gamma: None,
+        theta: None,
+        vega: None,
+        rho: None,
+        greek_status: status,
+        greek_meta: GreekMeta {
+            model: "bsm_european",
+            style_assumption: "European",
+            dividend_assumption,
+            theta_unit: "per_day",
+            vega_unit: "per_1pct_vol",
+            rho_unit: "per_1pct_rate",
+            spot_source,
+            rate_source: "rates_parquet",
+            t_convention,
+            expiry_anchor,
+            spot_original: None,
+            dividend_pv: None,
+        },
+    }
+}
+
+/// Enrich a single option row with Greeks fields.
+/// Returns the row with Greek fields appended.
+#[allow(clippy::too_many_arguments)]
+fn enrich_row_with_greeks(
+    row: &mut Map<String, Value>,
+    spot: f64,
+    curve: &RatesCurve,
+    t_years: f64,
+    is_call: bool,
+    dividend_calendar: &DividendCalendar,
+    underlying: &str,
+    obs_date_days: i32,
+    expiry_days: i32,
+    spot_source: &'static str,
+    t_convention: &'static str,
+    expiry_anchor: &'static str,
+) {
+    let close = match row.get("close").and_then(Value::as_f64) {
+        Some(c) if c.is_finite() && c > 0.0 => c,
+        _ => {
+            let result = null_greek_result(
+                GreekStatus::NonFiniteInput,
+                "q0",
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
+            merge_greek_result(row, &result);
+            return;
+        }
+    };
+
+    let strike = match row.get("strike").and_then(Value::as_f64) {
+        Some(k) if k.is_finite() && k > 0.0 => k,
+        _ => {
+            let result = null_greek_result(
+                GreekStatus::NonFiniteInput,
+                "q0",
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
+            merge_greek_result(row, &result);
+            return;
+        }
+    };
+
+    let r = match curve.interpolate(t_years) {
+        Ok(rate) => rate,
+        Err(_) => {
+            let result = null_greek_result(
+                GreekStatus::MissingRate,
+                "q0",
+                spot_source,
+                t_convention,
+                expiry_anchor,
+            );
+            merge_greek_result(row, &result);
+            return;
+        }
+    };
+
+    let (pv_sum, div_count) =
+        dividend_calendar.pv_dividends(underlying, obs_date_days, expiry_days, r);
+    let s_adj = (spot - pv_sum).max(0.01);
+    let dividend_assumption = if div_count > 0 { "discrete" } else { "q0" };
+
+    if pv_sum >= spot {
+        tracing::warn!(
+            underlying,
+            spot,
+            pv_sum,
+            s_adj,
+            "dividend PV exceeds spot price, S_adj floored at 0.01"
+        );
+    }
+
+    let (spot_original, dividend_pv) = if div_count > 0 {
+        (Some(spot), Some(pv_sum))
+    } else {
+        (None, None)
+    };
+
+    let q = 0.0;
+    let (iv_result, greeks_opt) = compute_greeks(close, s_adj, strike, t_years, r, q, is_call);
+
+    let greek_status = iv_status_to_greek_status(&iv_result.status);
+    let meta = GreekMeta {
+        model: "bsm_european",
+        style_assumption: "European",
+        dividend_assumption,
+        theta_unit: "per_day",
+        vega_unit: "per_1pct_vol",
+        rho_unit: "per_1pct_rate",
+        spot_source,
+        rate_source: "rates_parquet",
+        t_convention,
+        expiry_anchor,
+        spot_original,
+        dividend_pv,
+    };
+
+    let result = match greeks_opt {
+        Some(g) => GreekResult {
+            iv: iv_result.iv,
+            delta: Some(g.delta),
+            gamma: Some(g.gamma),
+            theta: Some(g.theta),
+            vega: Some(g.vega),
+            rho: Some(g.rho),
+            greek_status,
+            greek_meta: meta,
+        },
+        None => GreekResult {
+            iv: None,
+            delta: None,
+            gamma: None,
+            theta: None,
+            vega: None,
+            rho: None,
+            greek_status,
+            greek_meta: meta,
+        },
+    };
+
+    merge_greek_result(row, &result);
+}
+
+/// Merge a GreekResult into a row's JSON map.
+fn merge_greek_result(row: &mut Map<String, Value>, result: &GreekResult) {
+    row.insert(
+        "iv".to_string(),
+        match result.iv {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "delta".to_string(),
+        match result.delta {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "gamma".to_string(),
+        match result.gamma {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "theta".to_string(),
+        match result.theta {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "vega".to_string(),
+        match result.vega {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert(
+        "rho".to_string(),
+        match result.rho {
+            Some(v) => json!(v),
+            None => Value::Null,
+        },
+    );
+    row.insert("greek_status".to_string(), json!(result.greek_status));
+    row.insert("greek_meta".to_string(), json!(result.greek_meta));
+}
+
+/// Determine if a row represents a call based on the "type" or "right" field.
+fn row_is_call(row: &Map<String, Value>) -> Option<bool> {
+    let right_val = row
+        .get("type")
+        .or_else(|| row.get("right"))
+        .and_then(Value::as_str)?;
+    match right_val {
+        "C" => Some(true),
+        "P" => Some(false),
+        _ => None,
+    }
 }
 
 fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
@@ -1064,8 +2307,21 @@ fn parse_projection(
     Ok(default_fields.join(", "))
 }
 
+/// Strip UTC suffixes (Z, +00:00) that LLMs commonly append.
+/// Must match the logic in `upq_core::validation::validate_datetime`.
+fn strip_utc_suffix(input: &str) -> &str {
+    if input.ends_with('Z') {
+        &input[..input.len() - 1]
+    } else if input.ends_with("+00:00") {
+        &input[..input.len() - 6]
+    } else {
+        input
+    }
+}
+
 fn parse_datetime_ns(input: &str, end_of_second: bool) -> Result<i64, &'static str> {
-    let dt = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+    let bare = strip_utc_suffix(input);
+    let dt = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S")
         .map_err(|_| "failed to parse datetime")?;
     let dt = if end_of_second {
         dt.checked_add_signed(Duration::nanoseconds(999_999_999))
@@ -1080,7 +2336,8 @@ fn parse_datetime_ns(input: &str, end_of_second: bool) -> Result<i64, &'static s
 }
 
 fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'static str> {
-    if let Ok(dt) = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S") {
+    let bare = strip_utc_suffix(input);
+    if let Ok(dt) = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S") {
         let final_dt = if end_of_day {
             dt.checked_add_signed(Duration::nanoseconds(999_999_999))
                 .ok_or("datetime overflow")?
@@ -1108,7 +2365,8 @@ fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'sta
 }
 
 fn extract_date_from_datetime(input: &str) -> Result<String, &'static str> {
-    let dt = NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S")
+    let bare = strip_utc_suffix(input);
+    let dt = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S")
         .map_err(|_| "failed to parse datetime")?;
     Ok(dt.date().format("%Y-%m-%d").to_string())
 }
@@ -1194,4 +2452,98 @@ fn internal_error(error: ServiceError) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test assertions")]
+#[expect(clippy::panic, reason = "test helper")]
+mod timezone_tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    /// Helper: build UTC nanoseconds from a UTC datetime string.
+    fn utc_ns(s: &str) -> i64 {
+        let ndt = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+            .unwrap_or_else(|e| panic!("bad datetime {s:?}: {e}"));
+        ndt.and_utc()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| panic!("overflow for {s}"))
+    }
+
+    #[test]
+    fn ns_to_date_est_winter() {
+        // 2025-01-15 00:30 UTC → still Jan 14 in ET (EST, UTC-5)
+        let ns = utc_ns("2025-01-15 00:30:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-01-14".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_est_winter_daytime() {
+        // 2025-01-15 15:00 UTC → 10:00 EST → Jan 15 in ET
+        let ns = utc_ns("2025-01-15 15:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-01-15".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_edt_summer() {
+        // 2025-07-15 00:30 UTC → still Jul 14 in ET (EDT, UTC-4), since 00:30-4 = 20:30 Jul 14
+        let ns = utc_ns("2025-07-15 00:30:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-07-14".to_string()));
+    }
+
+    #[test]
+    fn ns_to_date_edt_summer_daytime() {
+        // 2025-07-15 14:00 UTC → 10:00 EDT → Jul 15
+        let ns = utc_ns("2025-07-15 14:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-07-15".to_string()));
+    }
+
+    #[test]
+    fn dst_spring_forward_march_2025() {
+        // 2025 DST spring forward: March 9 at 02:00 ET
+        // March 9 07:00 UTC = 02:00 EST = 03:00 EDT (just transitioned)
+        // Should map to March 9 in ET (EDT)
+        let ns = utc_ns("2025-03-09 07:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-03-09".to_string()));
+
+        // March 9 06:00 UTC = 01:00 EST (still EST, before transition)
+        // Should map to March 9 in ET
+        let ns = utc_ns("2025-03-09 06:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-03-09".to_string()));
+    }
+
+    #[test]
+    fn dst_fall_back_november_2025() {
+        // 2025 DST fall back: November 2 at 02:00 ET
+        // November 2 06:00 UTC = 02:00 EDT → falls back to 01:00 EST
+        // Should map to November 2 in ET
+        let ns = utc_ns("2025-11-02 06:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-11-02".to_string()));
+
+        // November 2 05:00 UTC = 01:00 EDT (still EDT)
+        let ns = utc_ns("2025-11-02 05:00:00");
+        assert_eq!(ns_to_date_string(ns), Some("2025-11-02".to_string()));
+    }
+
+    #[test]
+    fn expiry_anchor_est() {
+        // Winter: 16:00 ET = 21:00 UTC (EST)
+        let date = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+        let ndt = date.and_hms_opt(16, 0, 0).unwrap();
+        let et_dt = New_York.from_local_datetime(&ndt).single().unwrap();
+        let utc_dt = et_dt.with_timezone(&chrono::Utc);
+        assert_eq!(utc_dt.hour(), 21);
+    }
+
+    #[test]
+    fn expiry_anchor_edt() {
+        // Summer: 16:00 ET = 20:00 UTC (EDT)
+        let date = NaiveDate::from_ymd_opt(2025, 7, 18).unwrap();
+        let ndt = date.and_hms_opt(16, 0, 0).unwrap();
+        let et_dt = New_York.from_local_datetime(&ndt).single().unwrap();
+        let utc_dt = et_dt.with_timezone(&chrono::Utc);
+        assert_eq!(utc_dt.hour(), 20);
+    }
+
+    use chrono::Timelike;
 }

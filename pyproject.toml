@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["requests>=2.28"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "responses"]
 
 [tool.setuptools]
 packages = [
