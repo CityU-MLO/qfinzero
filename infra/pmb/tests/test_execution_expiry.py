@@ -49,8 +49,8 @@ def test_process_expiries_otm_closes_option():
     # Option position should be closed
     opt_pos = ledger.positions.get(f"OPTION:{contract}")
     assert opt_pos is None or opt_pos.qty == 0
-    # Realized PnL = 3.50 (short closed at 0, premium kept)
-    assert ledger.realized_pnl == pytest.approx(3.50, abs=0.01)
+    # Realized PnL = 3.50 × 100 = 350 (short closed at 0, premium kept, ×100 multiplier)
+    assert ledger.realized_pnl == pytest.approx(350.0, abs=1.0)
     # One OPTION_EXPIRY_EVENT emitted
     assert len(events) == 1
     assert events[0].type == EventType.OPTION_EXPIRY_EVENT
@@ -166,10 +166,10 @@ def test_process_expiries_long_itm_realizes_intrinsic():
     assert opt_pos is None or opt_pos.qty == 0
     # No stock position created
     assert "STOCK:NVDA" not in ledger.positions
-    # Cash increases by intrinsic value (9.0 per contract, 1 contract)
-    assert ledger.cash == pytest.approx(cash_before + 9.0, abs=0.01)
-    # Realized PnL = intrinsic - avg_price = 9.0 - 3.50 = 5.50
-    assert ledger.realized_pnl == pytest.approx(5.50, abs=0.01)
+    # Cash increases by intrinsic × 100 multiplier (9.0 × 100 = 900)
+    assert ledger.cash == pytest.approx(cash_before + 9.0 * 100, abs=0.01)
+    # Realized PnL = (intrinsic - avg_price) × 100 = (9.0 - 3.50) × 100 = 550.0
+    assert ledger.realized_pnl == pytest.approx(550.0, abs=0.01)
     # One event
     assert len(events) == 1
     assert events[0].type == EventType.OPTION_EXPIRY_EVENT

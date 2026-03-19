@@ -63,8 +63,10 @@ def test_spread_execution_fills_both_legs_atomically():
     assert len(trades) == 2
 
     # Net cash impact: bought put at $5×100 (-$500), sold put at $2×100 (+$200) = -$300 net debit
-    # Plus fees
+    # Plus fees: 1×$0.65 buy + 1×$0.65 sell = $1.30
+    # Cash = 100000 - 500 + 200 - 1.30 = 99698.70
     assert ledger.cash < 100_000.0
+    assert abs(ledger.cash - 99698.70) < 1.0
 
 
 def test_spread_and_individual_orders_process_together():

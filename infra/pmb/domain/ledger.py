@@ -2,6 +2,8 @@ from models.enums import Side, InstrumentType, MarginStatus
 from models.position import Position
 from models.event import AccountSnapshotPayload
 
+OPTION_MULTIPLIER = 100
+
 
 class Ledger:
     """Pure in-memory accounting: cash, positions, P&L."""
@@ -47,7 +49,11 @@ class Ledger:
         return [p for p in self._positions.values() if p.qty != 0]
 
     def net_positions_value(self) -> float:
-        return sum(p.qty * p.mark_price for p in self._positions.values())
+        total = 0.0
+        for p in self._positions.values():
+            mult = OPTION_MULTIPLIER if p.type == InstrumentType.OPTION else 1
+            total += p.qty * p.mark_price * mult
+        return total
 
     def total_equity(self) -> float:
         return self._cash + self.net_positions_value() - self._loan
@@ -61,15 +67,20 @@ class Ledger:
         price: float,
         fees: float,
     ) -> float:
-        """Apply a trade fill. Returns realized_pnl for this fill."""
+        """Apply a trade fill. Returns realized_pnl for this fill.
+
+        For options, qty is in contracts and price is per-share premium.
+        The multiplier (100) is applied to convert to notional value.
+        """
         self._total_fees += fees
         realized = 0.0
         is_buy = side == Side.BUY
+        mult = OPTION_MULTIPLIER if instrument_type == InstrumentType.OPTION else 1
 
         pos = self._positions.get(instrument_id)
 
         if is_buy:
-            cost = qty * price + fees
+            cost = qty * price * mult + fees
             self._cash -= cost
             if pos is None:
                 self._positions[instrument_id] = Position(
@@ -88,7 +99,7 @@ class Ledger:
             else:
                 # Covering short
                 cover_qty = min(qty, abs(pos.qty))
-                realized = cover_qty * (pos.avg_price - price)
+                realized = cover_qty * (pos.avg_price - price) * mult
                 self._realized_pnl += realized
                 remaining_buy = qty - cover_qty
                 pos.qty += qty
@@ -98,7 +109,7 @@ class Ledger:
                     self._positions.pop(instrument_id, None)
         else:
             # SELL
-            proceeds = qty * price - fees
+            proceeds = qty * price * mult - fees
             self._cash += proceeds
             if pos is None:
                 # Opening short
@@ -112,7 +123,7 @@ class Ledger:
             elif pos.qty > 0:
                 # Closing long
                 sell_qty = min(qty, pos.qty)
-                realized = sell_qty * (price - pos.avg_price)
+                realized = sell_qty * (price - pos.avg_price) * mult
                 self._realized_pnl += realized
                 remaining_sell = qty - sell_qty
                 pos.qty -= qty
@@ -138,7 +149,8 @@ class Ledger:
         for iid, pos in self._positions.items():
             if iid in prices:
                 pos.mark_price = prices[iid]
-                pos.unrealized_pnl = pos.qty * (pos.mark_price - pos.avg_price)
+                mult = OPTION_MULTIPLIER if pos.type == InstrumentType.OPTION else 1
+                pos.unrealized_pnl = pos.qty * (pos.mark_price - pos.avg_price) * mult
 
     def get_snapshot(
         self,

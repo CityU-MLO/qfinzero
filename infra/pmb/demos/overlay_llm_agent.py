@@ -35,7 +35,7 @@ from demos.overlay_helpers import (
     place_order, step_session, get_summary, get_export,
     get_positions, get_account, print_section, query_stock_price,
     query_option_chain, select_contract, compute_initial_cash,
-    get_etf_daily_prices, UPQ_CHAIN,
+    get_etf_daily_prices, get_etf_total_return, UPQ_CHAIN,
     query_option_greeks, compute_effective_delta,
     load_macro_context, load_semi_earnings,
 )
@@ -65,7 +65,7 @@ STRATEGY_CONFIG = {
         "dte_min": 7,
         "dte_max": 60,
         "tickers": ["QQQ", "NVDA"],
-        "etf_benchmarks": {},
+        "etf_benchmarks": {"QQQ": "JEPQ", "NVDA": "NVDY"},
     },
 }
 
@@ -315,7 +315,7 @@ def run_llm_strategy(underlying: str, strategy: str):
         end_ts=END_DATE,
         stocks=[underlying],
         options=option_tickers,
-        seed=701,
+        seed=501,
         run_id=f"overlay_llm_{strategy}_{underlying.lower()}_2025",
     )
     session_id = sess["session_id"]
@@ -721,10 +721,23 @@ def run_llm_strategy(underlying: str, strategy: str):
     benchmark_equity = (initial_cash - stock_cost) + final_price * STOCK_QTY
     benchmark_return = (benchmark_equity - initial_cash) / initial_cash
 
-    print(f"\n  {'Metric':<30} {'LLM Agent':>15} {'Buy-Hold':>15}")
-    print("  " + "-" * 60)
-    print(f"  {'Total Return':<30} {overlay_return*100:>14.2f}% {benchmark_return*100:>14.2f}%")
-    print(f"  {'Final Equity':<30} ${summary['final_equity']:>13,.2f} ${benchmark_equity:>13,.2f}")
+    # ETF benchmark (total return: price + dividends)
+    etf_return = get_etf_total_return(etf_ticker, START_DATE, END_DATE) if etf_ticker else None
+
+    header = f"  {'Metric':<30} {'LLM Agent':>15} {'Buy-Hold':>15}"
+    if etf_return is not None:
+        header += f" {etf_ticker:>15}"
+    print(f"\n{header}")
+    print("  " + "-" * (60 + (16 if etf_return is not None else 0)))
+    row_return = f"  {'Total Return':<30} {overlay_return*100:>14.2f}% {benchmark_return*100:>14.2f}%"
+    if etf_return is not None:
+        row_return += f" {etf_return*100:>14.2f}%"
+    print(row_return)
+    row_equity = f"  {'Final Equity':<30} ${summary['final_equity']:>13,.2f} ${benchmark_equity:>13,.2f}"
+    if etf_return is not None:
+        etf_final_equity = initial_cash * (1 + etf_return)
+        row_equity += f" ${etf_final_equity:>13,.2f}"
+    print(row_equity)
     print(f"  {'Max Drawdown':<30} {summary['max_drawdown']*100:>14.2f}%")
     print(f"  {'Alpha':<30} {(overlay_return - benchmark_return)*100:>14.2f}%")
     print(f"  {'Fees':<30} ${summary['fees_paid']:>13,.2f}")
@@ -775,6 +788,8 @@ def run_llm_strategy(underlying: str, strategy: str):
     saver.add_summary_line(f"Performance:")
     saver.add_summary_line(f"  LLM Agent Return: {overlay_return*100:+.2f}%")
     saver.add_summary_line(f"  Buy-and-Hold: {benchmark_return*100:+.2f}%")
+    if etf_return is not None:
+        saver.add_summary_line(f"  {etf_ticker} Return: {etf_return*100:+.2f}%")
     saver.add_summary_line(f"  Alpha: {(overlay_return - benchmark_return)*100:+.2f}%")
     saver.add_summary_line(f"")
     saver.add_summary_line(f"LLM Metrics:")

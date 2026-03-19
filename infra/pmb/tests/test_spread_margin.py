@@ -21,9 +21,9 @@ def test_spread_margin_uses_width_not_individual():
     assert spread_margin == 1000.0  # $10 × 100 × 1
 
     # Compare: individual margin for selling a $390 put would be much higher
-    # sell 390 put: 0.20 × 390 × 100 = $7,800
+    # sell 390 put: 0.20 × 1 × 390.0 × 100 = $7,800
     individual = engine.initial_margin_for_order(
-        Side.SELL, InstrumentType.OPTION, 1, 390.0 * 100
+        Side.SELL, InstrumentType.OPTION, 1, 390.0
     )
     assert spread_margin < individual
 

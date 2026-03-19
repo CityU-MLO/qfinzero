@@ -14,7 +14,7 @@ from models.event import (
 )
 from models.session import FeeModel
 from domain.order_manager import OrderManager
-from domain.ledger import Ledger
+from domain.ledger import Ledger, OPTION_MULTIPLIER
 from domain.margin_engine import MarginEngine
 
 
@@ -221,7 +221,8 @@ class ExecutionEngine:
 
         # Check buying power for this order
         if is_opening:
-            order_cost = order.remaining_qty * fill_price
+            mult = OPTION_MULTIPLIER if order.instrument_id.startswith("OPTION:") else 1
+            order_cost = order.remaining_qty * fill_price * mult
             total_needed = order_cost if order.side == Side.BUY else 0
             equity = ledger.total_equity()
             im = margin_engine.total_initial_margin(ledger.positions)
