@@ -569,3 +569,47 @@ class SessionService:
         if best_fallback is not None:
             return best_fallback.open
         return None
+
+    async def add_option_contracts(self, session_id: str, contracts: list[str]) -> dict:
+        """Dynamically load option contract data into a running session cache."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {"ok": False, "error": "session not found"}
+
+        # Build date -> stock_ns lookup for timestamp alignment.
+        # Stock bars use UTC midnight; option bars may use ET midnight (UTC+5h).
+        from domain.session_clock import ns_to_iso
+        date_to_stock_ns: dict[str, int] = {}
+        for sym_bars in state.cache._stock_bars.values():
+            for ns in sym_bars:
+                date_str = ns_to_iso(ns)[:10]
+                date_to_stock_ns[date_str] = ns
+            break  # one symbol is enough
+
+        loaded = 0
+        skipped = 0
+        for contract in contracts:
+            if contract in state.cache._option_bars:
+                skipped += 1
+                continue
+            try:
+                if state.clock.frequency == Frequency.MINUTE:
+                    opt_bars = await self._upq.get_option_minute_bars(
+                        contract, state.config.start_ts, state.config.end_ts
+                    )
+                else:
+                    start_date = state.config.start_ts[:10]
+                    end_date = state.config.end_ts[:10]
+                    opt_bars = await self._upq.get_option_daily_bars(
+                        contract, start_date, end_date
+                    )
+                # Align option bar timestamps to stock bar timestamps
+                for bar in opt_bars:
+                    opt_date = ns_to_iso(bar.window_start_ns)[:10]
+                    if opt_date in date_to_stock_ns:
+                        bar.window_start_ns = date_to_stock_ns[opt_date]
+                state.cache.load_option_bars(contract, opt_bars)
+                loaded += 1
+            except Exception:
+                pass  # contract may not have data
+        return {"ok": True, "loaded": loaded, "skipped": skipped}

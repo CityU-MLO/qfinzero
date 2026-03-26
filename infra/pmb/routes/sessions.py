@@ -125,3 +125,17 @@ async def export_session(
             detail={"code": "not_found", "message": "session not found"},
         )
     return data
+
+
+@router.post("/v1/sessions/{session_id}/add_contracts")
+async def add_contracts(session_id: str, request: Request):
+    body = await request.json()
+    contracts = body.get("contracts", [])
+    session_svc = request.app.state.session_service
+    result = await session_svc.add_option_contracts(session_id, contracts)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": result.get("error", "unknown")},
+        )
+    return result
