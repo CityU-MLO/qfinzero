@@ -143,6 +143,18 @@ paths:
           schema:
             type: string
             example: "ticker,date,close"
+        - name: indicators
+          in: query
+          required: false
+          description: |
+            Comma-separated technical indicators to compute on close price.
+            Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average),
+            macd (MACD 12/26/9). Example: "ma_5,ma_20,ema_12,macd".
+            All computed from split-adjusted close price. Early rows where window
+            is insufficient return null for that indicator.
+          schema:
+            type: string
+            example: "ma_20,ema_12,macd"
       responses:
         '200':
           description: Successful query
@@ -355,7 +367,7 @@ paths:
           in: query
           required: false
           description: |
-            Comma-separated list of tenors to return. 
+            Comma-separated list of tenors to return.
             Available: 1M, 3M, 1Y, 2Y, 5Y, 10Y, 30Y
             Defaults to all if not specified.
           schema:
@@ -370,6 +382,53 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RateRecord'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dividends/query:
+    get:
+      summary: Dividend Query
+      description: |
+        Query dividend data for stocks/ETFs by ticker and date range.
+        Returns ex-dividend dates and per-share amounts.
+      operationId: getDividends
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated list of stock/ETF tickers
+          schema:
+            type: string
+            example: "JEPQ"
+        - name: start
+          in: query
+          required: true
+          description: Start date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2024-01-01"
+        - name: end
+          in: query
+          required: true
+          description: End date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2024-12-31"
+      responses:
+        '200':
+          description: Successful query
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DividendRecord'
         '400':
           description: Invalid parameters
           content:
@@ -550,6 +609,24 @@ components:
           type: number
           format: double
           description: 30-year yield
+
+    DividendRecord:
+      type: object
+      properties:
+        ticker:
+          type: string
+          description: Stock/ETF ticker symbol
+          example: "JEPQ"
+        ex_dividend_date:
+          type: string
+          format: date
+          description: Ex-dividend date
+          example: "2024-02-01"
+        amount:
+          type: number
+          format: double
+          description: Per-share dividend amount
+          example: 0.3417
 
     ErrorResponse:
       type: object

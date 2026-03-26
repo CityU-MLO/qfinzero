@@ -45,6 +45,7 @@ class OrderManager:
             status=OrderStatus.NEW,
             created_ts=ts,
             last_update_ts=ts,
+            spread_id=req.spread_id,
         )
 
         self._orders[order_id] = order

@@ -2,6 +2,7 @@ from models.account import MarginConfig
 from models.enums import Side, InstrumentType, MarginStatus
 from models.position import Position
 from models.event import RiskEventPayload
+from domain.ledger import OPTION_MULTIPLIER
 
 
 class MarginEngine:
@@ -24,7 +25,8 @@ class MarginEngine:
         self, side: Side, instrument_type: InstrumentType, qty: int, price: float
     ) -> float:
         """Margin required to accept an order."""
-        mv = qty * price
+        mult = OPTION_MULTIPLIER if instrument_type == InstrumentType.OPTION else 1
+        mv = qty * price * mult
         if instrument_type == InstrumentType.STOCK:
             if side == Side.BUY:
                 return mv * self._config.stock_initial
@@ -43,7 +45,8 @@ class MarginEngine:
         for pos in positions.values():
             if pos.qty == 0:
                 continue
-            mv = abs(pos.qty) * pos.mark_price
+            mult = OPTION_MULTIPLIER if pos.type == InstrumentType.OPTION else 1
+            mv = abs(pos.qty) * pos.mark_price * mult
             if pos.type == InstrumentType.STOCK:
                 if pos.qty > 0:
                     total += mv * self._config.stock_initial
@@ -60,7 +63,8 @@ class MarginEngine:
         for pos in positions.values():
             if pos.qty == 0:
                 continue
-            mv = abs(pos.qty) * pos.mark_price
+            mult = OPTION_MULTIPLIER if pos.type == InstrumentType.OPTION else 1
+            mv = abs(pos.qty) * pos.mark_price * mult
             if pos.type == InstrumentType.STOCK:
                 if pos.qty > 0:
                     total += mv * self._config.stock_maintenance
@@ -95,6 +99,10 @@ class MarginEngine:
         if equity >= mm:
             self._margin_status = MarginStatus.NORMAL
         return None
+
+    def margin_for_spread(self, spread_width: float, qty: int, multiplier: int = 100) -> float:
+        """Margin for a spread = max loss = width × qty × multiplier."""
+        return spread_width * qty * multiplier
 
     def can_open_position(self) -> bool:
         """Whether new positions are allowed under current margin status."""

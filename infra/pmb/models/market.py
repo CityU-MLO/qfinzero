@@ -24,3 +24,11 @@ class OptionBar(BaseModel):
     expiry: Optional[str] = None
     strike: Optional[float] = None
     right: Optional[str] = None
+    # BSM Greeks (populated when UPQ returns include_greeks data)
+    iv: Optional[float] = None
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    rho: Optional[float] = None
+    greek_status: Optional[str] = None

@@ -29,6 +29,7 @@ class PartialFillConfig(BaseModel):
 class ExecutionConfig(BaseModel):
     price_rule: str = "LAST"
     slippage_bps: float = 1.0
+    option_spread_pct: float = 0.0  # bid-ask spread as % of premium (e.g. 0.05 = 5%)
     fee_model: FeeModel = FeeModel()
     partial_fill: PartialFillConfig = PartialFillConfig()
 

@@ -18,10 +18,9 @@ def run_demo(script_name, description):
     print(f"  Script: {script_name}")
     print(f"{'='*70}\n")
 
-    result = subprocess.run(
-        [sys.executable, f"demos/{script_name}"],
-        cwd=".",
-    )
+    parts = script_name.split()
+    cmd = [sys.executable, f"demos/{parts[0]}"] + parts[1:]
+    result = subprocess.run(cmd, cwd=".")
 
     if result.returncode != 0:
         print(f"\n❌ {script_name} failed with code {result.returncode}")
@@ -40,6 +39,14 @@ def main():
         ("daily_buy_close.py", "Daily Buy-at-Close Strategy (AAPL Jan 2025)"),
         ("intraday_5min_signal.py", "Intraday 5-Min Mean Reversion (AAPL)"),
         ("covered_call.py", "Covered Call Strategy (NVDA with Options)"),
+        ("overlay_profit_increase.py", "Overlay: Covered Call Profit Increase (AAPL 2024)"),
+        ("overlay_hedging.py", "Overlay: Protective Put Hedging (AAPL 2024)"),
+        ("overlay_profit_increase_v2.py", "Overlay v2: Covered Call (Paper Spec, QQQ/NVDA/USO)"),
+        ("overlay_hedging_v2.py", "Overlay v2: Protective Put (Paper Spec, QQQ/NVDA)"),
+        ("overlay_llm_agent.py --ticker QQQ --strategy profit",
+         "LLM Agent: Covered Call (QQQ, DeepSeek)"),
+        ("overlay_llm_agent.py --ticker QQQ --strategy hedge",
+         "LLM Agent: Protective Put (QQQ, DeepSeek)"),
     ]
 
     success_count = 0

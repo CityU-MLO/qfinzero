@@ -75,8 +75,9 @@ def upq_stock_daily(
     start: str,
     end: str,
     fields: Optional[str] = None,
+    indicators: Optional[str] = None,
 ) -> str:
-    """Query daily OHLCV bars for one or more stocks.
+    """Query daily OHLCV bars for one or more stocks, with optional technical indicators.
 
     Args:
         tickers: Stock symbols, e.g. ["AAPL", "NVDA", "SPY"]
@@ -84,12 +85,18 @@ def upq_stock_daily(
         end: End date "YYYY-MM-DD"
         fields: Comma-separated fields to return, e.g. "date,close,volume"
                 Available: ticker, date, open, high, low, close, volume, transactions
+        indicators: Comma-separated technical indicators, e.g. "ma_20,ema_12,macd"
+                    Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average),
+                    macd (MACD 12/26/9 — returns macd, macd_signal, macd_histogram columns).
 
     Returns:
-        JSON list of daily bar objects, one per ticker per day.
+        JSON list of daily bar objects with indicator columns appended when requested.
     """
     with UPQClient(UPQ_URL) as client:
-        return json.dumps(client.stock_daily(tickers=tickers, start=start, end=end, fields=fields))
+        return json.dumps(client.stock_daily(
+            tickers=tickers, start=start, end=end,
+            fields=fields, indicators=indicators,
+        ))
 
 
 @mcp.tool()
@@ -224,6 +231,26 @@ def upq_option_contract(
                 greek_price_field=greek_price_field,
             )
         )
+
+
+@mcp.tool()
+def upq_dividends(
+    tickers: list[str],
+    start: str,
+    end: str,
+) -> str:
+    """Query dividend history for stocks/ETFs.
+
+    Args:
+        tickers: Stock/ETF symbols, e.g. ["JEPQ", "AAPL"]
+        start: Start date "YYYY-MM-DD"
+        end: End date "YYYY-MM-DD"
+
+    Returns:
+        JSON list of dividend objects with ticker, ex_dividend_date, amount.
+    """
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.dividends(tickers=tickers, start=start, end=end))
 
 
 @mcp.tool()
