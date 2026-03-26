@@ -18,9 +18,9 @@ Large language model (LLM) agents are increasingly applied to financial decision
 
 | Service | Full Name | Port | Description |
 |---------|-----------|------|-------------|
-| **UPQ** | Unified Price Query | 19350 | Multi-resolution stock, option, and rates data (Rust/Axum) |
-| **NPP** | News Pushing Pipeline | 19330 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
-| **PMB** | Paper Money Broker | 19320 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
+| **UPQ** | Unified Price Query | 19703 | Multi-resolution stock, option, and rates data (Rust/Axum) |
+| **NPP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
+| **PMB** | Paper Money Broker | 19701 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
 
 Port 19380 is reserved for a future system status dashboard.
 
@@ -40,7 +40,7 @@ Port 19380 is reserved for a future system status dashboard.
          v              v              v
     ┌─────────┐    ┌─────────┐    ┌─────────┐
     │   UPQ   │    │   NPP   │    │   PMB   │
-    │ :19350  │    │ :19330  │    │ :19320  │
+    │ :19703  │    │ :19702  │    │ :19701  │
     └─────────┘    └────┬────┘    └────┬────┘
          ▲              │              │
          │              v              │
@@ -101,19 +101,19 @@ Edit `config/qfinzero.env` if you want to change ports, host, or data paths.
 cd infra/upq
 cargo build --release
 STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# curl http://127.0.0.1:19350/health
+# curl http://127.0.0.1:19703/health
 
 # NPP (Python)
 cd infra/npp
 pip install -r requirements.txt
 python main.py
-# curl http://127.0.0.1:19330/npp/health
+# curl http://127.0.0.1:19702/npp/health
 
 # PMB (Python — requires UPQ running)
 cd infra/pmb
 pip install -r requirements.txt
 python main.py
-# curl http://127.0.0.1:19320/v1/health
+# curl http://127.0.0.1:19701/v1/health
 ```
 
 ### Start Monitoring Frontend (Next.js)
@@ -197,9 +197,9 @@ Global service configuration lives in `config/qfinzero.env` and can be overridde
 
 | Service | Port | Env Override |
 |---------|------|-------------|
-| PMB | 19320 | `PMB_PORT` |
-| NPP | 19330 | `NPP_PORT` |
-| UPQ | 19350 | `UPQ_PORT` (service reads `PORT`) |
+| PMB | 19701 | `PMB_PORT` |
+| NPP | 19702 | `NPP_PORT` |
+| UPQ | 19703 | `UPQ_PORT` (service reads `PORT`) |
 | Dashboard | 19380 | `DASHBOARD_PORT` (reserved) |
 
 Each service also accepts host/port via its own environment variables (e.g., `PMB_HOST`, `NPP_MONGO_URI`).

@@ -17,13 +17,19 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Allow imports from this directory
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, CURRENT_DIR)
 
 from config import settings
+from qfinzero.runtime import qfinzero_version
 from services.data_sources import DataSourceManager
 from services.event_service import EventService
 from routes import health, events, triggers, calendar, news, timeline, stats, export, admin
@@ -70,7 +76,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="News Pushing Pipeline",
-    version="0.1.0",
+    version=qfinzero_version(),
     lifespan=lifespan,
 )
 

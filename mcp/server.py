@@ -23,12 +23,13 @@ from mcp.server.fastmcp import FastMCP
 from clients.upq.client import UPQClient
 from clients.npp.client import NPPClient
 from clients.pmb.client import PMBClient
+from qfinzero.config import PMB_URL as DEFAULT_PMB_URL, NPP_URL as DEFAULT_NPP_URL, UPQ_URL as DEFAULT_UPQ_URL
 
 # ── Service URLs (can be overridden via env vars) ────────────────────────────
 
-UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", "http://127.0.0.1:19350")
-NPP_URL = os.environ.get("QFINZERO_NPP_URL", "http://127.0.0.1:19330")
-PMB_URL = os.environ.get("QFINZERO_PMB_URL", "http://127.0.0.1:19320")
+UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", DEFAULT_UPQ_URL)
+NPP_URL = os.environ.get("QFINZERO_NPP_URL", DEFAULT_NPP_URL)
+PMB_URL = os.environ.get("QFINZERO_PMB_URL", DEFAULT_PMB_URL)
 
 mcp = FastMCP(
     "QFinZero",

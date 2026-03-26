@@ -7,11 +7,11 @@ import type { ServiceStatusCard } from "@/lib/types";
 
 const sample: ServiceStatusCard = {
   name: "NPP",
-  baseUrl: "http://127.0.0.1:19330",
-  port: "19330",
+  baseUrl: "http://127.0.0.1:19702",
+  port: "19702",
   healthPath: "/npp/health",
   state: "stale",
-  version: "0.1.0",
+  version: "qfinzero:deadbee",
   uptimeSeconds: 100,
   activeRequests: 1,
   requests5m: 25,

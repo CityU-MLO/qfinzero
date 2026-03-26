@@ -9,9 +9,9 @@ Strategy:
   - Run for full year 2024
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:23333 with AAPL 2024 daily data
-  - UPQ option chain on http://127.0.0.1:19350 with AAPL 2024 option data
-  - PMB running on http://127.0.0.1:19320
+  - UPQ running on http://127.0.0.1:19703 with AAPL 2024 daily data
+  - UPQ option chain on http://127.0.0.1:19703 with AAPL 2024 option data
+  - PMB running on http://127.0.0.1:19701
 
 Usage:
   python demos/overlay_profit_increase.py

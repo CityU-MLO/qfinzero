@@ -17,6 +17,8 @@ import requests
 from datetime import datetime, timezone
 from typing import Optional
 
+from qfinzero.config import UPQ_URL
+
 
 class UPQError(Exception):
     """Error from UPQ API."""
@@ -30,7 +32,7 @@ class UPQError(Exception):
 class UPQClient:
     """Synchronous client for the Unified Price Query REST API."""
 
-    DEFAULT_URL = "http://127.0.0.1:19350"
+    DEFAULT_URL = UPQ_URL
 
     def __init__(self, base_url: str = None, timeout: int = 30):
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")

@@ -8,8 +8,8 @@ Strategy:
   - Run for 3 months with detailed tracking
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:23333 with NVDA stock data
-  - PMB running on http://127.0.0.1:19320
+  - UPQ running on http://127.0.0.1:19703 with NVDA stock data
+  - PMB running on http://127.0.0.1:19701
 
 Note: This demo simulates a rolling covered call strategy.
       If actual option data is unavailable from UPQ, it will track stock only.
@@ -26,10 +26,11 @@ import requests
 import json
 from datetime import datetime, timedelta
 from demos.result_saver import ResultSaver
+from qfinzero.config import PMB_URL, UPQ_URL
 
 
-BASE = "http://127.0.0.1:19320"
-OPTION_CHAIN_API = "http://127.0.0.1:19350"
+BASE = PMB_URL
+OPTION_CHAIN_API = UPQ_URL
 
 
 def print_section(title):

@@ -15,9 +15,9 @@ clients/
 
 | Client | Import | Default Port | Agent Guide |
 |--------|--------|-------------|-------------|
-| PMB | `from qfinzero.clients.pmb import PMBClient` | 19320 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
-| NPP | `from qfinzero.clients.npp import NPPClient` | 19330 | [docs/npp/agent-guide.md](../docs/npp/agent-guide.md) |
-| UPQ | `from qfinzero.clients.upq import UPQClient` | 19350 | [docs/upq/agent-guide.md](../docs/upq/agent-guide.md) |
+| PMB | `from qfinzero.clients.pmb import PMBClient` | 19701 | [docs/pmb/agent-guide.md](../docs/pmb/agent-guide.md) |
+| NPP | `from qfinzero.clients.npp import NPPClient` | 19702 | [docs/npp/agent-guide.md](../docs/npp/agent-guide.md) |
+| UPQ | `from qfinzero.clients.upq import UPQClient` | 19703 | [docs/upq/agent-guide.md](../docs/upq/agent-guide.md) |
 
 ### Quick Start
 

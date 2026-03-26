@@ -1,5 +1,7 @@
-from pydantic import BaseModel
 from typing import Optional, List, Any
+from pydantic import BaseModel
+
+from qfinzero.config import UPQ_URL
 
 from .enums import Frequency, SessionStatus
 
@@ -10,7 +12,7 @@ class Universe(BaseModel):
 
 
 class UPQConfig(BaseModel):
-    base_url: str = "http://127.0.0.1:23333"
+    base_url: str = UPQ_URL
     fields_stock_minute: str = "ticker,window_start,open,high,low,close,volume"
     fields_stock_daily: str = "ticker,date,open,high,low,close,volume"
 

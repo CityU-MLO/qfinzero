@@ -1,6 +1,8 @@
 """Playground Agent Service — FastAPI + SSE."""
 
 import json
+import sys
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
@@ -10,11 +12,16 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from config import HOST, PORT
 from agent import run_agent_stream
+from qfinzero.runtime import qfinzero_version
 
 
-app = FastAPI(title="QFinZero Playground Agent", version="0.1.0")
+app = FastAPI(title="QFinZero Playground Agent", version=qfinzero_version())
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,7 +47,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "playground"}
+    return {"status": "ok", "service": "playground", "version": qfinzero_version()}
 
 
 class TestConnectionRequest(BaseModel):

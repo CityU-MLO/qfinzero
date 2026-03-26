@@ -13,6 +13,8 @@ Usage:
 import requests
 from typing import Optional
 
+from qfinzero.config import NPP_URL
+
 
 class NPPError(Exception):
     """Error from NPP API."""
@@ -26,7 +28,7 @@ class NPPError(Exception):
 class NPPClient:
     """Synchronous client for the News Pushing Pipeline REST API."""
 
-    DEFAULT_URL = "http://127.0.0.1:19330"
+    DEFAULT_URL = NPP_URL
 
     def __init__(self, base_url: str = None, timeout: int = 30):
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")

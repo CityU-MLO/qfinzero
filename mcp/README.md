@@ -36,9 +36,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "python",
       "args": ["/path/to/qfinzero/mcp/server.py"],
       "env": {
-        "QFINZERO_UPQ_URL": "http://127.0.0.1:19350",
-        "QFINZERO_NPP_URL": "http://127.0.0.1:19330",
-        "QFINZERO_PMB_URL": "http://127.0.0.1:19320"
+        "QFINZERO_UPQ_URL": "http://127.0.0.1:19703",
+        "QFINZERO_NPP_URL": "http://127.0.0.1:19702",
+        "QFINZERO_PMB_URL": "http://127.0.0.1:19701"
       }
     }
   }
@@ -57,9 +57,9 @@ Service URLs can be set via environment variables:
 
 | Variable              | Default                   | Description         |
 |-----------------------|---------------------------|---------------------|
-| `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19350` | Market data service |
-| `QFINZERO_NPP_URL`   | `http://127.0.0.1:19330` | News/events service |
-| `QFINZERO_PMB_URL`   | `http://127.0.0.1:19320` | Trading broker      |
+| `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19703` | Market data service |
+| `QFINZERO_NPP_URL`   | `http://127.0.0.1:19702` | News/events service |
+| `QFINZERO_PMB_URL`   | `http://127.0.0.1:19701` | Trading broker      |
 
 ## Available Tools
 

@@ -6,7 +6,7 @@ Shows how to:
   - Filter by specific tenors (e.g. 1M, 10Y)
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19350 with rates data
+  - UPQ running on http://127.0.0.1:19703 with rates data
 
 Usage:
   cd qfinzero

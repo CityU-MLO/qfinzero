@@ -8,8 +8,8 @@ Strategy:
   - Single day: 2025-01-06
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:23333 with AAPL minute data
-  - PMB running on http://127.0.0.1:19320
+  - UPQ running on http://127.0.0.1:19703 with AAPL minute data
+  - PMB running on http://127.0.0.1:19701
 
 Usage:
   python demos/intraday_5min_signal.py
@@ -22,9 +22,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 import json
 from demos.result_saver import ResultSaver
+from qfinzero.config import PMB_URL
 
 
-BASE = "http://127.0.0.1:19320"
+BASE = PMB_URL
 
 
 def print_section(title):

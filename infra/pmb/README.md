@@ -10,14 +10,14 @@ A step-driven paper trading broker for backtesting AI trading agents. Supports s
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Start the server (requires UPQ on port 23333)
+# 2. Start the server (requires UPQ on port 19703)
 python main.py
 
 # 3. Run demos
 python demos/daily_buy_close.py
 ```
 
-Server will listen on **http://127.0.0.1:19320**
+Server will listen on **http://127.0.0.1:19701**
 
 ---
 
@@ -52,7 +52,7 @@ PMB is a **FastAPI-based paper broker** designed for deterministic backtesting w
 ### Data Source
 
 Integrates with **UPQ** (Unified Price Query) service:
-- REST API at http://127.0.0.1:23333
+- REST API at http://127.0.0.1:19703
 - Stocks: minute/daily OHLCV bars
 - Options: contract data with OPRA IDs
 - See: [infra/upq/docs/api-usage.md](../upq/docs/api-usage.md)
@@ -61,7 +61,7 @@ Integrates with **UPQ** (Unified Price Query) service:
 
 ## API Overview
 
-**Base URL**: `http://127.0.0.1:19320/v1`
+**Base URL**: `http://127.0.0.1:19701/v1`
 
 | Endpoint | Method | Description |
 |---|---|---|
@@ -148,7 +148,7 @@ pmb/
 ### 1. Create Account
 
 ```bash
-curl -X POST http://127.0.0.1:19320/v1/accounts \
+curl -X POST http://127.0.0.1:19701/v1/accounts \
   -H 'Content-Type: application/json' \
   -d '{
     "account_type": "MARGIN",
@@ -160,7 +160,7 @@ curl -X POST http://127.0.0.1:19320/v1/accounts \
 ### 2. Create Session
 
 ```bash
-curl -X POST http://127.0.0.1:19320/v1/sessions \
+curl -X POST http://127.0.0.1:19701/v1/sessions \
   -H 'Content-Type: application/json' \
   -d '{
     "account_id": "acct_abc123",
@@ -175,7 +175,7 @@ curl -X POST http://127.0.0.1:19320/v1/sessions \
 ### 3. Step Simulation
 
 ```bash
-curl -X POST http://127.0.0.1:19320/v1/sessions/sess_xyz/step \
+curl -X POST http://127.0.0.1:19701/v1/sessions/sess_xyz/step \
   -H 'Content-Type: application/json' \
   -d '{"step": 1}'
 ```
@@ -198,7 +198,7 @@ Returns:
 ### 4. Place Order
 
 ```bash
-curl -X POST http://127.0.0.1:19320/v1/orders \
+curl -X POST http://127.0.0.1:19701/v1/orders \
   -H 'Content-Type: application/json' \
   -d '{
     "session_id": "sess_xyz",
@@ -217,7 +217,7 @@ curl -X POST http://127.0.0.1:19320/v1/orders \
 ### 5. Get Summary
 
 ```bash
-curl http://127.0.0.1:19320/v1/sessions/sess_xyz/summary
+curl http://127.0.0.1:19701/v1/sessions/sess_xyz/summary
 ```
 
 Returns:
@@ -262,8 +262,8 @@ Edit [config.py](config.py) or set environment variables:
 
 ```bash
 export PMB_HOST=127.0.0.1
-export PMB_PORT=19320
-export PMB_UPQ_BASE_URL=http://127.0.0.1:23333
+export PMB_PORT=19701
+export PMB_UPQ_BASE_URL=http://127.0.0.1:19703
 export PMB_LOG_LEVEL=INFO
 ```
 
@@ -276,7 +276,7 @@ export PMB_LOG_LEVEL=INFO
 ```bash
 python main.py
 # or with reload:
-uvicorn main:app --host 127.0.0.1 --port 19320 --reload
+uvicorn main:app --host 127.0.0.1 --port 19701 --reload
 ```
 
 ### Run Tests
@@ -286,7 +286,7 @@ uvicorn main:app --host 127.0.0.1 --port 19320 --reload
 python -c "from main import app; print('OK')"
 
 # Manual API test
-curl http://127.0.0.1:19320/v1/health
+curl http://127.0.0.1:19701/v1/health
 ```
 
 ---

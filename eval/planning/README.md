@@ -44,9 +44,9 @@ pip install httpx pyyaml
 Optionally, to run in **live mode** you need the QFinZero services running:
 ```bash
 # In separate terminals:
-python infra/upq/main.py      # UPQ on port 23333
-python infra/npp/main.py      # NPP on port 19330
-python infra/pmb/main.py      # PMB on port 19320
+python infra/upq/main.py      # UPQ on port 19703
+python infra/npp/main.py      # NPP on port 19702
+python infra/pmb/main.py      # PMB on port 19701
 ```
 
 ---

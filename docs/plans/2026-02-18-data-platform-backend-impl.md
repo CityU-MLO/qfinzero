@@ -457,7 +457,7 @@ async def search_news(req: NewsSearchRequest, request: Request):
 Run: `cd infra/npp && python main.py` (in another terminal)
 
 ```bash
-curl -X POST http://127.0.0.1:19330/npp/news/search \
+curl -X POST http://127.0.0.1:19702/npp/news/search \
   -H "Content-Type: application/json" \
   -d '{"keyword":"earnings","limit":5}'
 ```
@@ -590,7 +590,7 @@ app.include_router(stats.router)
 
 ### Step 3: Verify
 
-Run: `curl http://127.0.0.1:19330/npp/news/stats?days=7`
+Run: `curl http://127.0.0.1:19702/npp/news/stats?days=7`
 Expected: 200 with statistics JSON
 
 ### Step 4: Commit
@@ -812,8 +812,8 @@ app.include_router(export.router)
 ### Step 3: Verify
 
 ```bash
-curl "http://127.0.0.1:19330/npp/news/export?format=jsonl&start=2025-01-01T00:00:00Z&end=2025-01-03T00:00:00Z"
-curl "http://127.0.0.1:19330/npp/calendar/earnings/export?start=2025-01-01&end=2025-01-31&format=csv"
+curl "http://127.0.0.1:19702/npp/news/export?format=jsonl&start=2025-01-01T00:00:00Z&end=2025-01-03T00:00:00Z"
+curl "http://127.0.0.1:19702/npp/calendar/earnings/export?start=2025-01-01&end=2025-01-31&format=csv"
 ```
 
 ### Step 4: Commit
@@ -952,7 +952,7 @@ async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1
 ### Step 2: Verify
 
 ```bash
-curl http://127.0.0.1:19330/npp/calendar/coverage?days=30
+curl http://127.0.0.1:19702/npp/calendar/coverage?days=30
 ```
 
 ### Step 3: Commit
@@ -1037,7 +1037,7 @@ async def health_freshness(request: Request):
 ### Step 2: Verify
 
 ```bash
-curl http://127.0.0.1:19330/npp/health/freshness
+curl http://127.0.0.1:19702/npp/health/freshness
 ```
 
 ### Step 3: Commit
@@ -1199,7 +1199,7 @@ app.include_router(admin.router)
 ### Step 3: Verify
 
 ```bash
-curl http://127.0.0.1:19330/npp/admin/sanity
+curl http://127.0.0.1:19702/npp/admin/sanity
 ```
 
 ### Step 4: Commit

@@ -61,8 +61,8 @@ Shared helpers for overlay strategy demos.
 import requests
 from datetime import datetime, timedelta
 
-PMB_BASE = "http://127.0.0.1:19320"
-UPQ_CHAIN = "http://127.0.0.1:19350"
+PMB_BASE = "http://127.0.0.1:19701"
+UPQ_CHAIN = "http://127.0.0.1:19703"
 
 
 def query_option_chain(underlying: str, date: str, option_type: str,
@@ -334,9 +334,9 @@ Strategy:
   - Run for full year 2024
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:23333 with AAPL 2024 daily data
-  - UPQ option chain on http://127.0.0.1:19350 with AAPL 2024 option data
-  - PMB running on http://127.0.0.1:19320
+  - UPQ running on http://127.0.0.1:19703 with AAPL 2024 daily data
+  - UPQ option chain on http://127.0.0.1:19703 with AAPL 2024 option data
+  - PMB running on http://127.0.0.1:19701
 
 Usage:
   python demos/overlay_profit_increase.py
@@ -369,7 +369,7 @@ OTM_PCT = 0.05  # 5% OTM for call strike
 def get_reference_price(underlying: str, date: str) -> float:
     """Get approximate stock price from UPQ for strike estimation."""
     try:
-        resp = requests.get(f"http://127.0.0.1:23333/stock/daily", params={
+        resp = requests.get(f"http://127.0.0.1:19703/stock/daily", params={
             "tickers": underlying, "start": date, "end": date,
             "fields": "ticker,date,close",
         }, timeout=10)
@@ -689,9 +689,9 @@ Strategy:
   - Run for full year 2024
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:23333 with AAPL 2024 daily data
-  - UPQ option chain on http://127.0.0.1:19350 with AAPL 2024 option data
-  - PMB running on http://127.0.0.1:19320
+  - UPQ running on http://127.0.0.1:19703 with AAPL 2024 daily data
+  - UPQ option chain on http://127.0.0.1:19703 with AAPL 2024 option data
+  - PMB running on http://127.0.0.1:19701
 
 Usage:
   python demos/overlay_hedging.py
@@ -723,7 +723,7 @@ OTM_PCT = 0.05  # 5% OTM for put strike
 def get_reference_price(underlying: str, date: str) -> float:
     """Get approximate stock price from UPQ for strike estimation."""
     try:
-        resp = requests.get(f"http://127.0.0.1:23333/stock/daily", params={
+        resp = requests.get(f"http://127.0.0.1:19703/stock/daily", params={
             "tickers": underlying, "start": date, "end": date,
             "fields": "ticker,date,close",
         }, timeout=10)
@@ -1024,7 +1024,7 @@ git commit -m "feat(pmb): add overlay demos to run_all.py"
 
 ## Task 5: Smoke Test with Live Services
 
-**Prerequisites:** UPQ running on `:23333` + `:19350`, PMB running on `:19320`
+**Prerequisites:** UPQ running on `:19703` + `:19703`, PMB running on `:19701`
 
 **Step 1: Run covered call demo**
 

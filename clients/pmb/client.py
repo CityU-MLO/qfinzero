@@ -24,6 +24,8 @@ Usage:
 import requests
 from typing import Optional
 
+from qfinzero.config import PMB_URL
+
 
 class PMBError(Exception):
     """Error from PMB API."""
@@ -95,7 +97,7 @@ class StepResult:
 class PMBClient:
     """Synchronous client for the Paper Money Broker REST API."""
 
-    DEFAULT_URL = "http://127.0.0.1:19320"
+    DEFAULT_URL = PMB_URL
 
     def __init__(self, base_url: str = None, timeout: int = 30):
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")

@@ -4,19 +4,32 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-CONFIG_FILE="$ROOT_DIR/config/qfinzero.env"
-if [ -f "$CONFIG_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
-    set +a
-fi
+load_env_defaults() {
+    local env_file="$1"
+    [ -f "$env_file" ] || return 0
+    while IFS='=' read -r key value; do
+        case "$key" in
+            ''|\#*) continue ;;
+        esac
+        key="$(printf '%s' "$key" | xargs)"
+        [ -n "$key" ] || continue
+        if [ -z "${!key+x}" ]; then
+            value="${value%$'\r'}"
+            value="${value#\"}"
+            value="${value%\"}"
+            export "$key=$value"
+        fi
+    done < "$env_file"
+}
+
+load_env_defaults "$ROOT_DIR/.env"
+load_env_defaults "$ROOT_DIR/config/qfinzero.env"
 
 : "${QFZ_HOST:=127.0.0.1}"
-: "${PMB_PORT:=19320}"
-: "${NPP_PORT:=19330}"
-: "${UPQ_PORT:=19350}"
-: "${DASHBOARD_PORT:=19380}"
+: "${DASHBOARD_PORT:=19700}"
+: "${PMB_PORT:=19701}"
+: "${NPP_PORT:=19702}"
+: "${UPQ_PORT:=19703}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

@@ -656,9 +656,13 @@ async fn option() -> axum::response::Response {
 }
 
 async fn health() -> axum::response::Response {
+    let version = format!(
+        "qfinzero:{}",
+        option_env!("QFINZERO_GIT_HASH").unwrap_or("unknown")
+    );
     (
         StatusCode::OK,
-        Json(json!({ "status": "ok", "version": "0.1.0" })),
+        Json(json!({ "status": "ok", "service": "upq", "version": version })),
     )
         .into_response()
 }

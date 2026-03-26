@@ -46,9 +46,9 @@ import os
 import pytest
 
 # Mock base URLs — no real servers needed
-MOCK_UPQ_URL = "http://mock-upq:19350"
-MOCK_NPP_URL = "http://mock-npp:19330"
-MOCK_PMB_URL = "http://mock-pmb:19320"
+MOCK_UPQ_URL = "http://mock-upq:19703"
+MOCK_NPP_URL = "http://mock-npp:19702"
+MOCK_PMB_URL = "http://mock-pmb:19701"
 
 
 @pytest.fixture
@@ -251,7 +251,7 @@ import responses
 
 from clients.upq.client import UPQClient, UPQError
 
-MOCK_URL = "http://mock-upq:19350"
+MOCK_URL = "http://mock-upq:19703"
 
 
 @pytest.fixture
@@ -555,7 +555,7 @@ import responses
 
 from clients.npp.client import NPPClient, NPPError
 
-MOCK_URL = "http://mock-npp:19330"
+MOCK_URL = "http://mock-npp:19702"
 
 
 @pytest.fixture
@@ -888,7 +888,7 @@ import responses
 
 from clients.pmb.client import PMBClient, PMBError, StepResult
 
-MOCK_URL = "http://mock-pmb:19320"
+MOCK_URL = "http://mock-pmb:19701"
 
 
 @pytest.fixture

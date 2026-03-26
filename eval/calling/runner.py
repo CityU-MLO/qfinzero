@@ -64,12 +64,24 @@ logging.basicConfig(
 )
 log = logging.getLogger("eval_runner")
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from qfinzero.env import load_root_env_defaults
+
+load_root_env_defaults()
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_TIMEOUT = 60  # seconds per model call
 DEFAULT_MAX_WORKERS = 4
-SERVICE_PORTS = {"UPQ": 19350, "NPP": 19330, "PMB": 19320}
+SERVICE_PORTS = {
+    "UPQ": int(os.getenv("UPQ_PORT", "19703")),
+    "NPP": int(os.getenv("NPP_PORT", "19702")),
+    "PMB": int(os.getenv("PMB_PORT", "19701")),
+}
 
 
 # ---------------------------------------------------------------------------

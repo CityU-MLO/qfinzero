@@ -5,7 +5,7 @@ A high-performance Rust-based price query service providing REST API access to s
 ## Server
 
 - **Language**: Rust (Axum)
-- **Default Port**: 19350
+- **Default Port**: 19703
 - **Entry Point**: `cargo run -p upq-service`
 
 ```bash
@@ -13,7 +13,7 @@ cd infra/upq
 cargo build --release
 cargo run -p upq-ingest -- ingest --raw-root ~/upq_data --storage-root ~/upq_storage
 STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# http://127.0.0.1:19350
+# http://127.0.0.1:19703
 ```
 
 ## API Overview
@@ -55,16 +55,16 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 
 ```bash
 # Stock daily data
-curl "http://127.0.0.1:19350/stock/daily?tickers=AAPL&start=2025-01-01&end=2025-01-31"
+curl "http://127.0.0.1:19703/stock/daily?tickers=AAPL&start=2025-01-01&end=2025-01-31"
 
 # Stock minute data
-curl "http://127.0.0.1:19350/stock?tickers=AAPL&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00"
+curl "http://127.0.0.1:19703/stock?tickers=AAPL&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00"
 
 # Option chain
-curl "http://127.0.0.1:19350/option/chain_query?underlying=NVDA&date=2025-01-15&type=C"
+curl "http://127.0.0.1:19703/option/chain_query?underlying=NVDA&date=2025-01-15&type=C"
 
 # Treasury yields
-curl "http://127.0.0.1:19350/rates/query?start=2025-01-01&end=2025-01-31&tenors=1M,10Y"
+curl "http://127.0.0.1:19703/rates/query?start=2025-01-01&end=2025-01-31&tenors=1M,10Y"
 ```
 
 ## Python Client
@@ -170,10 +170,10 @@ Each option row is enriched with: `iv`, `delta`, `gamma`, `theta`, `vega`, `rho`
 **Example with Greeks (curl):**
 ```bash
 # Option chain with Greeks
-curl "http://127.0.0.1:19350/option/chain_query?underlying=NVDA&date=2025-01-15&type=C&include_greeks=true"
+curl "http://127.0.0.1:19703/option/chain_query?underlying=NVDA&date=2025-01-15&type=C&include_greeks=true"
 
 # Contract history with Greeks
-curl "http://127.0.0.1:19350/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-06&end=2025-01-17&include_greeks=true"
+curl "http://127.0.0.1:19703/option/ticker_query?contract=O:NVDA250221C00140000&start=2025-01-06&end=2025-01-17&include_greeks=true"
 ```
 
 **Example with Greeks (Python):**
@@ -201,7 +201,7 @@ with UPQClient() as upq:
 | Environment Variable | Required | Default | Description |
 |---------------------|----------|---------|-------------|
 | `STORAGE_ROOT` | Yes | — | Path to ingested Parquet data |
-| `PORT` | No | 19350 | Server port |
+| `PORT` | No | 19703 | Server port |
 | `RUST_LOG` | No | info | Log level |
 
 ## References

@@ -13,7 +13,7 @@ Covers:
   - upq_make_opra       — build OPRA contract string
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19350
+  - UPQ running on http://127.0.0.1:19703
   - MCP server deps: pip install "mcp[cli]>=1.0.0"
 
 Usage:

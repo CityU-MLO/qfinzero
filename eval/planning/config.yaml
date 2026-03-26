@@ -19,11 +19,11 @@ sqlite:
 # ── Service base URLs ───────────────────────────────────────────────────────
 services:
   upq:
-    base_url: "http://127.0.0.1:23333"   # Unified Price Query (external port)
+    base_url: "http://127.0.0.1:19703"   # Unified Price Query
   npp:
-    base_url: "http://127.0.0.1:19330"   # News Pushing Pipeline
+    base_url: "http://127.0.0.1:19702"   # News Pushing Pipeline
   pmb:
-    base_url: "http://127.0.0.1:19320"   # Paper Money Broker
+    base_url: "http://127.0.0.1:19701"   # Paper Money Broker
 
 # ── Paper trading setup ─────────────────────────────────────────────────────
 # Runner pre-creates ONE account + ONE session before running any episode.

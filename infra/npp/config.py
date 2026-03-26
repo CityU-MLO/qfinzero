@@ -1,9 +1,14 @@
 from pydantic_settings import BaseSettings
 
+from qfinzero.env import load_root_env_defaults
+
+
+load_root_env_defaults()
+
 
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
-    port: int = 19330
+    port: int = 19702
 
     # MongoDB
     mongo_uri: str = "mongodb://localhost:27018"

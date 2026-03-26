@@ -102,14 +102,14 @@ RULES:
    For NPP/PMB POST calls put parameters in "args" as request body.
 
 AVAILABLE TOOLS:
-=== UPQ (Unified Price Query) — base: http://127.0.0.1:23333 ===
+=== UPQ (Unified Price Query) — base: http://127.0.0.1:19703 ===
 UPQ.stock.minute     GET /stock              args: tickers(str,csv), start(datetime), end(datetime), fields(opt)
 UPQ.stock.daily      GET /stock/daily        args: tickers(str,csv), start(date), end(date), fields(opt)
 UPQ.option.chain_query  GET /option/chain_query  args: underlying(str), date(date), type(C|P,opt), strike_min/max(float,opt), expiry_min/max(date,opt)
 UPQ.option.ticker_query GET /option/ticker_query args: contract(OPRA str), start, end, resolution(day|minute,opt)
 UPQ.rates.query      GET /rates/query        args: start(date), end(date), tenors(csv: 1M,3M,1Y,2Y,5Y,10Y,30Y, opt=all)
 
-=== NPP (News Pushing Pipeline) — base: http://127.0.0.1:19330 ===
+=== NPP (News Pushing Pipeline) — base: http://127.0.0.1:19702 ===
 NPP.events.query     POST /npp/events/query  args: mode(upcoming|just_happened|window), event_types(list), tickers(list,opt), horizon_minutes(int,opt), start_utc/end_utc(opt), min_importance(opt), limit(opt)
 NPP.events.get       GET  /npp/events/{event_id}   (no args; event_id in URL)
 NPP.events.stream    POST /npp/events/stream args: cursor(str), event_types(list,opt), tickers(list,opt)
@@ -119,7 +119,7 @@ NPP.calendar.econ    POST /npp/calendar/econ args: start_date(date), end_date(da
 NPP.calendar.earnings POST /npp/calendar/earnings args: start_date(date), end_date(date), tickers(list,opt)
 NPP.news.body        GET  /npp/news/{news_id}/body  (no args; news_id in URL)
 
-=== PMB (Paper Money Broker) — base: http://127.0.0.1:19320 ===
+=== PMB (Paper Money Broker) — base: http://127.0.0.1:19701 ===
 PMB.account.positions GET /v1/accounts/{account_id}/positions   (no body args)
 PMB.account.orders    GET /v1/accounts/{account_id}/orders      args: status_in(csv,opt), session_id(opt), limit(opt)
 PMB.account.trades    GET /v1/accounts/{account_id}/trades      args: session_id(opt)

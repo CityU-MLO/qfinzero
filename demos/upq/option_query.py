@@ -9,7 +9,7 @@ Shows how to:
   - Chain discovery → contract detail workflow
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19350 with option data
+  - UPQ running on http://127.0.0.1:19703 with option data
 
 Usage:
   cd qfinzero

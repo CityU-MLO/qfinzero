@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
+from qfinzero.runtime import qfinzero_version
 
 logger = logging.getLogger("npp.health")
 
@@ -14,7 +15,7 @@ async def health(request: Request):
     return {
         "status": "ok",
         "service": "npp",
-        "version": "0.1.0",
+        "version": qfinzero_version(),
         "data_freshness": freshness,
     }
 

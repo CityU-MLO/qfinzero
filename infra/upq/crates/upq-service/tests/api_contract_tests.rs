@@ -178,6 +178,18 @@ async fn health_endpoint_returns_ok_status() -> Result<(), Box<dyn std::error::E
         payload.get("status"),
         Some(&Value::String("ok".to_string()))
     );
+    assert_eq!(
+        payload.get("service"),
+        Some(&Value::String("upq".to_string()))
+    );
+    let version = payload
+        .get("version")
+        .and_then(Value::as_str)
+        .expect("health payload should include version string");
+    assert!(
+        version.starts_with("qfinzero:"),
+        "unexpected version format: {version}"
+    );
     Ok(())
 }
 

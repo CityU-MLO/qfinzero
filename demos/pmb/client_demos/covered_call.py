@@ -6,7 +6,7 @@ Buy 100 NVDA shares, sell OTM calls every 2 weeks over 3 months.
 
 Prerequisites:
   - UPQ running with NVDA stock + option data
-  - PMB running on http://127.0.0.1:19320
+  - PMB running on http://127.0.0.1:19701
 
 Usage:
   cd qfinzero
@@ -16,8 +16,7 @@ Usage:
 import requests
 from datetime import datetime, timedelta
 from qfinzero.clients.pmb import PMBClient
-
-UPQ_URL = "http://127.0.0.1:19350"
+from qfinzero.config import UPQ_URL
 
 
 def query_option_chain(underlying, date, strike_min, strike_max, option_type="C", expiry_max=None):

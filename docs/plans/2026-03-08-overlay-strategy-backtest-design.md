@@ -93,7 +93,7 @@ This approach is chosen because:
 
 ### Contract Discovery
 
-Uses UPQ `chain_query` endpoint (port 19350) to dynamically find contracts:
+Uses UPQ `chain_query` endpoint (port 19703) to dynamically find contracts:
 
 ```python
 GET /option/chain_query?underlying=AAPL&date=2024-03-15

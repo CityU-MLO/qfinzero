@@ -3,14 +3,20 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Add pmb root to path for absolute imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, CURRENT_DIR)
 
 from config import settings
 from clients.upq_client import UPQClient
+from qfinzero.runtime import qfinzero_version
 from services.account_service import AccountService
 from services.session_service import SessionService
 from services.order_service import OrderService
@@ -50,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Paper Money Broker",
-    version="0.1.0",
+    version=qfinzero_version(),
     lifespan=lifespan,
 )
 

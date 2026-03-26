@@ -130,14 +130,14 @@ Checks:
 **Step 2: Add CLI options**
 
 - `--host` default `127.0.0.1`
-- `--port` default `19705`
+- `--port` default `19703`
 - `--underlying`, `--date`, `--contract` optional overrides
 
 **Step 3: Run against deployed service**
 
 Run (via qlib):
 ```bash
-python3 infra/upq/tests/smoke_greeks_api.py --host 127.0.0.1 --port 19705
+python3 infra/upq/tests/smoke_greeks_api.py --host 127.0.0.1 --port 19703
 ```
 
 Expected:
@@ -150,5 +150,5 @@ Expected:
 
 - Unit: Extended math suite passes locally.
 - Regression: UTC day-boundary minute test prevents trade-date lookup drift.
-- Smoke: Live endpoint smoke suite passes on port 19705.
+- Smoke: Live endpoint smoke suite passes on port 19703.
 - Documentation: This plan is versioned under `docs/plans` and referenced by future greeks changes.

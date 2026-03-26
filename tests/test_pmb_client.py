@@ -23,6 +23,13 @@ def client():
 
 
 class TestHealth:
+    def test_default_base_url_uses_standard_pmb_port(self):
+        client = PMBClient()
+        try:
+            assert client.base_url == "http://127.0.0.1:19701"
+        finally:
+            client.close()
+
     @responses.activate
     def test_health_happy_path(self, client):
         responses.get(f"{MOCK_URL}/v1/health", json={"status": "ok"})
