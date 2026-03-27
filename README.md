@@ -18,11 +18,21 @@ Large language model (LLM) agents are increasingly applied to financial decision
 
 | Service | Full Name | Port | Description |
 |---------|-----------|------|-------------|
-| **UPQ** | Unified Price Query | 19703 | Multi-resolution stock, option, and rates data (Rust/Axum) |
-| **NPP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
+| **Dashboard Web** | Next.js monitoring frontend | 19700 | Status dashboard and web UI for service browsing and playground access |
 | **PMB** | Paper Money Broker | 19701 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
+| **NPP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
+| **UPQ** | Unified Price Query | 19703 | Multi-resolution stock, option, and rates data (Rust/Axum) |
+| **Playground** | Agent playground service | 19704 | LLM agent backend used by the web playground UI |
 
-Port 19380 is reserved for a future system status dashboard.
+### Port Layout
+
+| Port | Service | Primary Endpoint |
+|------|---------|------------------|
+| `19700` | Dashboard Web | `http://127.0.0.1:19700/` |
+| `19701` | PMB | `http://127.0.0.1:19701/v1/health` |
+| `19702` | NPP | `http://127.0.0.1:19702/npp/health` |
+| `19703` | UPQ | `http://127.0.0.1:19703/health` |
+| `19704` | Playground | `http://127.0.0.1:19704/health` |
 
 ## Architecture
 
@@ -83,7 +93,7 @@ from qfinzero.clients.pmb import PMBClient
 
 ## Quick Start
 
-Edit `config/qfinzero.env` if you want to change ports, host, or data paths.
+Ports default to `19700` to `19704`. Override them with environment variables, or create a root `.env` from `.env.example` for local development overrides.
 
 ### Start All Services
 
@@ -97,6 +107,18 @@ Edit `config/qfinzero.env` if you want to change ports, host, or data paths.
 ### Start Individually
 
 ```bash
+# Dashboard Web (Next.js frontend)
+cd infra/dashboard-web
+pnpm install --no-frozen-lockfile
+pnpm build
+PORT=19700 \
+PMB_BASE_URL=http://127.0.0.1:19701 \
+NPP_BASE_URL=http://127.0.0.1:19702 \
+UPQ_BASE_URL=http://127.0.0.1:19703 \
+PLAYGROUND_SERVICE_URL=http://127.0.0.1:19704 \
+pnpm start
+# open http://127.0.0.1:19700
+
 # UPQ (Rust — build first)
 cd infra/upq
 cargo build --release
@@ -114,9 +136,19 @@ cd infra/pmb
 pip install -r requirements.txt
 python main.py
 # curl http://127.0.0.1:19701/v1/health
+
+# Playground (Python — expects PMB/NPP/UPQ running)
+cd infra/playground
+pip install -r requirements.txt
+PLAYGROUND_PORT=19704 \
+QFINZERO_PMB_URL=http://127.0.0.1:19701 \
+QFINZERO_NPP_URL=http://127.0.0.1:19702 \
+QFINZERO_UPQ_URL=http://127.0.0.1:19703 \
+python main.py
+# curl http://127.0.0.1:19704/health
 ```
 
-### Start Monitoring Frontend (Next.js)
+### Start Monitoring Frontend (Dev Mode)
 
 ```bash
 cd infra/dashboard-web
@@ -168,7 +200,9 @@ qfinzero/
 ├── infra/                      # Service implementations
 │   ├── upq/                    #   UPQ server (Rust workspace)
 │   ├── npp/                    #   NPP server (FastAPI)
-│   └── pmb/                    #   PMB server (FastAPI)
+│   ├── pmb/                    #   PMB server (FastAPI)
+│   ├── playground/             #   Playground backend (FastAPI / LangGraph)
+│   └── dashboard-web/          #   Next.js frontend
 ├── demos/                      # Usage examples
 │   ├── upq/                    #   Price query demos
 │   ├── npp/                    #   Event query demos
@@ -177,8 +211,7 @@ qfinzero/
 │   ├── upq/                    #   UPQ API docs + OpenAPI
 │   ├── npp/                    #   NPP API docs + OpenAPI
 │   └── pmb/                    #   PMB API docs + OpenAPI
-├── config/                     # Global service config
-│   └── qfinzero.env
+├── .env.example                # Example local overrides
 ├── data/                       # Local databases
 │   ├── benzinga_earnings.sqlite3
 │   └── nasdaq_econ_events.sqlite3
@@ -191,18 +224,33 @@ qfinzero/
 
 ## Configuration
 
-Global service configuration lives in `config/qfinzero.env` and can be overridden by environment variables. The service scripts automatically load this file.
+Configuration follows a simple layered model:
 
-`qfinzero/config.py` reads the same environment variables so clients stay consistent.
+1. Environment variables take highest priority.
+2. Root `.env` is an optional local development override.
+3. Code defaults fall back to the standard `19700` to `19704` port range.
+
+Start by copying `.env.example` if you want local overrides:
+
+```bash
+cp .env.example .env
+```
+
+`qfinzero/config.py` reads the same environment variables so clients and services stay consistent.
 
 | Service | Port | Env Override |
 |---------|------|-------------|
+| Dashboard Web | 19700 | `DASHBOARD_PORT` |
 | PMB | 19701 | `PMB_PORT` |
 | NPP | 19702 | `NPP_PORT` |
 | UPQ | 19703 | `UPQ_PORT` (service reads `PORT`) |
-| Dashboard | 19380 | `DASHBOARD_PORT` (reserved) |
+| Playground | 19704 | `PLAYGROUND_PORT` |
 
-Each service also accepts host/port via its own environment variables (e.g., `PMB_HOST`, `NPP_MONGO_URI`).
+Related service URL overrides:
+
+- `PMB_BASE_URL`, `NPP_BASE_URL`, `UPQ_BASE_URL` for `dashboard-web`
+- `PLAYGROUND_SERVICE_URL` for the web playground proxy
+- `QFINZERO_PMB_URL`, `QFINZERO_NPP_URL`, `QFINZERO_UPQ_URL` for `playground`
 
 ## Documentation
 
