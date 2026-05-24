@@ -4,7 +4,7 @@ Monitoring frontend for QFinZero data platform operations.
 
 ## Features
 
-- Health & status cards for UPQ / NPP / PMB
+- Health & status cards for UPQ / ESP / PMB
 - Freshness lag signals and stale detection
 - MongoDB news browser (query, detail JSON, export)
 - SQLite calendar browser (earnings/economic query, heatmap, export)
@@ -25,14 +25,14 @@ Open `http://127.0.0.1:19400`.
 By default this app connects to:
 
 - `UPQ_BASE_URL=http://127.0.0.1:19703`
-- `NPP_BASE_URL=http://127.0.0.1:19702`
+- `ESP_BASE_URL=http://127.0.0.1:19702`
 - `PMB_BASE_URL=http://127.0.0.1:19701`
 
 Override with env vars:
 
 ```bash
 UPQ_BASE_URL=http://127.0.0.1:19703 \
-NPP_BASE_URL=http://127.0.0.1:19702 \
+ESP_BASE_URL=http://127.0.0.1:19702 \
 PMB_BASE_URL=http://127.0.0.1:19701 \
 pnpm dev
 ```

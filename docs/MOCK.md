@@ -7,7 +7,7 @@
 | 服务 | 项目 ID | 说明 |
 |------|---------|------|
 | UPQ | 7841779 | Unified Price Query (价格查询服务) |
-| NPP | 7841780 | News Pushing Pipeline (新闻事件服务) |
+| ESP | 7841780 | News Pushing Pipeline (新闻事件服务) |
 | PMB | 7841781 | Paper Money Broker (模拟交易服务) |
 
 团队 ID: `3671673`
@@ -48,7 +48,7 @@ curl "https://m1.apifoxmock.com/m1/7841779-7590489-default/rates/query?start=202
 
 ---
 
-## NPP - 新闻事件服务
+## ESP - 新闻事件服务
 
 ### Mock 配置
 ```
@@ -59,36 +59,36 @@ Token: v5Y_OQpiEusEy9_viqRx-
 ### 接口列表
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/npp/health` | 健康检查 |
-| GET | `/npp/health/freshness` | 数据新鲜度 |
-| POST | `/npp/events/query` | 统一事件查询 |
-| GET | `/npp/events/{event_id}` | 获取单个事件 |
-| POST | `/npp/events/stream` | 增量事件轮询 |
-| POST | `/npp/triggers/next` | 获取即将到来的触发事件 |
-| POST | `/npp/calendar/econ` | 经济日历 |
-| POST | `/npp/calendar/earnings` | 财报日历 |
-| GET | `/npp/calendar/coverage` | 日历数据覆盖统计 |
-| GET | `/npp/news/{news_id}/body` | 获取完整新闻文章 |
-| POST | `/npp/news/search` | 搜索新闻 |
-| GET | `/npp/news/stats` | 新闻统计 |
-| GET | `/npp/news/export` | 导出新闻 |
-| GET | `/npp/calendar/earnings/export` | 导出财报数据 |
-| GET | `/npp/calendar/economic/export` | 导出经济数据 |
-| POST | `/npp/timeline` | 事件时间线 |
-| GET | `/npp/admin/sanity` | 数据质量检查 |
+| GET | `/esp/health` | 健康检查 |
+| GET | `/esp/health/freshness` | 数据新鲜度 |
+| POST | `/esp/events/query` | 统一事件查询 |
+| GET | `/esp/events/{event_id}` | 获取单个事件 |
+| POST | `/esp/events/stream` | 增量事件轮询 |
+| POST | `/esp/triggers/next` | 获取即将到来的触发事件 |
+| POST | `/esp/calendar/econ` | 经济日历 |
+| POST | `/esp/calendar/earnings` | 财报日历 |
+| GET | `/esp/calendar/coverage` | 日历数据覆盖统计 |
+| GET | `/esp/news/{news_id}/body` | 获取完整新闻文章 |
+| POST | `/esp/news/search` | 搜索新闻 |
+| GET | `/esp/news/stats` | 新闻统计 |
+| GET | `/esp/news/export` | 导出新闻 |
+| GET | `/esp/calendar/earnings/export` | 导出财报数据 |
+| GET | `/esp/calendar/economic/export` | 导出经济数据 |
+| POST | `/esp/timeline` | 事件时间线 |
+| GET | `/esp/admin/sanity` | 数据质量检查 |
 
 ### 使用示例
 ```bash
 # 健康检查
-curl "https://m1.apifoxmock.com/m1/7841780-7590490-default/npp/health?apifoxToken=v5Y_OQpiEusEy9_viqRx-"
+curl "https://m1.apifoxmock.com/m1/7841780-7590490-default/esp/health?apifoxToken=v5Y_OQpiEusEy9_viqRx-"
 
 # 查询即将到来的事件
-curl -X POST "https://m1.apifoxmock.com/m1/7841780-7590490-default/npp/events/query?apifoxToken=v5Y_OQpiEusEy9_viqRx-" \
+curl -X POST "https://m1.apifoxmock.com/m1/7841780-7590490-default/esp/events/query?apifoxToken=v5Y_OQpiEusEy9_viqRx-" \
   -H "Content-Type: application/json" \
   -d '{"mode": "upcoming", "horizon_minutes": 120}'
 
 # 获取触发事件
-curl -X POST "https://m1.apifoxmock.com/m1/7841780-7590490-default/npp/triggers/next?apifoxToken=v5Y_OQpiEusEy9_viqRx-" \
+curl -X POST "https://m1.apifoxmock.com/m1/7841780-7590490-default/esp/triggers/next?apifoxToken=v5Y_OQpiEusEy9_viqRx-" \
   -H "Content-Type: application/json" \
   -d '{"tickers": ["AAPL"], "min_importance": "high"}'
 ```
@@ -227,8 +227,8 @@ data = response.json()
 ## 相关文档
 
 - [UPQ API 文档](./upq/README.md)
-- [NPP API 文档](./npp/README.md)
+- [ESP API 文档](./esp/README.md)
 - [PMB API 文档](./pmb/README.md)
 - [UPQ OpenAPI](./upq/openapi.yaml)
-- [NPP OpenAPI](./npp/openapi.yaml)
+- [ESP OpenAPI](./esp/openapi.yaml)
 - [PMB OpenAPI](./pmb/openapi.yaml)

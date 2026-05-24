@@ -1,4 +1,4 @@
-from qfinzero.clients.npp import NPPClient
+from qfinzero.clients.esp import ESPClient
 from qfinzero.clients.upq import UPQClient
 import pprint
 import json
@@ -124,8 +124,8 @@ def get_option_chain(ticker, current_date):
 
     
 def main():
-    npp = NPPClient()
-    result = npp.earnings_calendar(
+    esp = ESPClient()
+    result = esp.earnings_calendar(
         start_date="2025-01-01",
         end_date="2025-12-31",
         tickers=qqq_top_10_tickers, 

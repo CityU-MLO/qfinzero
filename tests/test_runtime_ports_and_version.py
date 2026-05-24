@@ -45,7 +45,7 @@ def test_default_port_allocation(monkeypatch):
     for env_name in [
         "QFZ_HOST",
         "PMB_PORT",
-        "NPP_PORT",
+        "ESP_PORT",
         "UPQ_PORT",
         "DASHBOARD_PORT",
         "PLAYGROUND_PORT",
@@ -57,11 +57,11 @@ def test_default_port_allocation(monkeypatch):
     assert config.DEFAULT_HOST == "127.0.0.1"
     assert config.DASHBOARD_PORT == 19700
     assert config.PMB_PORT == 19701
-    assert config.NPP_PORT == 19702
+    assert config.ESP_PORT == 19702
     assert config.UPQ_PORT == 19703
     assert config.PLAYGROUND_PORT == 19704
     assert config.PMB_URL == "http://127.0.0.1:19701"
-    assert config.NPP_URL == "http://127.0.0.1:19702"
+    assert config.ESP_URL == "http://127.0.0.1:19702"
     assert config.UPQ_URL == "http://127.0.0.1:19703"
     assert config.PLAYGROUND_URL == "http://127.0.0.1:19704"
 
@@ -97,8 +97,8 @@ def test_pmb_health_includes_standard_version(monkeypatch):
     }
 
 
-def test_npp_health_includes_standard_version(monkeypatch):
-    module = _load_module("npp_health_route_test", "infra/npp/routes/health.py")
+def test_esp_health_includes_standard_version(monkeypatch):
+    module = _load_module("esp_health_route_test", "infra/esp/routes/health.py")
     monkeypatch.setattr(module, "qfinzero_version", lambda: "qfinzero:deadbee", raising=False)
 
     class DummySources:
@@ -112,7 +112,7 @@ def test_npp_health_includes_standard_version(monkeypatch):
     payload = asyncio.run(module.health(request))
 
     assert payload["status"] == "ok"
-    assert payload["service"] == "npp"
+    assert payload["service"] == "esp"
     assert payload["version"] == "qfinzero:deadbee"
     assert payload["data_freshness"] == {"news": {"latest_timestamp": "2026-03-26T00:00:00Z"}}
 

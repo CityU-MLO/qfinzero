@@ -12,7 +12,7 @@ QFinZero unifies price data, event/news retrieval, and brokerage simulation behi
 
 ## Abstract
 
-Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (NPP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
+Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (ESP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
 
 ## Services
 
@@ -20,7 +20,7 @@ Large language model (LLM) agents are increasingly applied to financial decision
 |---------|-----------|------|-------------|
 | **Dashboard Web** | Next.js monitoring frontend | 19700 | Status dashboard and web UI for service browsing and playground access |
 | **PMB** | Paper Money Broker | 19701 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
-| **NPP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
+| **ESP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
 | **UPQ** | Unified Price Query | 19703 | Multi-resolution stock, option, and rates data (Rust/Axum) |
 | **Playground** | Agent playground service | 19704 | LLM agent backend used by the web playground UI |
 
@@ -30,7 +30,7 @@ Large language model (LLM) agents are increasingly applied to financial decision
 |------|---------|------------------|
 | `19700` | Dashboard Web | `http://127.0.0.1:19700/` |
 | `19701` | PMB | `http://127.0.0.1:19701/v1/health` |
-| `19702` | NPP | `http://127.0.0.1:19702/npp/health` |
+| `19702` | ESP | `http://127.0.0.1:19702/esp/health` |
 | `19703` | UPQ | `http://127.0.0.1:19703/health` |
 | `19704` | Playground | `http://127.0.0.1:19704/health` |
 
@@ -43,13 +43,13 @@ Large language model (LLM) agents are increasingly applied to financial decision
          │              │              │
          v              v              v
     ┌─────────┐    ┌─────────┐    ┌─────────┐
-    │   UPQ   │    │   NPP   │    │   PMB   │
+    │   UPQ   │    │   ESP   │    │   PMB   │
     │ Client  │    │ Client  │    │ Client  │
     └────┬────┘    └────┬────┘    └────┬────┘
          │              │              │
          v              v              v
     ┌─────────┐    ┌─────────┐    ┌─────────┐
-    │   UPQ   │    │   NPP   │    │   PMB   │
+    │   UPQ   │    │   ESP   │    │   PMB   │
     │ :19703  │    │ :19702  │    │ :19701  │
     └─────────┘    └────┬────┘    └────┬────┘
          ▲              │              │
@@ -67,14 +67,14 @@ Large language model (LLM) agents are increasingly applied to financial decision
 
 **Unified Price Query (UPQ)** provides multi-resolution price data (minute and daily bars) for equities, options (OPRA), and treasury yields through a single API. Agents query structured market states without handling vendor-specific formatting.
 
-**News Pushing Pipeline (NPP)** aggregates news articles (MongoDB), earnings calendars (Benzinga), and US economic events (NASDAQ) into a canonical event schema. Supports three query modes: upcoming events, recently occurred events, and arbitrary time windows. All times normalized to UTC.
+**News Pushing Pipeline (ESP)** aggregates news articles (MongoDB), earnings calendars (Benzinga), and US economic events (NASDAQ) into a canonical event schema. Supports three query modes: upcoming events, recently occurred events, and arbitrary time windows. All times normalized to UTC.
 
 **Paper Money Broker (PMB)** is a step-driven brokerage simulator supporting market/limit/stop orders, margin accounts, and explicit order lifecycle (pending, filled, canceled). Time advances only when the agent calls `step`, enabling deterministic replay.
 
 ### Service Dependencies
 
 - **PMB -> UPQ**: PMB fetches market data from UPQ at session creation.
-- **NPP -> MongoDB + SQLite**: NPP reads from three local data sources.
+- **ESP -> MongoDB + SQLite**: ESP reads from three local data sources.
 - **UPQ** is fully independent.
 
 ## Installation
@@ -87,7 +87,7 @@ This installs the `qfinzero` package with all client libraries:
 
 ```python
 from qfinzero.clients.upq import UPQClient
-from qfinzero.clients.npp import NPPClient
+from qfinzero.clients.esp import ESPClient
 from qfinzero.clients.pmb import PMBClient
 ```
 
@@ -99,7 +99,7 @@ Ports default to `19700` to `19704`. Override them with environment variables, o
 
 ```bash
 ./scripts/run_all.sh           # start all
-./scripts/run_all.sh pmb npp   # start specific services
+./scripts/run_all.sh pmb esp   # start specific services
 ./scripts/status.sh            # check what's running
 ./scripts/stop_all.sh          # stop all
 ```
@@ -113,7 +113,7 @@ pnpm install --no-frozen-lockfile
 pnpm build
 PORT=19700 \
 PMB_BASE_URL=http://127.0.0.1:19701 \
-NPP_BASE_URL=http://127.0.0.1:19702 \
+ESP_BASE_URL=http://127.0.0.1:19702 \
 UPQ_BASE_URL=http://127.0.0.1:19703 \
 PLAYGROUND_SERVICE_URL=http://127.0.0.1:19704 \
 pnpm start
@@ -125,11 +125,11 @@ cargo build --release
 STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 # curl http://127.0.0.1:19703/health
 
-# NPP (Python)
-cd infra/npp
+# ESP (Python)
+cd infra/esp
 pip install -r requirements.txt
 python main.py
-# curl http://127.0.0.1:19702/npp/health
+# curl http://127.0.0.1:19702/esp/health
 
 # PMB (Python — requires UPQ running)
 cd infra/pmb
@@ -137,12 +137,12 @@ pip install -r requirements.txt
 python main.py
 # curl http://127.0.0.1:19701/v1/health
 
-# Playground (Python — expects PMB/NPP/UPQ running)
+# Playground (Python — expects PMB/ESP/UPQ running)
 cd infra/playground
 pip install -r requirements.txt
 PLAYGROUND_PORT=19704 \
 QFINZERO_PMB_URL=http://127.0.0.1:19701 \
-QFINZERO_NPP_URL=http://127.0.0.1:19702 \
+QFINZERO_ESP_URL=http://127.0.0.1:19702 \
 QFINZERO_UPQ_URL=http://127.0.0.1:19703 \
 python main.py
 # curl http://127.0.0.1:19704/health
@@ -161,7 +161,7 @@ pnpm dev
 
 ```python
 from qfinzero.clients.upq import UPQClient
-from qfinzero.clients.npp import NPPClient
+from qfinzero.clients.esp import ESPClient
 from qfinzero.clients.pmb import PMBClient
 
 # Price data
@@ -169,10 +169,10 @@ with UPQClient() as upq:
     bars = upq.stock_daily(["AAPL", "NVDA"], "2025-01-06", "2025-01-31")
 
 # News and events
-with NPPClient() as npp:
-    events = npp.query_events(mode="upcoming", horizon_minutes=120)
-    earnings = npp.earnings_calendar(tickers=["AAPL"], start_date="2025-01-01", end_date="2025-03-31")
-    triggers = npp.next_triggers(tickers=["SPY", "QQQ"], min_importance="high")
+with ESPClient() as esp:
+    events = esp.query_events(mode="upcoming", horizon_minutes=120)
+    earnings = esp.earnings_calendar(tickers=["AAPL"], start_date="2025-01-01", end_date="2025-03-31")
+    triggers = esp.next_triggers(tickers=["SPY", "QQQ"], min_importance="high")
 
 # Paper trading
 with PMBClient() as pmb:
@@ -195,21 +195,21 @@ qfinzero/
 │   └── config.py               # Global port/path configuration
 ├── clients/                    # Client libraries
 │   ├── upq/                    #   UPQ Python client
-│   ├── npp/                    #   NPP Python client
+│   ├── esp/                    #   ESP Python client
 │   └── pmb/                    #   PMB Python client
 ├── infra/                      # Service implementations
 │   ├── upq/                    #   UPQ server (Rust workspace)
-│   ├── npp/                    #   NPP server (FastAPI)
+│   ├── esp/                    #   ESP server (FastAPI)
 │   ├── pmb/                    #   PMB server (FastAPI)
 │   ├── playground/             #   Playground backend (FastAPI / LangGraph)
 │   └── dashboard-web/          #   Next.js frontend
 ├── demos/                      # Usage examples
 │   ├── upq/                    #   Price query demos
-│   ├── npp/                    #   Event query demos
+│   ├── esp/                    #   Event query demos
 │   └── pmb/                    #   Paper trading demos
 ├── docs/                       # Service documentation
 │   ├── upq/                    #   UPQ API docs + OpenAPI
-│   ├── npp/                    #   NPP API docs + OpenAPI
+│   ├── esp/                    #   ESP API docs + OpenAPI
 │   └── pmb/                    #   PMB API docs + OpenAPI
 ├── .env.example                # Example local overrides
 ├── data/                       # Local databases
@@ -242,20 +242,20 @@ cp .env.example .env
 |---------|------|-------------|
 | Dashboard Web | 19700 | `DASHBOARD_PORT` |
 | PMB | 19701 | `PMB_PORT` |
-| NPP | 19702 | `NPP_PORT` |
+| ESP | 19702 | `ESP_PORT` |
 | UPQ | 19703 | `UPQ_PORT` (service reads `PORT`) |
 | Playground | 19704 | `PLAYGROUND_PORT` |
 
 Related service URL overrides:
 
-- `PMB_BASE_URL`, `NPP_BASE_URL`, `UPQ_BASE_URL` for `dashboard-web`
+- `PMB_BASE_URL`, `ESP_BASE_URL`, `UPQ_BASE_URL` for `dashboard-web`
 - `PLAYGROUND_SERVICE_URL` for the web playground proxy
-- `QFINZERO_PMB_URL`, `QFINZERO_NPP_URL`, `QFINZERO_UPQ_URL` for `playground`
+- `QFINZERO_PMB_URL`, `QFINZERO_ESP_URL`, `QFINZERO_UPQ_URL` for `playground`
 
 ## Documentation
 
 - [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
-- [NPP API Reference](docs/npp/README.md) | [Agent Guide](docs/npp/agent-guide.md) | [OpenAPI](docs/npp/openapi.yaml)
+- [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
 - [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
 
 ## License

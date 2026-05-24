@@ -8,7 +8,7 @@ from typing import AsyncIterator
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from config import MCP_SERVER_PATH, UPQ_URL, NPP_URL, PMB_URL
+from config import MCP_SERVER_PATH, UPQ_URL, ESP_URL, PMB_URL
 
 
 def get_mcp_server_params() -> StdioServerParameters:
@@ -19,7 +19,7 @@ def get_mcp_server_params() -> StdioServerParameters:
         env={
             **os.environ,
             "QFINZERO_UPQ_URL": UPQ_URL,
-            "QFINZERO_NPP_URL": NPP_URL,
+            "QFINZERO_ESP_URL": ESP_URL,
             "QFINZERO_PMB_URL": PMB_URL,
         },
     )

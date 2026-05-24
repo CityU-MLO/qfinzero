@@ -8,7 +8,7 @@
 
 ## Overview
 
-Add a **Playground** page to the QFinZero dashboard — a chatbot-style interface where users configure an LLM provider (model, API key, base URL), set an "as-of date" for historical context, and type natural language queries. The system invokes QFinZero tools (UPQ/NPP/PMB) via a LangGraph ReAct agent and streams both tool call details and the final answer back to the UI.
+Add a **Playground** page to the QFinZero dashboard — a chatbot-style interface where users configure an LLM provider (model, API key, base URL), set an "as-of date" for historical context, and type natural language queries. The system invokes QFinZero tools (UPQ/ESP/PMB) via a LangGraph ReAct agent and streams both tool call details and the final answer back to the UI.
 
 ---
 
@@ -19,7 +19,7 @@ Add a **Playground** page to the QFinZero dashboard — a chatbot-style interfac
 - Natural language input → LangGraph agent → tool calls → streamed response
 - UI shows: tool name called, input parameters, returned data (expandable JSON), and final LLM answer
 - Multi-turn conversation within a session (history passed per request; agent is stateless)
-- All 29 MCP tools available: UPQ (7), NPP (9), PMB (13)
+- All 29 MCP tools available: UPQ (7), ESP (9), PMB (13)
 
 ---
 
@@ -157,7 +157,7 @@ PLAYGROUND_SERVICE_URL=http://localhost:19310
 
 ### Service Startup
 
-Add `infra/playground/main.py` to `scripts/run_all.sh` alongside UPQ/NPP/PMB.
+Add `infra/playground/main.py` to `scripts/run_all.sh` alongside UPQ/ESP/PMB.
 
 ### Navbar
 

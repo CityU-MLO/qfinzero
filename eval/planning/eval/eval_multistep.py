@@ -83,14 +83,14 @@ TOOL_ENDPOINT_MAP: dict[str, str] = {
     "UPQ.option.chain_query":  "/option/chain_query",
     "UPQ.option.ticker_query": "/option/ticker_query",
     "UPQ.rates.query":         "/rates/query",
-    "NPP.events.query":        "/npp/events/query",
-    "NPP.events.get":          "/npp/events/{event_id}",
-    "NPP.events.stream":       "/npp/events/stream",
-    "NPP.triggers.next":       "/npp/triggers/next",
-    "NPP.timeline":            "/npp/timeline",
-    "NPP.calendar.econ":       "/npp/calendar/econ",
-    "NPP.calendar.earnings":   "/npp/calendar/earnings",
-    "NPP.news.body":           "/npp/news/{news_id}/body",
+    "ESP.events.query":        "/esp/events/query",
+    "ESP.events.get":          "/esp/events/{event_id}",
+    "ESP.events.stream":       "/esp/events/stream",
+    "ESP.triggers.next":       "/esp/triggers/next",
+    "ESP.timeline":            "/esp/timeline",
+    "ESP.calendar.econ":       "/esp/calendar/econ",
+    "ESP.calendar.earnings":   "/esp/calendar/earnings",
+    "ESP.news.body":           "/esp/news/{news_id}/body",
     "PMB.account.positions":   "/v1/accounts/{account_id}/positions",
     "PMB.account.orders":      "/v1/accounts/{account_id}/orders",
     "PMB.account.trades":      "/v1/accounts/{account_id}/trades",
@@ -110,14 +110,14 @@ TOOL_METHOD_MAP: dict[str, str] = {
     "UPQ.option.chain_query":  "GET",
     "UPQ.option.ticker_query": "GET",
     "UPQ.rates.query":         "GET",
-    "NPP.events.query":        "POST",
-    "NPP.events.get":          "GET",
-    "NPP.events.stream":       "POST",
-    "NPP.triggers.next":       "POST",
-    "NPP.timeline":            "POST",
-    "NPP.calendar.econ":       "POST",
-    "NPP.calendar.earnings":   "POST",
-    "NPP.news.body":           "GET",
+    "ESP.events.query":        "POST",
+    "ESP.events.get":          "GET",
+    "ESP.events.stream":       "POST",
+    "ESP.triggers.next":       "POST",
+    "ESP.timeline":            "POST",
+    "ESP.calendar.econ":       "POST",
+    "ESP.calendar.earnings":   "POST",
+    "ESP.news.body":           "GET",
     "PMB.account.positions":   "GET",
     "PMB.account.orders":      "GET",
     "PMB.account.trades":      "GET",
@@ -281,11 +281,11 @@ def _score_params(pred_args: dict, required_params: dict) -> tuple[float, list[s
 # Tool name matching
 # ---------------------------------------------------------------------------
 def _tool_family(tool_name: str) -> str:
-    """Return UPQ / NPP / PMB / UNKNOWN."""
+    """Return UPQ / ESP / PMB / UNKNOWN."""
     if tool_name.startswith("UPQ"):
         return "UPQ"
-    if tool_name.startswith("NPP"):
-        return "NPP"
+    if tool_name.startswith("ESP"):
+        return "ESP"
     if tool_name.startswith("PMB"):
         return "PMB"
     return "UNKNOWN"

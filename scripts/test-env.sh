@@ -2,9 +2,9 @@
 # test-env.sh — Manage qfinzero test services on the remote qlib server
 #
 # Usage:
-#   ./scripts/test-env.sh start   [pmb|npp|upq|web|playground]   — git pull, build if needed, then start
-#   ./scripts/test-env.sh stop    [pmb|npp|upq|web|playground]   — stop service(s)
-#   ./scripts/test-env.sh restart [pmb|npp|upq|web|playground]   — stop then start
+#   ./scripts/test-env.sh start   [pmb|esp|upq|web|playground]   — git pull, build if needed, then start
+#   ./scripts/test-env.sh stop    [pmb|esp|upq|web|playground]   — stop service(s)
+#   ./scripts/test-env.sh restart [pmb|esp|upq|web|playground]   — stop then start
 #   ./scripts/test-env.sh status                                  — show all services status
 #
 # Options:
@@ -12,7 +12,7 @@
 #
 # Services run on the remote host accessible via `ssh qlib`.
 #   PMB         19701  /home/qlib/qfinzero/infra/pmb          (Python)
-#   NPP         19702  /home/qlib/qfinzero/infra/npp          (Python)
+#   ESP         19702  /home/qlib/qfinzero/infra/esp          (Python)
 #   UPQ         19703  /home/qlib/qfinzero/infra/upq          (Rust binary)
 #   PLAYGROUND  19704  /home/qlib/qfinzero/infra/playground   (Python / LangGraph)
 #   WEB         19700  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
@@ -30,7 +30,7 @@ LOG_DIR="/tmp/efan"
 PID_DIR="/tmp/efan"
 
 PMB_PORT=19701
-NPP_PORT=19702
+ESP_PORT=19702
 UPQ_PORT=19703
 PLAYGROUND_PORT=19704
 WEB_PORT=19700
@@ -39,12 +39,12 @@ PYTHON="/home/qlib/miniconda3/bin/python3.13"
 WEB_DIR="$REMOTE_ROOT/infra/dashboard-web"
 
 PMB_DIR="$REMOTE_ROOT/infra/pmb"
-NPP_DIR="$REMOTE_ROOT/infra/npp"
+ESP_DIR="$REMOTE_ROOT/infra/esp"
 UPQ_DIR="$REMOTE_ROOT/infra/upq"
 PLAYGROUND_DIR="$REMOTE_ROOT/infra/playground"
 
 PMB_HEALTH="http://127.0.0.1:${PMB_PORT}/v1/health"
-NPP_HEALTH="http://127.0.0.1:${NPP_PORT}/npp/health"
+ESP_HEALTH="http://127.0.0.1:${ESP_PORT}/esp/health"
 UPQ_HEALTH="http://127.0.0.1:${UPQ_PORT}/health"
 PLAYGROUND_HEALTH="http://127.0.0.1:${PLAYGROUND_PORT}/health"
 WEB_HEALTH="http://127.0.0.1:${WEB_PORT}"
@@ -172,7 +172,7 @@ fi
 if [ "\$NEEDS_BUILD" = '1' ]; then
     echo 'Running: pnpm build ...'
     PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
-    NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
+    ESP_BASE_URL=http://127.0.0.1:${ESP_PORT} \
     UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
     pnpm build
     echo 'Next.js build complete.'
@@ -221,18 +221,18 @@ echo \$! > '${pid_file}'
 echo "PMB started with PID \$(cat '${pid_file}')"
 EOF
             ;;
-        npp)
+        esp)
             remote_run <<EOF
 set -e
 mkdir -p '${LOG_DIR}'
-cd '${NPP_DIR}'
-nohup env NPP_PORT=${NPP_PORT} \
-    NPP_MONGO_URI=mongodb://localhost:27017 \
-    NPP_EARNINGS_DB=/home/qlib/news/benzinga_earnings.sqlite3 \
-    NPP_ECON_EVENTS_DB=/home/qlib/news/nasdaq_econ_events.sqlite3 \
+cd '${ESP_DIR}'
+nohup env ESP_PORT=${ESP_PORT} \
+    ESP_MONGO_URI=mongodb://localhost:27017 \
+    ESP_EARNINGS_DB=/home/qlib/news/benzinga_earnings.sqlite3 \
+    ESP_ECON_EVENTS_DB=/home/qlib/news/nasdaq_econ_events.sqlite3 \
     ${PYTHON} main.py > '${log_file}' 2>&1 &
 echo \$! > '${pid_file}'
-echo "NPP started with PID \$(cat '${pid_file}')"
+echo "ESP started with PID \$(cat '${pid_file}')"
 EOF
             ;;
         upq)
@@ -255,7 +255,7 @@ mkdir -p '${LOG_DIR}'
 cd '${WEB_DIR}'
 nohup env PORT=${WEB_PORT} \
     PMB_BASE_URL=http://127.0.0.1:${PMB_PORT} \
-    NPP_BASE_URL=http://127.0.0.1:${NPP_PORT} \
+    ESP_BASE_URL=http://127.0.0.1:${ESP_PORT} \
     UPQ_BASE_URL=http://127.0.0.1:${UPQ_PORT} \
     PLAYGROUND_SERVICE_URL=http://127.0.0.1:${PLAYGROUND_PORT} \
     node_modules/.bin/next start -p ${WEB_PORT} > '${log_file}' 2>&1 &
@@ -270,7 +270,7 @@ mkdir -p '${LOG_DIR}'
 cd '${PLAYGROUND_DIR}'
 nohup env PLAYGROUND_PORT=${PLAYGROUND_PORT} \
     QFINZERO_UPQ_URL=http://127.0.0.1:${UPQ_PORT} \
-    QFINZERO_NPP_URL=http://127.0.0.1:${NPP_PORT} \
+    QFINZERO_ESP_URL=http://127.0.0.1:${ESP_PORT} \
     QFINZERO_PMB_URL=http://127.0.0.1:${PMB_PORT} \
     ${PYTHON} main.py > '${log_file}' 2>&1 &
 echo \$! > '${pid_file}'
@@ -287,7 +287,7 @@ EOF
     local health_url
     case "$svc" in
         pmb)        health_url="$PMB_HEALTH" ;;
-        npp)        health_url="$NPP_HEALTH" ;;
+        esp)        health_url="$ESP_HEALTH" ;;
         upq)        health_url="$UPQ_HEALTH" ;;
         playground) health_url="$PLAYGROUND_HEALTH" ;;
         web)        health_url="$WEB_HEALTH" ;;
@@ -369,13 +369,13 @@ EOF
 show_status() {
     section "Service Status"
 
-    for svc in pmb npp upq playground web; do
+    for svc in pmb esp upq playground web; do
         local port health_url log_file pid_file
         pid_file="${PID_DIR}/${svc}.pid"
         log_file="${LOG_DIR}/${svc}.log"
         case "$svc" in
             pmb)        port=$PMB_PORT;        health_url="$PMB_HEALTH" ;;
-            npp)        port=$NPP_PORT;        health_url="$NPP_HEALTH" ;;
+            esp)        port=$ESP_PORT;        health_url="$ESP_HEALTH" ;;
             upq)        port=$UPQ_PORT;        health_url="$UPQ_HEALTH" ;;
             playground) port=$PLAYGROUND_PORT; health_url="$PLAYGROUND_HEALTH" ;;
             web)        port=$WEB_PORT;        health_url="$WEB_HEALTH" ;;
@@ -454,9 +454,9 @@ usage() {
     echo "  -b <branch>   Use specific git branch (default: main)"
     echo ""
     echo "Commands:"
-    echo "  start   [pmb|npp|upq|playground|web]   — git pull, build if needed, then start"
-    echo "  stop    [pmb|npp|upq|playground|web]   — stop service(s)"
-    echo "  restart [pmb|npp|upq|playground|web]   — stop then start (with git pull + rebuild)"
+    echo "  start   [pmb|esp|upq|playground|web]   — git pull, build if needed, then start"
+    echo "  stop    [pmb|esp|upq|playground|web]   — stop service(s)"
+    echo "  restart [pmb|esp|upq|playground|web]   — stop then start (with git pull + rebuild)"
     echo "  status                                  — show all services status"
     echo ""
     echo "Omit [service] to target all five services."
@@ -469,9 +469,9 @@ usage() {
 
 resolve_services() {
     case "${1:-}" in
-        pmb|npp|upq|playground|web) echo "$1" ;;
-        "")              echo "pmb npp upq playground web" ;;
-        *)               error "Unknown service: '${1}'. Valid: pmb, npp, upq, playground, web"; exit 1 ;;
+        pmb|esp|upq|playground|web) echo "$1" ;;
+        "")              echo "pmb esp upq playground web" ;;
+        *)               error "Unknown service: '${1}'. Valid: pmb, esp, upq, playground, web"; exit 1 ;;
     esac
 }
 

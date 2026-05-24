@@ -18,12 +18,12 @@ export const SERVICES: ServiceConfig[] = [
     apiToken: process.env.PMB_API_TOKEN,
   },
   {
-    name: "NPP",
-    baseUrl: process.env.NPP_BASE_URL ?? "http://127.0.0.1:19702",
-    healthPath: "/npp/health",
+    name: "ESP",
+    baseUrl: process.env.ESP_BASE_URL ?? "http://127.0.0.1:19702",
+    healthPath: "/esp/health",
     statsPath: "/_stats",
-    freshnessPath: "/npp/health/freshness",
-    apiToken: process.env.NPP_API_TOKEN,
+    freshnessPath: "/esp/health/freshness",
+    apiToken: process.env.ESP_API_TOKEN,
   },
   {
     name: "UPQ",
@@ -34,8 +34,8 @@ export const SERVICES: ServiceConfig[] = [
   },
 ];
 
-export const NPP_BASE_URL = process.env.NPP_BASE_URL ?? "http://127.0.0.1:19702";
-export const NPP_API_TOKEN = process.env.NPP_API_TOKEN;
+export const ESP_BASE_URL = process.env.ESP_BASE_URL ?? "http://127.0.0.1:19702";
+export const ESP_API_TOKEN = process.env.ESP_API_TOKEN;
 export const STATUS_REFRESH_MS = Number(process.env.NEXT_PUBLIC_STATUS_REFRESH_MS ?? "15000");
 
 export function extractPort(baseUrl: string): string | null {

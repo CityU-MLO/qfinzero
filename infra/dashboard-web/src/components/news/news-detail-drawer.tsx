@@ -5,14 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { JsonViewer } from "@/components/news/json-viewer";
 import { formatDateTime } from "@/lib/time";
-import type { NewsBodyResponse, NppEvent } from "@/lib/types";
+import type { NewsBodyResponse, EspEvent } from "@/lib/types";
 
 export function NewsDetailDrawer({
   selected,
   article,
   onClose,
 }: {
-  selected: NppEvent | null;
+  selected: EspEvent | null;
   article: NewsBodyResponse | null;
   onClose: () => void;
 }) {

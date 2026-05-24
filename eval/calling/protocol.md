@@ -14,7 +14,7 @@ accuracy benchmark.
 - Python 3.10+
 - `pip install httpx pyyaml`
 - Access to model endpoints (API keys or local vLLM servers)
-- (Optional, for live mode) Running QFinZero services (UPQ, NPP, PMB)
+- (Optional, for live mode) Running QFinZero services (UPQ, ESP, PMB)
 
 ## Step-by-step Protocol
 
@@ -137,7 +137,7 @@ The provided benchmark.jsonl contains 45 cases. To reach 80:
 | Intraday datetime (minute bars) | ±5 minutes |
 | Daily date boundaries | ±1 calendar day |
 | "Past N trading days" conversions | ±2 calendar days |
-| horizon_minutes for NPP queries | ±30 minutes |
+| horizon_minutes for ESP queries | ±30 minutes |
 | Exact dates explicitly stated | exact match |
 | Numeric param values | relative tolerance 0.01% |
 | String params | case-insensitive match |

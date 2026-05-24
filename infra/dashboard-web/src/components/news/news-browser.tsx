@@ -8,7 +8,7 @@ import { NewsSearchPanel } from "@/components/news/news-search-panel";
 import { NewsStatsCharts } from "@/components/news/news-stats-charts";
 import { NewsTable } from "@/components/news/news-table";
 import { Button } from "@/components/ui/button";
-import type { NewsBodyResponse, NewsStatsResponse, NppEvent, PaginatedEventsResponse } from "@/lib/types";
+import type { NewsBodyResponse, NewsStatsResponse, EspEvent, PaginatedEventsResponse } from "@/lib/types";
 
 type NewsFilters = {
   tickers: string;
@@ -70,17 +70,17 @@ export function NewsBrowser() {
   const [result, setResult] = React.useState<PaginatedEventsResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [selected, setSelected] = React.useState<NppEvent | null>(null);
+  const [selected, setSelected] = React.useState<EspEvent | null>(null);
 
   const stats = useQuery({
     queryKey: ["news-stats", 7],
-    queryFn: () => getJson<NewsStatsResponse>("/api/npp/news/stats?days=7"),
+    queryFn: () => getJson<NewsStatsResponse>("/api/esp/news/stats?days=7"),
   });
 
   const bodyQuery = useQuery({
     queryKey: ["news-body", selected?.source_id],
     enabled: Boolean(selected?.source_id),
-    queryFn: () => getJson<NewsBodyResponse>(`/api/npp/news/body/${encodeURIComponent(selected?.source_id ?? "")}`),
+    queryFn: () => getJson<NewsBodyResponse>(`/api/esp/news/body/${encodeURIComponent(selected?.source_id ?? "")}`),
   });
 
   const runSearch = React.useCallback(
@@ -99,7 +99,7 @@ export function NewsBrowser() {
           cursor,
         };
 
-        const data = await postJson<PaginatedEventsResponse>("/api/npp/news/search", payload);
+        const data = await postJson<PaginatedEventsResponse>("/api/esp/news/search", payload);
         setResult(data);
         if (!cursor) {
           setSelected(data.events[0] ?? null);
@@ -186,12 +186,12 @@ export function NewsBrowser() {
 
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline">
-          <a href={`/api/npp/news/export?format=jsonl${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
+          <a href={`/api/esp/news/export?format=jsonl${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
             Export JSONL
           </a>
         </Button>
         <Button asChild variant="outline">
-          <a href={`/api/npp/news/export?format=csv${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
+          <a href={`/api/esp/news/export?format=csv${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
             Export CSV
           </a>
         </Button>

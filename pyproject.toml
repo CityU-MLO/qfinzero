@@ -18,7 +18,7 @@ packages = [
     "qfinzero.clients",
     "qfinzero.clients.pmb",
     "qfinzero.clients.upq",
-    "qfinzero.clients.npp",
+    "qfinzero.clients.esp",
 ]
 
 [tool.setuptools.package-dir]
@@ -26,4 +26,4 @@ packages = [
 "qfinzero.clients" = "clients"
 "qfinzero.clients.pmb" = "clients/pmb"
 "qfinzero.clients.upq" = "clients/upq"
-"qfinzero.clients.npp" = "clients/npp"
+"qfinzero.clients.esp" = "clients/esp"

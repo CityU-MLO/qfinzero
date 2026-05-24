@@ -1,20 +1,20 @@
 """
-Demo: News & Events via MCP (NPP tools)
+Demo: News & Events via MCP (ESP tools)
 
 Shows how an external system or LLM connects to QFinZero through the MCP
-server and calls NPP tools to query market-moving events.
+server and calls ESP tools to query market-moving events.
 
 Covers:
-  - npp_health
-  - npp_query_events     — unified event search (upcoming / window modes)
-  - npp_econ_calendar    — macro economic events
-  - npp_earnings_calendar— earnings releases
-  - npp_next_triggers    — get agent wakeup triggers
-  - npp_stream_events    — incremental cursor-based polling
-  - npp_timeline         — time-bucketed event summary
+  - esp_health
+  - esp_query_events     — unified event search (upcoming / window modes)
+  - esp_econ_calendar    — macro economic events
+  - esp_earnings_calendar— earnings releases
+  - esp_next_triggers    — get agent wakeup triggers
+  - esp_stream_events    — incremental cursor-based polling
+  - esp_timeline         — time-bucketed event summary
 
 Prerequisites:
-  - NPP running on http://127.0.0.1:19702
+  - ESP running on http://127.0.0.1:19702
   - MCP server deps: pip install "mcp[cli]>=1.0.0"
 
 Usage:
@@ -50,8 +50,8 @@ async def main():
             await session.initialize()
 
             # ── Health check ──────────────────────────────────────────────
-            health = await call(session, "npp_health")
-            print(f"NPP health: {health.get('status')}")
+            health = await call(session, "esp_health")
+            print(f"ESP health: {health.get('status')}")
             print(f"Data freshness: {health.get('data_freshness', {})}\n")
 
             # ── 1. Upcoming events (replay mode) ──────────────────────────
@@ -61,7 +61,7 @@ async def main():
             print(f"=== Upcoming Events (next 24h from {NOW[:10]}) ===\n")
 
             result = await call(
-                session, "npp_query_events",
+                session, "esp_query_events",
                 mode="upcoming",
                 horizon_minutes=1440,
                 limit=10,
@@ -82,7 +82,7 @@ async def main():
             print("\n=== Window Query (2025-01-06, earnings only) ===\n")
 
             result = await call(
-                session, "npp_query_events",
+                session, "esp_query_events",
                 mode="window",
                 start_utc="2025-01-06T00:00:00Z",
                 end_utc="2025-01-07T00:00:00Z",
@@ -107,7 +107,7 @@ async def main():
             total = 0
             for page_num in range(1, 4):
                 result = await call(
-                    session, "npp_query_events",
+                    session, "esp_query_events",
                     mode="window",
                     start_utc="2025-01-06T00:00:00Z",
                     end_utc="2025-01-10T00:00:00Z",
@@ -129,7 +129,7 @@ async def main():
 
             if cursor:
                 streamed = await call(
-                    session, "npp_stream_events",
+                    session, "esp_stream_events",
                     cursor=cursor,
                     limit=5,
                     now_utc=NOW,
@@ -144,7 +144,7 @@ async def main():
             print("\n=== Economic Calendar (Jan 2025, high importance) ===\n")
 
             econ = await call(
-                session, "npp_econ_calendar",
+                session, "esp_econ_calendar",
                 start_date="2025-01-06",
                 end_date="2025-01-31",
                 min_importance="high",
@@ -163,7 +163,7 @@ async def main():
             print("\n=== Earnings Calendar (Jan 2025, AAPL / MSFT / NVDA) ===\n")
 
             earnings = await call(
-                session, "npp_earnings_calendar",
+                session, "esp_earnings_calendar",
                 start_date="2025-01-01",
                 end_date="2025-02-28",
                 tickers=["AAPL", "MSFT", "NVDA"],
@@ -179,7 +179,7 @@ async def main():
             print("\n=== Next Triggers (agent wakeup events) ===\n")
 
             triggers = await call(
-                session, "npp_next_triggers",
+                session, "esp_next_triggers",
                 tickers=["AAPL", "MSFT", "NVDA", "SPY"],
                 min_importance="high",
                 horizon_minutes=2880,   # next 2 days
@@ -198,7 +198,7 @@ async def main():
             print("\n=== Event Timeline for AAPL (2025-01-06, hourly buckets) ===\n")
 
             timeline = await call(
-                session, "npp_timeline",
+                session, "esp_timeline",
                 tickers=["AAPL"],
                 start_utc="2025-01-06T00:00:00Z",
                 end_utc="2025-01-07T00:00:00Z",

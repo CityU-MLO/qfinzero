@@ -20,7 +20,7 @@ sqlite:
 services:
   upq:
     base_url: "http://127.0.0.1:19703"   # Unified Price Query
-  npp:
+  esp:
     base_url: "http://127.0.0.1:19702"   # News Pushing Pipeline
   pmb:
     base_url: "http://127.0.0.1:19701"   # Paper Money Broker

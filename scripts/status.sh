@@ -28,7 +28,7 @@ load_env_defaults "$ROOT_DIR/config/qfinzero.env"
 : "${QFZ_HOST:=127.0.0.1}"
 : "${DASHBOARD_PORT:=19700}"
 : "${PMB_PORT:=19701}"
-: "${NPP_PORT:=19702}"
+: "${ESP_PORT:=19702}"
 : "${UPQ_PORT:=19703}"
 
 GREEN='\033[0;32m'
@@ -44,7 +44,7 @@ check() {
     local name=$1 port=$2
     if curl -s "http://$QFZ_HOST:$port" > /dev/null 2>&1 || \
        curl -s "http://$QFZ_HOST:$port/health" > /dev/null 2>&1 || \
-       curl -s "http://$QFZ_HOST:$port/npp/health" > /dev/null 2>&1 || \
+       curl -s "http://$QFZ_HOST:$port/esp/health" > /dev/null 2>&1 || \
        curl -s "http://$QFZ_HOST:$port/v1/health" > /dev/null 2>&1; then
         echo -e "  $name  :$port  ${GREEN}UP${NC}"
     else
@@ -53,6 +53,6 @@ check() {
 }
 
 check "PMB" "$PMB_PORT"
-check "NPP" "$NPP_PORT"
+check "ESP" "$ESP_PORT"
 check "UPQ" "$UPQ_PORT"
 echo ""

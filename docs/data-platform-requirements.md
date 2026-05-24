@@ -11,7 +11,7 @@
 | 功能模块 | 完成度 | 优先级 | 状态 |
 |---------|-------|-------|------|
 | 1. 组件状态页 (Health & Status) | 90% | 🔴 高 | ✅ 基础实现 + Freshness集成 |
-| 2. 数据新鲜度与覆盖 | 90% | 🔴 高 | ✅ UPQ/NPP Freshness端点完成 |
+| 2. 数据新鲜度与覆盖 | 90% | 🔴 高 | ✅ UPQ/ESP Freshness端点完成 |
 | 3. MongoDB内容浏览器 (News) | 80% | 🟡 中 | ✅ Search/Stats/Export API完成 |
 | 4. SQLite内容浏览器 (Calendar) | 80% | 🟡 中 | ✅ Coverage/Export API完成 |
 | 5. 数据一致性检查 | 80% | 🟡 中 | ✅ Sanity Check API完成 |
@@ -24,7 +24,7 @@
 ## 1️⃣ 组件状态页 (Health & Status)
 
 ### 目标
-对 UPQ / NPP / PMB + DB（Mongo/SQLite）做统一状态卡片：
+对 UPQ / ESP / PMB + DB（Mongo/SQLite）做统一状态卡片：
 
 - ✅ health check（/health 或 ping）
 - ✅ 端口 / base url
@@ -40,11 +40,11 @@
 
 **Health Check 端点**:
 - **UPQ** (Rust): `GET /health` → `{"status": "ok"}`
-- **NPP** (Python): `GET /npp/health` → 返回服务状态 + 数据新鲜度
+- **ESP** (Python): `GET /esp/health` → 返回服务状态 + 数据新鲜度
 - **PMB** (Python): `GET /v1/health` → 返回服务状态
 
 **Dashboard 监控** (`infra/dashboard/main.py`):
-- 实时状态卡片（PMB/NPP/UPQ）
+- 实时状态卡片（PMB/ESP/UPQ）
 - Uptime显示（格式: Xh Ym）
 - 总请求数 / 总错误数 / 活跃请求数
 - 端点级延迟统计（p50/p95/p99/RPM）
@@ -58,7 +58,7 @@
 - 最近60秒RPM计算
 
 **Dashboard Freshness集成** (`infra/dashboard/main.py`):
-- NPP和UPQ的freshness数据自动拉取并展示
+- ESP和UPQ的freshness数据自动拉取并展示
 - Data Freshness表格: Source / Latest / Records / Keys
 - 每5秒自动刷新freshness信息
 
@@ -66,7 +66,7 @@
 
 | 需求 | 当前状态 | 缺失说明 |
 |-----|---------|---------|
-| 版本信息 | 仅NPP返回硬编码版本 | UPQ/PMB未返回，无git commit信息 |
+| 版本信息 | 仅ESP返回硬编码版本 | UPQ/PMB未返回，无git commit信息 |
 | Stale状态 | 后端返回时间戳 | 前端需实现阈值判断和警告展示 |
 
 #### ❌ 未实现
@@ -79,7 +79,7 @@
 ```
 infra/dashboard/main.py          # Dashboard服务
 qfinzero/metrics.py              # FastAPI metrics中间件
-infra/npp/routes/health.py       # NPP health端点
+infra/esp/routes/health.py       # ESP health端点
 infra/upq/crates/upq-service/src/app.rs  # UPQ health端点
 infra/pmb/routes/health.py       # PMB health端点
 ```
@@ -115,7 +115,7 @@ infra/pmb/routes/health.py       # PMB health端点
 
 ---
 
-### 2.2 NPP (新闻数据)
+### 2.2 ESP (新闻数据)
 
 #### 需求
 - 最新 published_utc
@@ -127,21 +127,21 @@ infra/pmb/routes/health.py       # PMB health端点
 
 **✅ 已实现**
 
-1. `GET /npp/health/freshness` — 统一Freshness Schema端点
+1. `GET /esp/health/freshness` — 统一Freshness Schema端点
    - news: latest_timestamp, record_count, unique_keys (tickers), unique_key_label
    - earnings: latest_date, latest_timestamp, record_count, unique_keys (tickers)
    - econ_events: latest_timestamp, record_count, unique_keys (event_types)
 
-2. `GET /npp/news/stats` — 每日新闻统计
+2. `GET /esp/news/stats` — 每日新闻统计
    - 按天统计新闻数量 (daily_counts)
    - Top tickers (前20), Top publishers (前10)
    - 去重率统计 (by_url, by_title)
    - 支持days参数 (1-90天回溯)
 
 **实现文件**:
-- `infra/npp/routes/health.py` — freshness端点
-- `infra/npp/routes/stats.py` — stats端点
-- `docs/npp/openapi.yaml` — OpenAPI spec已更新
+- `infra/esp/routes/health.py` — freshness端点
+- `infra/esp/routes/stats.py` — stats端点
+- `docs/esp/openapi.yaml` — OpenAPI spec已更新
 
 ---
 
@@ -156,22 +156,22 @@ infra/pmb/routes/health.py       # PMB health端点
 
 **✅ 已实现**
 
-1. `GET /npp/health/freshness` — 统一Freshness Schema
+1. `GET /esp/health/freshness` — 统一Freshness Schema
    - earnings: latest_date, record_count, unique_keys (tickers)
    - econ_events: latest_timestamp, record_count, unique_keys (event_types)
 
-2. `GET /npp/calendar/coverage?days=30` — 覆盖分析
+2. `GET /esp/calendar/coverage?days=30` — 覆盖分析
    - 按天统计事件数量 (daily_counts)
    - 缺失交易日检测 (missing_dates，基于工作日推算)
    - 按重要性统计 (HIGH/MEDIUM/LOW)
    - 按事件类型TOP10统计 (by_type_top10)
 
-3. `GET /npp/calendar/earnings/export` — 财报数据导出 (JSONL/CSV)
-4. `GET /npp/calendar/economic/export` — 经济事件导出 (JSONL/CSV)
+3. `GET /esp/calendar/earnings/export` — 财报数据导出 (JSONL/CSV)
+4. `GET /esp/calendar/economic/export` — 经济事件导出 (JSONL/CSV)
 
 **实现文件**:
-- `infra/npp/routes/calendar.py` — coverage端点 + export端点
-- `infra/npp/routes/health.py` — freshness端点
+- `infra/esp/routes/calendar.py` — coverage端点 + export端点
+- `infra/esp/routes/health.py` — freshness端点
 
 #### ⚠️ 部分缺失
 
@@ -207,12 +207,12 @@ infra/pmb/routes/health.py       # PMB health端点
 
 1. **单条新闻查询**
    ```
-   GET /npp/news/{news_id}/body
+   GET /esp/news/{news_id}/body
    ```
 
 2. **新闻搜索** (新增)
    ```
-   POST /npp/news/search
+   POST /esp/news/search
 
    Request:
    {
@@ -231,7 +231,7 @@ infra/pmb/routes/health.py       # PMB health端点
 
 3. **新闻统计** (新增)
    ```
-   GET /npp/news/stats?days=7
+   GET /esp/news/stats?days=7
    ```
    - daily_counts (按天新闻数)
    - top_tickers (前20), top_publishers (前10)
@@ -239,7 +239,7 @@ infra/pmb/routes/health.py       # PMB health端点
 
 4. **新闻导出** (新增)
    ```
-   GET /npp/news/export?format=jsonl&tickers=AAPL&start=...&end=...
+   GET /esp/news/export?format=jsonl&tickers=AAPL&start=...&end=...
    ```
    - 支持JSONL和CSV格式
    - StreamingResponse流式传输
@@ -247,7 +247,7 @@ infra/pmb/routes/health.py       # PMB health端点
 
 5. **通用事件查询**
    ```
-   POST /npp/events/query
+   POST /esp/events/query
    ```
 
 #### ⚠️ 缺失功能
@@ -257,12 +257,12 @@ infra/pmb/routes/health.py       # PMB health端点
 ### 相关文件
 
 ```
-infra/npp/routes/news.py           # News搜索 + 单条查询
-infra/npp/routes/stats.py          # 新闻统计
-infra/npp/routes/export.py         # JSONL/CSV导出
-infra/npp/routes/events.py         # 通用事件查询
-infra/npp/services/data_sources.py # MongoNewsSource (含search_news方法)
-infra/npp/models.py                # NewsSearchRequest模型
+infra/esp/routes/news.py           # News搜索 + 单条查询
+infra/esp/routes/stats.py          # 新闻统计
+infra/esp/routes/export.py         # JSONL/CSV导出
+infra/esp/routes/events.py         # 通用事件查询
+infra/esp/services/data_sources.py # MongoNewsSource (含search_news方法)
+infra/esp/models.py                # NewsSearchRequest模型
 ```
 
 ---
@@ -285,32 +285,32 @@ infra/npp/models.py                # NewsSearchRequest模型
 
 1. **Earnings查询**
    ```
-   POST /npp/calendar/earnings
+   POST /esp/calendar/earnings
    ```
 
 2. **Economic Events查询**
    ```
-   POST /npp/calendar/econ
+   POST /esp/calendar/econ
    ```
 
 3. **覆盖分析** (新增)
    ```
-   GET /npp/calendar/coverage?days=30
+   GET /esp/calendar/coverage?days=30
    ```
    - earnings: daily_counts, missing_dates, total_count
    - econ_events: daily_counts, missing_dates, by_importance, by_type_top10, total_count
 
 4. **数据导出** (新增)
    ```
-   GET /npp/calendar/earnings/export?format=csv&start=2025-01-01&end=2025-01-31
-   GET /npp/calendar/economic/export?format=jsonl
+   GET /esp/calendar/earnings/export?format=csv&start=2025-01-01&end=2025-01-31
+   GET /esp/calendar/economic/export?format=jsonl
    ```
    - 支持JSONL和CSV格式
    - 最大10,000条限制
 
 5. **时间线视图**
    ```
-   POST /npp/timeline
+   POST /esp/timeline
    ```
 
 #### ⚠️ 缺失功能
@@ -321,10 +321,10 @@ infra/npp/models.py                # NewsSearchRequest模型
 ### 相关文件
 
 ```
-infra/npp/routes/calendar.py       # Calendar路由 + coverage端点
-infra/npp/routes/export.py         # 导出路由
-infra/npp/routes/timeline.py       # Timeline路由
-infra/npp/services/data_sources.py # SQLiteEarningsSource, SQLiteEconEventsSource
+infra/esp/routes/calendar.py       # Calendar路由 + coverage端点
+infra/esp/routes/export.py         # 导出路由
+infra/esp/routes/timeline.py       # Timeline路由
+infra/esp/services/data_sources.py # SQLiteEarningsSource, SQLiteEconEventsSource
 ```
 
 ---
@@ -349,7 +349,7 @@ infra/npp/services/data_sources.py # SQLiteEarningsSource, SQLiteEconEventsSourc
 
 **✅ API已实现**
 
-`GET /npp/admin/sanity` — 数据质量检查端点
+`GET /esp/admin/sanity` — 数据质量检查端点
 
 **检查项**:
 1. **future_timestamps**: 检测published_utc在未来的新闻
@@ -381,9 +381,9 @@ infra/npp/services/data_sources.py # SQLiteEarningsSource, SQLiteEconEventsSourc
 ### 相关文件
 
 ```
-infra/npp/routes/admin.py            # Sanity check端点
-clients/npp/client.py                # sanity_check() 客户端方法
-docs/npp/openapi.yaml                # OpenAPI spec
+infra/esp/routes/admin.py            # Sanity check端点
+clients/esp/client.py                # sanity_check() 客户端方法
+docs/esp/openapi.yaml                # OpenAPI spec
 ```
 
 ---
@@ -422,7 +422,7 @@ docs/npp/openapi.yaml                # OpenAPI spec
 
 2. **监控API**:
    ```
-   GET /npp/admin/etl_status
+   GET /esp/admin/etl_status
    ```
 
 ---
@@ -441,15 +441,15 @@ qfinzero/metrics.py      # FastAPI metrics中间件
 
 ### Health端点
 ```
-infra/npp/routes/health.py       # NPP health
+infra/esp/routes/health.py       # ESP health
 infra/pmb/routes/health.py       # PMB health
 infra/upq/crates/upq-service/src/app.rs  # UPQ health
 ```
 
 ### 数据服务
 ```
-infra/npp/
-├── main.py                        # NPP主服务
+infra/esp/
+├── main.py                        # ESP主服务
 ├── routes/
 │   ├── news.py                    # News查询 + 搜索
 │   ├── stats.py                   # 新闻统计 (新增)
@@ -472,7 +472,7 @@ infra/upq/
 ### 客户端
 ```
 clients/
-├── npp/client.py          # NPP Python客户端
+├── esp/client.py          # ESP Python客户端
 ├── upq/client.py          # UPQ Python客户端
 └── pmb/client.py          # PMB Python客户端
 ```
@@ -514,10 +514,10 @@ clients/
 
 - ~~UPQ `/health/freshness` 端点~~ ✅
 - ~~Dashboard展示freshness数据~~ ✅
-- ~~NPP新闻搜索/统计/导出API~~ ✅
-- ~~NPP Calendar coverage + 导出~~ ✅
-- ~~NPP Sanity check API~~ ✅
-- ~~NPP/UPQ Freshness统一Schema~~ ✅
+- ~~ESP新闻搜索/统计/导出API~~ ✅
+- ~~ESP Calendar coverage + 导出~~ ✅
+- ~~ESP Sanity check API~~ ✅
+- ~~ESP/UPQ Freshness统一Schema~~ ✅
 - ~~客户端方法更新~~ ✅
 - ~~OpenAPI spec更新~~ ✅
 
@@ -527,7 +527,7 @@ clients/
 
 | 日期 | 变更内容 | 作者 |
 |-----|---------|------|
-| 2026-02-19 | 后端API全面更新：UPQ freshness、NPP search/stats/export/coverage/sanity、Dashboard freshness集成、OpenAPI spec重写 | Atlas |
+| 2026-02-19 | 后端API全面更新：UPQ freshness、ESP search/stats/export/coverage/sanity、Dashboard freshness集成、OpenAPI spec重写 | Atlas |
 | 2025-02-18 | 初始版本：分析当前实现状态，记录需求清单 | Atlas |
 
 ---

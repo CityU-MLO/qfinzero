@@ -3,12 +3,12 @@
 #
 # Usage:
 #   ./scripts/run_all.sh          # start all services
-#   ./scripts/run_all.sh pmb npp  # start specific services
+#   ./scripts/run_all.sh pmb esp  # start specific services
 #
 # Ports (defaults; override via environment or repo-root .env):
 #   DASHBOARD  19700   Next.js Dashboard (production)
 #   PMB        19701   Paper Money Broker
-#   NPP        19702   News Pushing Pipeline
+#   ESP        19702   News Pushing Pipeline
 #   UPQ        19703   Unified Price Query
 
 set -e
@@ -45,7 +45,7 @@ load_env_defaults "$ROOT_DIR/config/qfinzero.env"
 : "${QFZ_HOST:=127.0.0.1}"
 : "${DASHBOARD_PORT:=19700}"
 : "${PMB_PORT:=19701}"
-: "${NPP_PORT:=19702}"
+: "${ESP_PORT:=19702}"
 : "${UPQ_PORT:=19703}"
 
 # ── Color helpers ────────────────────────────────────────────────
@@ -68,12 +68,12 @@ start_pmb() {
     info "PMB started (PID: $(cat "$LOG_DIR/pmb.pid"))"
 }
 
-start_npp() {
-    info "Starting NPP (News Pushing Pipeline) on port $NPP_PORT..."
-    cd "$ROOT_DIR/infra/npp"
-    NPP_HOST="$QFZ_HOST" NPP_PORT="$NPP_PORT" python main.py > "$LOG_DIR/npp.log" 2>&1 &
-    echo $! > "$LOG_DIR/npp.pid"
-    info "NPP started (PID: $(cat "$LOG_DIR/npp.pid"))"
+start_esp() {
+    info "Starting ESP (News Pushing Pipeline) on port $ESP_PORT..."
+    cd "$ROOT_DIR/infra/esp"
+    ESP_HOST="$QFZ_HOST" ESP_PORT="$ESP_PORT" python main.py > "$LOG_DIR/esp.log" 2>&1 &
+    echo $! > "$LOG_DIR/esp.pid"
+    info "ESP started (PID: $(cat "$LOG_DIR/esp.pid"))"
 }
 
 start_upq() {
@@ -97,12 +97,12 @@ start_dashboard() {
     if [ ! -d ".next" ]; then
         warn "Next.js build not found. Running pnpm build first..."
         PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
-        NPP_BASE_URL="http://$QFZ_HOST:$NPP_PORT" \
+        ESP_BASE_URL="http://$QFZ_HOST:$ESP_PORT" \
         UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
         pnpm build
     fi
     PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
-    NPP_BASE_URL="http://$QFZ_HOST:$NPP_PORT" \
+    ESP_BASE_URL="http://$QFZ_HOST:$ESP_PORT" \
     UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
     node_modules/.bin/next start -p "$DASHBOARD_PORT" > "$LOG_DIR/dashboard.log" 2>&1 &
     echo $! > "$LOG_DIR/dashboard.pid"
@@ -112,7 +112,7 @@ start_dashboard() {
 
 # ── Main ─────────────────────────────────────────────────────────
 
-SERVICES="${@:-pmb npp upq dashboard}"
+SERVICES="${@:-pmb esp upq dashboard}"
 
 echo ""
 echo "=========================================="
@@ -123,10 +123,10 @@ echo ""
 for svc in $SERVICES; do
     case "$svc" in
         pmb) start_pmb ;;
-        npp) start_npp ;;
+        esp) start_esp ;;
         upq) start_upq ;;
         dashboard) start_dashboard ;;
-        *)   warn "Unknown service: $svc (valid: pmb, npp, upq, dashboard)" ;;
+        *)   warn "Unknown service: $svc (valid: pmb, esp, upq, dashboard)" ;;
     esac
 done
 
@@ -141,7 +141,7 @@ echo "Service Status:"
 for svc in $SERVICES; do
     case "$svc" in
         pmb) PORT="$PMB_PORT" ;;
-        npp) PORT="$NPP_PORT" ;;
+        esp) PORT="$ESP_PORT" ;;
         upq) PORT="$UPQ_PORT" ;;
         dashboard) PORT="$DASHBOARD_PORT" ;;
         *)   continue ;;

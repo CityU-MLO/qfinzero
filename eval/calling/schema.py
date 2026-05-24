@@ -106,46 +106,46 @@ Available QFinZero tools:
    Optional: tenors (str, comma-sep from: 1M,3M,1Y,2Y,5Y,10Y,30Y; default=all)
    Returns: Treasury yield curve data.
 
-=== NPP (News Pushing Pipeline) ===
-6. NPP.events.query
-   POST /npp/events/query
+=== ESP (News Pushing Pipeline) ===
+6. ESP.events.query
+   POST /esp/events/query
    Body: mode ("upcoming"|"just_happened"|"window"), event_types (list from: macro_calendar, earnings, breaking_news, daily_news)
    Optional: start_utc (ISO-UTC), end_utc (ISO-UTC), horizon_minutes (int), tickers (list), min_importance ("low"|"medium"|"high"), limit (int), cursor (str), view ("compact"|"full"), now_utc (ISO-UTC)
    Returns: list of events with pagination.
 
-7. NPP.events.get
-   GET /npp/events/{event_id}
+7. ESP.events.get
+   GET /esp/events/{event_id}
    Returns: single event by ID.
 
-8. NPP.events.stream
-   POST /npp/events/stream
+8. ESP.events.stream
+   POST /esp/events/stream
    Body: cursor (str), event_types (list), tickers (list), limit (int), now_utc (ISO-UTC)
    Returns: incremental event updates from cursor.
 
-9. NPP.triggers.next
-   POST /npp/triggers/next
+9. ESP.triggers.next
+   POST /esp/triggers/next
    Body: tickers (list), min_importance (str), horizon_minutes (int), limit (int), now_utc (ISO-UTC)
    Returns: next trigger events for agent wakeup.
 
-10. NPP.timeline
-    POST /npp/timeline
+10. ESP.timeline
+    POST /esp/timeline
     Body: tickers (list), start_utc (ISO-UTC), end_utc (ISO-UTC), bucket_minutes (int), now_utc (ISO-UTC)
     Returns: events bucketed by time interval.
 
-11. NPP.calendar.econ
-    POST /npp/calendar/econ
+11. ESP.calendar.econ
+    POST /esp/calendar/econ
     Body: start_date (date), end_date (date), min_importance ("low"|"medium"|"high")
     Optional: limit (int), cursor (str), now_utc (ISO-UTC)
     Returns: economic calendar events.
 
-12. NPP.calendar.earnings
-    POST /npp/calendar/earnings
+12. ESP.calendar.earnings
+    POST /esp/calendar/earnings
     Body: start_date (date), end_date (date)
     Optional: tickers (list), min_importance (int), limit (int), cursor (str), now_utc (ISO-UTC)
     Returns: earnings calendar events.
 
-13. NPP.news.body
-    GET /npp/news/{news_id}/body
+13. ESP.news.body
+    GET /esp/news/{news_id}/body
     Returns: full news article body.
 
 === PMB (Paper Money Broker) ===

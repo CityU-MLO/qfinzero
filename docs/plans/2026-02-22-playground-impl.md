@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a Playground page to the QFinZero dashboard — a chatbot UI where users configure an LLM provider, set an as-of date, type natural language queries, and watch a LangGraph ReAct agent invoke QFinZero tools (UPQ/NPP/PMB via MCP) in real time.
+**Goal:** Add a Playground page to the QFinZero dashboard — a chatbot UI where users configure an LLM provider, set an as-of date, type natural language queries, and watch a LangGraph ReAct agent invoke QFinZero tools (UPQ/ESP/PMB via MCP) in real time.
 
 **Architecture:** A new Python FastAPI service (`infra/playground/`, port 19310) runs a LangGraph ReAct agent that connects to `mcp/server.py` via stdio to load all 29 QFinZero tools. The Next.js dashboard adds a `/playground` page with a config panel (model/URL/key/date) and a streaming chat UI. The Next.js BFF proxies SSE from the Python service to the browser.
 
@@ -58,7 +58,7 @@ MCP_SERVER_PATH = str(PROJECT_ROOT / "mcp" / "server.py")
 
 # Backend service URLs (passed to MCP server via env)
 UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", "http://127.0.0.1:19703")
-NPP_URL = os.environ.get("QFINZERO_NPP_URL", "http://127.0.0.1:19702")
+ESP_URL = os.environ.get("QFINZERO_ESP_URL", "http://127.0.0.1:19702")
 PMB_URL = os.environ.get("QFINZERO_PMB_URL", "http://127.0.0.1:19701")
 
 REQUEST_TIMEOUT_S = int(os.environ.get("PLAYGROUND_TIMEOUT_S", "120"))
@@ -101,7 +101,7 @@ git commit -m "feat(playground): scaffold backend service with config and requir
 import sys
 from langchain_mcp_adapters.tools import MCPToolkit
 from mcp import StdioServerParameters
-from config import MCP_SERVER_PATH, UPQ_URL, NPP_URL, PMB_URL
+from config import MCP_SERVER_PATH, UPQ_URL, ESP_URL, PMB_URL
 
 
 def get_mcp_server_params() -> StdioServerParameters:
@@ -111,7 +111,7 @@ def get_mcp_server_params() -> StdioServerParameters:
         args=[MCP_SERVER_PATH],
         env={
             "QFINZERO_UPQ_URL": UPQ_URL,
-            "QFINZERO_NPP_URL": NPP_URL,
+            "QFINZERO_ESP_URL": ESP_URL,
             "QFINZERO_PMB_URL": PMB_URL,
         },
     )
@@ -141,7 +141,7 @@ async def main():
 asyncio.run(main())
 "
 ```
-Expected: `Loaded 29 tools` (or close to it) with tool names like `upq_stock_daily`, `npp_query_events`, etc.
+Expected: `Loaded 29 tools` (or close to it) with tool names like `upq_stock_daily`, `esp_query_events`, etc.
 
 **Step 3: Commit**
 
@@ -1082,7 +1082,7 @@ git commit -m "feat(playground): playground page, layout, and navbar entry"
 
 In separate terminals:
 ```bash
-# Terminal 1: QFinZero backend services (UPQ/NPP/PMB)
+# Terminal 1: QFinZero backend services (UPQ/ESP/PMB)
 bash scripts/run_all.sh
 
 # Terminal 2: Playground agent service

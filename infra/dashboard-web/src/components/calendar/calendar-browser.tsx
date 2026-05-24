@@ -10,7 +10,7 @@ import { CoverageHeatmap } from "@/components/calendar/coverage-heatmap";
 import { JsonViewer } from "@/components/news/json-viewer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { CoverageResponse, NppEvent, PaginatedEventsResponse } from "@/lib/types";
+import type { CoverageResponse, EspEvent, PaginatedEventsResponse } from "@/lib/types";
 
 async function postJson<T>(url: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(url, {
@@ -62,16 +62,16 @@ function splitTickers(input: string): string[] | undefined {
 export function CalendarBrowser() {
   const [mode, setMode] = React.useState<"earnings" | "econ">("earnings");
   const [filters, setFilters] = React.useState<CalendarFilters>(defaultFilters);
-  const [rows, setRows] = React.useState<NppEvent[]>([]);
+  const [rows, setRows] = React.useState<EspEvent[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [prevCursor, setPrevCursor] = React.useState<string | null>(null);
-  const [selected, setSelected] = React.useState<NppEvent | null>(null);
+  const [selected, setSelected] = React.useState<EspEvent | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const coverage = useQuery({
     queryKey: ["calendar-coverage", 60],
-    queryFn: () => getJson<CoverageResponse>("/api/npp/calendar/coverage?days=60"),
+    queryFn: () => getJson<CoverageResponse>("/api/esp/calendar/coverage?days=60"),
   });
 
   const runQuery = React.useCallback(
@@ -98,7 +98,7 @@ export function CalendarBrowser() {
                 cursor: nextCursor,
               };
 
-        const endpoint = mode === "earnings" ? "/api/npp/calendar/earnings" : "/api/npp/calendar/econ";
+        const endpoint = mode === "earnings" ? "/api/esp/calendar/earnings" : "/api/esp/calendar/econ";
         const data = await postJson<PaginatedEventsResponse>(endpoint, payload);
 
         setRows(data.events);
@@ -134,11 +134,11 @@ export function CalendarBrowser() {
       if (filters.tickers.trim()) {
         qs.set("ticker", filters.tickers.trim());
       }
-      return `/api/npp/calendar/earnings/export?format=csv${qs.toString() ? `&${qs.toString()}` : ""}`;
+      return `/api/esp/calendar/earnings/export?format=csv${qs.toString() ? `&${qs.toString()}` : ""}`;
     }
 
     qs.set("country", filters.country || "United States");
-    return `/api/npp/calendar/economic/export?format=csv${qs.toString() ? `&${qs.toString()}` : ""}`;
+    return `/api/esp/calendar/economic/export?format=csv${qs.toString() ? `&${qs.toString()}` : ""}`;
   }, [filters.country, filters.endDate, filters.startDate, filters.tickers, mode]);
 
   return (

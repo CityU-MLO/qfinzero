@@ -79,7 +79,7 @@ DEFAULT_TIMEOUT = 60  # seconds per model call
 DEFAULT_MAX_WORKERS = 4
 SERVICE_PORTS = {
     "UPQ": int(os.getenv("UPQ_PORT", "19703")),
-    "NPP": int(os.getenv("NPP_PORT", "19702")),
+    "ESP": int(os.getenv("ESP_PORT", "19702")),
     "PMB": int(os.getenv("PMB_PORT", "19701")),
 }
 

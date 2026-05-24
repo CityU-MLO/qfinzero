@@ -161,7 +161,7 @@ def attach_metrics(app, service_name: str) -> _MetricsStore:
 
     Args:
         app: FastAPI application instance
-        service_name: e.g. "pmb", "npp"
+        service_name: e.g. "pmb", "esp"
 
     Returns:
         The MetricsStore (useful for testing, usually ignored)

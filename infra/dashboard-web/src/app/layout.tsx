@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "QFinZero Data Platform Monitor",
-  description: "Health, freshness, and data browsing dashboard for UPQ/NPP/PMB",
+  description: "Health, freshness, and data browsing dashboard for UPQ/ESP/PMB",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

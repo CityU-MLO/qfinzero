@@ -47,7 +47,7 @@ import pytest
 
 # Mock base URLs — no real servers needed
 MOCK_UPQ_URL = "http://mock-upq:19703"
-MOCK_NPP_URL = "http://mock-npp:19702"
+MOCK_ESP_URL = "http://mock-esp:19702"
 MOCK_PMB_URL = "http://mock-pmb:19701"
 
 
@@ -55,7 +55,7 @@ MOCK_PMB_URL = "http://mock-pmb:19701"
 def mock_env(monkeypatch):
     """Patch env vars so MCP tools use mock URLs."""
     monkeypatch.setenv("QFINZERO_UPQ_URL", MOCK_UPQ_URL)
-    monkeypatch.setenv("QFINZERO_NPP_URL", MOCK_NPP_URL)
+    monkeypatch.setenv("QFINZERO_ESP_URL", MOCK_ESP_URL)
     monkeypatch.setenv("QFINZERO_PMB_URL", MOCK_PMB_URL)
 ```
 
@@ -534,33 +534,33 @@ git commit -m "test: add UPQ client unit tests with HTTP mocks"
 
 ---
 
-### Task 4: NPP Client Tests
+### Task 4: ESP Client Tests
 
 **Files:**
-- Create: `tests/test_npp_client.py`
+- Create: `tests/test_esp_client.py`
 
-**Context:** NPPClient (in `clients/npp/client.py`) uses both `_get()` and `_post()`. Key difference from UPQ: most methods use POST with JSON body (not GET with query params). URL prefix is `/npp/`.
+**Context:** ESPClient (in `clients/esp/client.py`) uses both `_get()` and `_post()`. Key difference from UPQ: most methods use POST with JSON body (not GET with query params). URL prefix is `/esp/`.
 
 **Step 1: Write the test file**
 
-Create `tests/test_npp_client.py`:
+Create `tests/test_esp_client.py`:
 
 ```python
-"""Tests for NPP client — HTTP-level mocks via responses library."""
+"""Tests for ESP client — HTTP-level mocks via responses library."""
 
 import json
 
 import pytest
 import responses
 
-from clients.npp.client import NPPClient, NPPError
+from clients.esp.client import ESPClient, ESPError
 
-MOCK_URL = "http://mock-npp:19702"
+MOCK_URL = "http://mock-esp:19702"
 
 
 @pytest.fixture
 def client():
-    c = NPPClient(MOCK_URL)
+    c = ESPClient(MOCK_URL)
     yield c
     c.close()
 
@@ -573,14 +573,14 @@ def client():
 class TestHealth:
     @responses.activate
     def test_health_happy_path(self, client):
-        responses.get(f"{MOCK_URL}/npp/health", json={"status": "ok", "version": "1.0"})
+        responses.get(f"{MOCK_URL}/esp/health", json={"status": "ok", "version": "1.0"})
         result = client.health()
         assert result["status"] == "ok"
 
     @responses.activate
     def test_health_error(self, client):
-        responses.get(f"{MOCK_URL}/npp/health", json={"message": "down"}, status=500)
-        with pytest.raises(NPPError) as exc:
+        responses.get(f"{MOCK_URL}/esp/health", json={"message": "down"}, status=500)
+        with pytest.raises(ESPError) as exc:
             client.health()
         assert exc.value.status_code == 500
 
@@ -594,13 +594,13 @@ class TestQueryEvents:
     @responses.activate
     def test_happy_path(self, client):
         body = {"server_time_utc": "2025-01-15T14:00:00Z", "events": [], "next_cursor": None}
-        responses.post(f"{MOCK_URL}/npp/events/query", json=body)
+        responses.post(f"{MOCK_URL}/esp/events/query", json=body)
         result = client.query_events(mode="upcoming")
         assert result["events"] == []
 
     @responses.activate
     def test_sends_correct_body(self, client):
-        responses.post(f"{MOCK_URL}/npp/events/query", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/events/query", json={"events": []})
         client.query_events(
             mode="window",
             start_utc="2025-01-15T00:00:00Z",
@@ -621,7 +621,7 @@ class TestQueryEvents:
 
     @responses.activate
     def test_optional_params_omitted(self, client):
-        responses.post(f"{MOCK_URL}/npp/events/query", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/events/query", json={"events": []})
         client.query_events(mode="upcoming")
         req_body = json.loads(responses.calls[0].request.body)
         assert "start_utc" not in req_body
@@ -642,14 +642,14 @@ class TestGetEvent:
     @responses.activate
     def test_happy_path(self, client):
         event = {"event_id": "ev123", "title": "FOMC Meeting"}
-        responses.get(f"{MOCK_URL}/npp/events/ev123", json=event)
+        responses.get(f"{MOCK_URL}/esp/events/ev123", json=event)
         result = client.get_event("ev123")
         assert result["event_id"] == "ev123"
 
     @responses.activate
     def test_not_found(self, client):
-        responses.get(f"{MOCK_URL}/npp/events/bad-id", json={"message": "not found"}, status=404)
-        with pytest.raises(NPPError) as exc:
+        responses.get(f"{MOCK_URL}/esp/events/bad-id", json={"message": "not found"}, status=404)
+        with pytest.raises(ESPError) as exc:
             client.get_event("bad-id")
         assert exc.value.status_code == 404
 
@@ -663,13 +663,13 @@ class TestStream:
     @responses.activate
     def test_happy_path(self, client):
         body = {"server_time_utc": "2025-01-15T14:00:00Z", "events": [{"event_id": "e1"}], "next_cursor": "cur2"}
-        responses.post(f"{MOCK_URL}/npp/events/stream", json=body)
+        responses.post(f"{MOCK_URL}/esp/events/stream", json=body)
         result = client.stream(cursor="cur1")
         assert result["next_cursor"] == "cur2"
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/events/stream", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/events/stream", json={"events": []})
         client.stream(cursor="cur1", event_types=["earnings"], tickers=["NVDA"], limit=10)
         req_body = json.loads(responses.calls[0].request.body)
         assert req_body["cursor"] == "cur1"
@@ -686,13 +686,13 @@ class TestEconCalendar:
     @responses.activate
     def test_happy_path(self, client):
         body = {"events": [{"title": "CPI"}]}
-        responses.post(f"{MOCK_URL}/npp/calendar/econ", json=body)
+        responses.post(f"{MOCK_URL}/esp/calendar/econ", json=body)
         result = client.econ_calendar(start_date="2025-01-01", end_date="2025-01-31")
         assert result["events"][0]["title"] == "CPI"
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/calendar/econ", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/calendar/econ", json={"events": []})
         client.econ_calendar(
             start_date="2025-01-01", end_date="2025-01-31",
             min_importance="high", limit=5,
@@ -712,13 +712,13 @@ class TestEarningsCalendar:
     @responses.activate
     def test_happy_path(self, client):
         body = {"events": [{"title": "AAPL Earnings"}]}
-        responses.post(f"{MOCK_URL}/npp/calendar/earnings", json=body)
+        responses.post(f"{MOCK_URL}/esp/calendar/earnings", json=body)
         result = client.earnings_calendar(tickers=["AAPL"])
         assert len(result["events"]) == 1
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/calendar/earnings", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/calendar/earnings", json={"events": []})
         client.earnings_calendar(
             start_date="2025-01-01", end_date="2025-03-31",
             tickers=["AAPL", "NVDA"], min_importance=3,
@@ -737,13 +737,13 @@ class TestNextTriggers:
     @responses.activate
     def test_happy_path(self, client):
         body = {"server_time_utc": "now", "triggers": [{"event_id": "e1"}]}
-        responses.post(f"{MOCK_URL}/npp/triggers/next", json=body)
+        responses.post(f"{MOCK_URL}/esp/triggers/next", json=body)
         result = client.next_triggers(tickers=["AAPL"])
         assert len(result["triggers"]) == 1
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/triggers/next", json={"triggers": []})
+        responses.post(f"{MOCK_URL}/esp/triggers/next", json={"triggers": []})
         client.next_triggers(tickers=["AAPL"], min_importance="high", horizon_minutes=60, limit=3)
         req_body = json.loads(responses.calls[0].request.body)
         assert req_body["tickers"] == ["AAPL"]
@@ -761,7 +761,7 @@ class TestNewsBody:
     @responses.activate
     def test_happy_path(self, client):
         body = {"news_id": "n1", "title": "Breaking news"}
-        responses.get(f"{MOCK_URL}/npp/news/n1/body", json=body)
+        responses.get(f"{MOCK_URL}/esp/news/n1/body", json=body)
         result = client.news_body("n1")
         assert result["title"] == "Breaking news"
 
@@ -775,13 +775,13 @@ class TestSearchNews:
     @responses.activate
     def test_happy_path(self, client):
         body = {"events": [{"title": "NVDA beats"}], "next_cursor": None}
-        responses.post(f"{MOCK_URL}/npp/news/search", json=body)
+        responses.post(f"{MOCK_URL}/esp/news/search", json=body)
         result = client.search_news(tickers=["NVDA"], keyword="beats")
         assert len(result["events"]) == 1
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/news/search", json={"events": []})
+        responses.post(f"{MOCK_URL}/esp/news/search", json={"events": []})
         client.search_news(
             tickers=["AAPL"],
             start_utc="2025-01-01T00:00:00Z",
@@ -806,13 +806,13 @@ class TestTimeline:
     @responses.activate
     def test_happy_path(self, client):
         body = {"buckets": [{"bucket_start_utc": "2025-01-15T14:00:00Z", "count": 3}]}
-        responses.post(f"{MOCK_URL}/npp/timeline", json=body)
+        responses.post(f"{MOCK_URL}/esp/timeline", json=body)
         result = client.timeline(tickers=["AAPL"])
         assert result["buckets"][0]["count"] == 3
 
     @responses.activate
     def test_body_params(self, client):
-        responses.post(f"{MOCK_URL}/npp/timeline", json={"buckets": []})
+        responses.post(f"{MOCK_URL}/esp/timeline", json={"buckets": []})
         client.timeline(
             tickers=["AAPL", "NVDA"],
             start_utc="2025-01-15T00:00:00Z",
@@ -832,32 +832,32 @@ class TestTimeline:
 class TestErrorHandling:
     @responses.activate
     def test_non_json_response(self, client):
-        responses.get(f"{MOCK_URL}/npp/health", body="bad gateway", status=502)
-        with pytest.raises(NPPError, match="Non-JSON response"):
+        responses.get(f"{MOCK_URL}/esp/health", body="bad gateway", status=502)
+        with pytest.raises(ESPError, match="Non-JSON response"):
             client.health()
 
     @responses.activate
     def test_error_preserves_code(self, client):
         responses.get(
-            f"{MOCK_URL}/npp/health",
+            f"{MOCK_URL}/esp/health",
             json={"message": "rate limited", "code": "RATE_LIMIT"},
             status=429,
         )
-        with pytest.raises(NPPError) as exc:
+        with pytest.raises(ESPError) as exc:
             client.health()
         assert exc.value.code == "RATE_LIMIT"
 ```
 
 **Step 2: Run tests**
 
-Run: `cd /Users/efan404/Codes/research/qfinzero && python -m pytest tests/test_npp_client.py -v`
+Run: `cd /Users/efan404/Codes/research/qfinzero && python -m pytest tests/test_esp_client.py -v`
 Expected: All tests PASS
 
 **Step 3: Commit**
 
 ```bash
-git add tests/test_npp_client.py
-git commit -m "test: add NPP client unit tests with HTTP mocks"
+git add tests/test_esp_client.py
+git commit -m "test: add ESP client unit tests with HTTP mocks"
 ```
 
 ---
@@ -867,7 +867,7 @@ git commit -m "test: add NPP client unit tests with HTTP mocks"
 **Files:**
 - Create: `tests/test_pmb_client.py`
 
-**Context:** PMBClient (in `clients/pmb/client.py`) differs from UPQ/NPP:
+**Context:** PMBClient (in `clients/pmb/client.py`) differs from UPQ/ESP:
 - URL prefix: `/v1` (via `_url()` method)
 - `get_positions/orders/trades` extract nested keys (e.g. `data.get("positions", [])`)
 - `step()` returns `StepResult` wrapper (not raw dict)
@@ -1234,7 +1234,7 @@ git commit -m "test: add PMB client unit tests with HTTP mocks"
 Key things to test:
 - Parameter forwarding from tool args to client methods
 - `json.dumps()` serialization of the return value
-- `npp_query_events` has date-to-UTC conversion logic (`start_date` → `start_utc`)
+- `esp_query_events` has date-to-UTC conversion logic (`start_date` → `start_utc`)
 - `pmb_create_session` builds `universe` dict from `stock_universe`/`option_universe`
 - `pmb_step_session` accesses `result._raw` (not the dict directly)
 
@@ -1263,19 +1263,19 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from tests.conftest import MOCK_UPQ_URL, MOCK_NPP_URL, MOCK_PMB_URL
+from tests.conftest import MOCK_UPQ_URL, MOCK_ESP_URL, MOCK_PMB_URL
 
 
 @pytest.fixture(autouse=True)
 def _patch_urls(monkeypatch):
     """Ensure all tools use mock URLs."""
     monkeypatch.setenv("QFINZERO_UPQ_URL", MOCK_UPQ_URL)
-    monkeypatch.setenv("QFINZERO_NPP_URL", MOCK_NPP_URL)
+    monkeypatch.setenv("QFINZERO_ESP_URL", MOCK_ESP_URL)
     monkeypatch.setenv("QFINZERO_PMB_URL", MOCK_PMB_URL)
     # Re-import to pick up patched env vars
     import mcp.server as srv
     monkeypatch.setattr(srv, "UPQ_URL", MOCK_UPQ_URL)
-    monkeypatch.setattr(srv, "NPP_URL", MOCK_NPP_URL)
+    monkeypatch.setattr(srv, "ESP_URL", MOCK_ESP_URL)
     monkeypatch.setattr(srv, "PMB_URL", MOCK_PMB_URL)
 
 
@@ -1351,29 +1351,29 @@ class TestUPQTools:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# NPP Tools
+# ESP Tools
 # ═══════════════════════════════════════════════════════════════════
 
 
-class TestNPPTools:
+class TestESPTools:
     @responses.activate
-    def test_npp_health(self):
-        responses.get(f"{MOCK_NPP_URL}/npp/health", json={"status": "ok"})
-        result = _srv().npp_health()
+    def test_esp_health(self):
+        responses.get(f"{MOCK_ESP_URL}/esp/health", json={"status": "ok"})
+        result = _srv().esp_health()
         assert json.loads(result)["status"] == "ok"
 
     @responses.activate
-    def test_npp_query_events(self):
+    def test_esp_query_events(self):
         body = {"events": [{"event_id": "e1"}]}
-        responses.post(f"{MOCK_NPP_URL}/npp/events/query", json=body)
-        result = _srv().npp_query_events(mode="upcoming")
+        responses.post(f"{MOCK_ESP_URL}/esp/events/query", json=body)
+        result = _srv().esp_query_events(mode="upcoming")
         assert len(json.loads(result)["events"]) == 1
 
     @responses.activate
-    def test_npp_query_events_date_conversion(self):
+    def test_esp_query_events_date_conversion(self):
         """start_date/end_date should be converted to start_utc/end_utc."""
-        responses.post(f"{MOCK_NPP_URL}/npp/events/query", json={"events": []})
-        _srv().npp_query_events(
+        responses.post(f"{MOCK_ESP_URL}/esp/events/query", json={"events": []})
+        _srv().esp_query_events(
             mode="window",
             start_date="2025-01-15",
             end_date="2025-01-16",
@@ -1383,10 +1383,10 @@ class TestNPPTools:
         assert req_body["end_utc"] == "2025-01-16T23:59:59+00:00"
 
     @responses.activate
-    def test_npp_query_events_start_utc_takes_precedence(self):
+    def test_esp_query_events_start_utc_takes_precedence(self):
         """If start_utc is provided, start_date should not override it."""
-        responses.post(f"{MOCK_NPP_URL}/npp/events/query", json={"events": []})
-        _srv().npp_query_events(
+        responses.post(f"{MOCK_ESP_URL}/esp/events/query", json={"events": []})
+        _srv().esp_query_events(
             mode="window",
             start_utc="2025-01-15T10:00:00Z",
             start_date="2025-01-15",
@@ -1395,51 +1395,51 @@ class TestNPPTools:
         assert req_body["start_utc"] == "2025-01-15T10:00:00Z"
 
     @responses.activate
-    def test_npp_get_event(self):
-        responses.get(f"{MOCK_NPP_URL}/npp/events/ev1", json={"event_id": "ev1"})
-        result = _srv().npp_get_event("ev1")
+    def test_esp_get_event(self):
+        responses.get(f"{MOCK_ESP_URL}/esp/events/ev1", json={"event_id": "ev1"})
+        result = _srv().esp_get_event("ev1")
         assert json.loads(result)["event_id"] == "ev1"
 
     @responses.activate
-    def test_npp_stream_events(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/events/stream", json={"events": []})
-        result = _srv().npp_stream_events(cursor="c1")
+    def test_esp_stream_events(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/events/stream", json={"events": []})
+        result = _srv().esp_stream_events(cursor="c1")
         assert json.loads(result)["events"] == []
 
     @responses.activate
-    def test_npp_econ_calendar(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/calendar/econ", json={"events": []})
-        result = _srv().npp_econ_calendar(start_date="2025-01-01")
+    def test_esp_econ_calendar(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/calendar/econ", json={"events": []})
+        result = _srv().esp_econ_calendar(start_date="2025-01-01")
         assert json.loads(result)["events"] == []
 
     @responses.activate
-    def test_npp_earnings_calendar(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/calendar/earnings", json={"events": []})
-        result = _srv().npp_earnings_calendar(tickers=["AAPL"])
+    def test_esp_earnings_calendar(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/calendar/earnings", json={"events": []})
+        result = _srv().esp_earnings_calendar(tickers=["AAPL"])
         assert json.loads(result)["events"] == []
 
     @responses.activate
-    def test_npp_next_triggers(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/triggers/next", json={"triggers": []})
-        result = _srv().npp_next_triggers(tickers=["AAPL"])
+    def test_esp_next_triggers(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/triggers/next", json={"triggers": []})
+        result = _srv().esp_next_triggers(tickers=["AAPL"])
         assert json.loads(result)["triggers"] == []
 
     @responses.activate
-    def test_npp_news_body(self):
-        responses.get(f"{MOCK_NPP_URL}/npp/news/n1/body", json={"title": "News"})
-        result = _srv().npp_news_body("n1")
+    def test_esp_news_body(self):
+        responses.get(f"{MOCK_ESP_URL}/esp/news/n1/body", json={"title": "News"})
+        result = _srv().esp_news_body("n1")
         assert json.loads(result)["title"] == "News"
 
     @responses.activate
-    def test_npp_search_news(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/news/search", json={"events": []})
-        result = _srv().npp_search_news(keyword="earnings")
+    def test_esp_search_news(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/news/search", json={"events": []})
+        result = _srv().esp_search_news(keyword="earnings")
         assert json.loads(result)["events"] == []
 
     @responses.activate
-    def test_npp_timeline(self):
-        responses.post(f"{MOCK_NPP_URL}/npp/timeline", json={"buckets": []})
-        result = _srv().npp_timeline(tickers=["AAPL"])
+    def test_esp_timeline(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/timeline", json={"buckets": []})
+        result = _srv().esp_timeline(tickers=["AAPL"])
         assert json.loads(result)["buckets"] == []
 
 

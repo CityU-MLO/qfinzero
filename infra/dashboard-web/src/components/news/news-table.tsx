@@ -4,7 +4,7 @@ import { ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { NppEvent } from "@/lib/types";
+import type { EspEvent } from "@/lib/types";
 
 function EmptyValue() {
   return <span className="text-muted-foreground/30">—</span>;
@@ -15,9 +15,9 @@ export function NewsTable({
   selectedId,
   onSelect,
 }: {
-  rows: NppEvent[];
+  rows: EspEvent[];
   selectedId: string | null;
-  onSelect: (event: NppEvent) => void;
+  onSelect: (event: EspEvent) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-white/70 shadow-sm">

@@ -6,7 +6,7 @@ export default function StatusPage() {
       <section>
         <h2 className="text-xl font-semibold">Health & Status</h2>
         <p className="text-sm text-muted-foreground">
-          Unified status cards for UPQ / NPP / PMB with freshness and request/error trend signals.
+          Unified status cards for UPQ / ESP / PMB with freshness and request/error trend signals.
         </p>
       </section>
       <StatusDashboard />

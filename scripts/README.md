@@ -19,7 +19,7 @@ Manages the five QFinZero services on the remote `qlib` server via SSH. Handles 
 
 # Start a specific service
 ./scripts/test-env.sh start pmb
-./scripts/test-env.sh start npp
+./scripts/test-env.sh start esp
 ./scripts/test-env.sh start upq
 ./scripts/test-env.sh start web
 ./scripts/test-env.sh start playground
@@ -37,7 +37,7 @@ Services and ports on qlib:
 | Service | Port | Description |
 |---|---|---|
 | PMB | 19701 | Paper Money Broker |
-| NPP | 19702 | News Pushing Pipeline |
+| ESP | 19702 | News Pushing Pipeline |
 | UPQ | 19703 | Unified Price Query (Rust) |
 | Playground | 19704 | LangGraph playground |
 | Web | 19700 | Next.js dashboard |
@@ -50,7 +50,7 @@ Starts all services locally (on the machine where the script runs). Used for loc
 
 ```bash
 ./scripts/run_all.sh           # start all
-./scripts/run_all.sh pmb npp   # start specific services
+./scripts/run_all.sh pmb esp   # start specific services
 ```
 
 ### `stop_all.sh` — Local service stop

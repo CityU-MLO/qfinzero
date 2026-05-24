@@ -11,7 +11,7 @@ Precedence:
 Port allocation:
     19700  Dashboard
     19701  PMB   Paper Money Broker
-    19702  NPP   News Pushing Pipeline
+    19702  ESP   News Pushing Pipeline
     19703  UPQ   Unified Price Query
     19704  Playground
 """
@@ -42,7 +42,7 @@ def _env_int(name: str, default: int) -> int:
 
 DASHBOARD_PORT = _env_int("DASHBOARD_PORT", 19700)
 PMB_PORT = _env_int("PMB_PORT", 19701)
-NPP_PORT = _env_int("NPP_PORT", 19702)
+ESP_PORT = _env_int("ESP_PORT", 19702)
 UPQ_PORT = _env_int("UPQ_PORT", 19703)
 PLAYGROUND_PORT = _env_int("PLAYGROUND_PORT", 19704)
 
@@ -53,7 +53,7 @@ DEFAULT_HOST = os.getenv("QFZ_HOST", "127.0.0.1")
 # ── Default base URLs ───────────────────────────────────────────
 
 PMB_URL = f"http://{DEFAULT_HOST}:{PMB_PORT}"
-NPP_URL = f"http://{DEFAULT_HOST}:{NPP_PORT}"
+ESP_URL = f"http://{DEFAULT_HOST}:{ESP_PORT}"
 UPQ_URL = f"http://{DEFAULT_HOST}:{UPQ_PORT}"
 PLAYGROUND_URL = f"http://{DEFAULT_HOST}:{PLAYGROUND_PORT}"
 

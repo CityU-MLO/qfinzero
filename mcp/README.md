@@ -1,7 +1,7 @@
 # QFinZero MCP Server
 
 Exposes all QFinZero tools as [MCP (Model Context Protocol)](https://modelcontextprotocol.io) tools,
-enabling Claude and other LLM systems to directly call the UPQ, NPP, and PMB services.
+enabling Claude and other LLM systems to directly call the UPQ, ESP, and PMB services.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "args": ["/path/to/qfinzero/mcp/server.py"],
       "env": {
         "QFINZERO_UPQ_URL": "http://127.0.0.1:19703",
-        "QFINZERO_NPP_URL": "http://127.0.0.1:19702",
+        "QFINZERO_ESP_URL": "http://127.0.0.1:19702",
         "QFINZERO_PMB_URL": "http://127.0.0.1:19701"
       }
     }
@@ -58,7 +58,7 @@ Service URLs can be set via environment variables:
 | Variable              | Default                   | Description         |
 |-----------------------|---------------------------|---------------------|
 | `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19703` | Market data service |
-| `QFINZERO_NPP_URL`   | `http://127.0.0.1:19702` | News/events service |
+| `QFINZERO_ESP_URL`   | `http://127.0.0.1:19702` | News/events service |
 | `QFINZERO_PMB_URL`   | `http://127.0.0.1:19701` | Trading broker      |
 
 ## Available Tools
@@ -75,19 +75,19 @@ Service URLs can be set via environment variables:
 | `upq_rates` | US Treasury yield rates |
 | `upq_make_opra` | Build an OPRA contract identifier string |
 
-### NPP — News & Events (8 tools)
+### ESP — News & Events (8 tools)
 
 | Tool | Description |
 |------|-------------|
-| `npp_health` | Check service health and data freshness |
-| `npp_query_events` | Unified event search (news, earnings, macro) |
-| `npp_get_event` | Fetch a single event by ID |
-| `npp_stream_events` | Incremental polling since a cursor |
-| `npp_econ_calendar` | US economic events calendar |
-| `npp_earnings_calendar` | Earnings release calendar |
-| `npp_next_triggers` | Next high-importance events for agent wakeup |
-| `npp_news_body` | Full article body |
-| `npp_timeline` | Time-bucketed event summary |
+| `esp_health` | Check service health and data freshness |
+| `esp_query_events` | Unified event search (news, earnings, macro) |
+| `esp_get_event` | Fetch a single event by ID |
+| `esp_stream_events` | Incremental polling since a cursor |
+| `esp_econ_calendar` | US economic events calendar |
+| `esp_earnings_calendar` | Earnings release calendar |
+| `esp_next_triggers` | Next high-importance events for agent wakeup |
+| `esp_news_body` | Full article body |
+| `esp_timeline` | Time-bucketed event summary |
 
 ### PMB — Paper Trading Broker (13 tools)
 
@@ -118,7 +118,7 @@ Service URLs can be set via environment variables:
 2. pmb_create_session   → get session_id
 3. loop:
    a. pmb_step_session  → advance clock, get market data + events
-   b. npp_query_events  → check news/earnings at current time
+   b. esp_query_events  → check news/earnings at current time
    c. upq_stock_daily   → get historical context if needed
    d. pmb_buy_stock / pmb_sell_stock  → place orders
    e. break if not is_running

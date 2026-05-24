@@ -6,10 +6,10 @@ import { ServiceCard } from "@/components/status/service-card";
 import type { ServiceStatusCard } from "@/lib/types";
 
 const sample: ServiceStatusCard = {
-  name: "NPP",
+  name: "ESP",
   baseUrl: "http://127.0.0.1:19702",
   port: "19702",
-  healthPath: "/npp/health",
+  healthPath: "/esp/health",
   state: "stale",
   version: "qfinzero:deadbee",
   uptimeSeconds: 100,
@@ -19,7 +19,7 @@ const sample: ServiceStatusCard = {
   health: { status: "ok" },
   stats: null,
   freshness: {
-    service: "npp",
+    service: "esp",
     checked_at: "2026-02-19T00:00:00Z",
     sources: {
       news: {

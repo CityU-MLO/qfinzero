@@ -10,10 +10,10 @@ import pytest
 from clients.upq.client import UPQClient
 from clients.pmb.client import StepResult
 
-# Allow importing from infra/npp without installing it as a package
-_NPP = os.path.join(os.path.dirname(__file__), "..", "infra", "npp")
-sys.path.insert(0, os.path.join(_NPP, "services"))
-sys.path.insert(0, _NPP)
+# Allow importing from infra/esp without installing it as a package
+_ESP = os.path.join(os.path.dirname(__file__), "..", "infra", "esp")
+sys.path.insert(0, os.path.join(_ESP, "services"))
+sys.path.insert(0, _ESP)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -134,7 +134,7 @@ class TestStepResult:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# NPP data_sources pure builder functions
+# ESP data_sources pure builder functions
 # ═══════════════════════════════════════════════════════════════════
 
 

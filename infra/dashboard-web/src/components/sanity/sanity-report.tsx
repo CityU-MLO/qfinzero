@@ -15,7 +15,7 @@ import type { SanityResponse } from "@/lib/types";
 type FilterStatus = "all" | "pass" | "warn" | "fail";
 
 async function fetchSanity(): Promise<SanityResponse> {
-  const response = await fetch("/api/npp/admin/sanity", { cache: "no-store" });
+  const response = await fetch("/api/esp/admin/sanity", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(await response.text());
   }

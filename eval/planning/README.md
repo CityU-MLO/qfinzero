@@ -1,7 +1,7 @@
 # QFinZero Multi-Step Planning Eval
 
 This folder contains the **planning** evaluation — 20 multi-step "episode" benchmarks
-that require the agent to chain calls across UPQ (prices), NPP (news/calendar), and
+that require the agent to chain calls across UPQ (prices), ESP (news/calendar), and
 PMB (paper trading broker).
 
 ```
@@ -45,7 +45,7 @@ Optionally, to run in **live mode** you need the QFinZero services running:
 ```bash
 # In separate terminals:
 python infra/upq/main.py      # UPQ on port 19703
-python infra/npp/main.py      # NPP on port 19702
+python infra/esp/main.py      # ESP on port 19702
 python infra/pmb/main.py      # PMB on port 19701
 ```
 
@@ -72,7 +72,7 @@ The model must return exactly one JSON object — no markdown, no extra text:
 {
   "plan": ["Step 1: find earnings date", "Step 2: fetch prices", ...],
   "tool_calls": [
-    {"step_id": "s1", "tool": "NPP.calendar.earnings", "args": {"start_date": "2025-01-01", "end_date": "2025-03-31", "tickers": ["AAPL"]}},
+    {"step_id": "s1", "tool": "ESP.calendar.earnings", "args": {"start_date": "2025-01-01", "end_date": "2025-03-31", "tickers": ["AAPL"]}},
     {"step_id": "s2", "tool": "UPQ.stock.daily",        "args": {"tickers": "AAPL", "start": "2025-01-22", "end": "2025-01-30"}},
     {"step_id": "s3", "tool": "PMB.order.place",        "args": {"session_id": "sess-xxx", "account_id": "acct-yyy", "order": {...}}}
   ],
@@ -170,7 +170,7 @@ In live mode:
 | Intraday datetime (minute bars) | ±5 minutes |
 | Daily date boundaries | ±1 calendar day |
 | "N trading days" conversions | ±2 calendar days |
-| NPP horizon_minutes | ±60 minutes |
+| ESP horizon_minutes | ±60 minutes |
 | Exact dates (explicitly stated) | exact match |
 | Numeric param values | relative ±0.01% |
 | String params | case-insensitive |
@@ -181,32 +181,32 @@ In live mode:
 
 | ID | Title | Difficulty | Pipelines | Recovery? |
 |----|-------|------------|-----------|-----------|
-| ms-001 | Earnings-Aware Put Protection (AAPL) | medium | NPP + UPQ + PMB | — |
-| ms-002 | NVDA Momentum Scan + Limit Entry | hard | NPP + UPQ price + UPQ rates + PMB | — |
-| ms-003 | Live Portfolio Price Refresh | medium | PMB × 2 + UPQ + NPP | — |
+| ms-001 | Earnings-Aware Put Protection (AAPL) | medium | ESP + UPQ + PMB | — |
+| ms-002 | NVDA Momentum Scan + Limit Entry | hard | ESP + UPQ price + UPQ rates + PMB | — |
+| ms-003 | Live Portfolio Price Refresh | medium | PMB × 2 + UPQ + ESP | — |
 | ms-004 | Covered Call Writing on AAPL | hard | UPQ price + UPQ options + PMB × 2 | — |
-| ms-005 | TSLA Weekend Date Recovery | hard | UPQ + NPP + PMB | ✓ |
-| ms-006 | MSFT Earnings Straddle Setup | hard | NPP + UPQ + PMB × 2 | — |
+| ms-005 | TSLA Weekend Date Recovery | hard | UPQ + ESP + PMB | ✓ |
+| ms-006 | MSFT Earnings Straddle Setup | hard | ESP + UPQ + PMB × 2 | — |
 | ms-007 | Cancel-Replace NVDA Limit Order | hard | PMB × 3 + UPQ | — |
-| ms-008 | Rate-Sensitive Macro Context | medium | UPQ rates + UPQ daily + NPP + PMB | — |
-| ms-009 | FOMC Event via Econ Calendar | hard | NPP × 3 + UPQ + PMB | ✓ |
+| ms-008 | Rate-Sensitive Macro Context | medium | UPQ rates + UPQ daily + ESP + PMB | — |
+| ms-009 | FOMC Event via Econ Calendar | hard | ESP × 3 + UPQ + PMB | ✓ |
 | ms-010 | Session Tick + Near-Expiry Options | hard | PMB × 3 + UPQ options + UPQ daily | — |
 
 ### qfinzero_multistep_10b.jsonl — Local-data focus (ms-011–ms-020)
 
-New endpoints introduced: `UPQ.option.ticker_query`, `NPP.timeline`, `NPP.triggers.next`,
-`NPP.events.stream`, `NPP.news.body`, `PMB.account.trades`, `PMB.order.modify`,
+New endpoints introduced: `UPQ.option.ticker_query`, `ESP.timeline`, `ESP.triggers.next`,
+`ESP.events.stream`, `ESP.news.body`, `PMB.account.trades`, `PMB.order.modify`,
 `PMB.session.export`. New tickers: `JPM`, `BAC`, `GS`.
 
 | ID | Title | Difficulty | New Endpoints | Recovery? |
 |----|-------|------------|---------------|-----------|
-| ms-011 | JPM Q4 Earnings — News Body Read + Buy | medium | NPP.news.body | — |
+| ms-011 | JPM Q4 Earnings — News Body Read + Buy | medium | ESP.news.body | — |
 | ms-012 | GS Near-Expiry Option Ticker Query | hard | UPQ.option.ticker_query | — |
-| ms-013 | TSLA News Timeline + Protective Put | hard | NPP.timeline | — |
+| ms-013 | TSLA News Timeline + Protective Put | hard | ESP.timeline | — |
 | ms-014 | MSFT Order Modify Workflow | hard | PMB.order.modify | — |
 | ms-015 | Banking Sector Earnings Sweep (JPM/BAC/GS) | hard | — | — |
 | ms-016 | CPI Release Day — Post-CPI MSFT Hedge | hard | — | — |
-| ms-017 | AAPL Trades Audit + Trigger Alert | hard | PMB.account.trades, NPP.triggers.next | — |
+| ms-017 | AAPL Trades Audit + Trigger Alert | hard | PMB.account.trades, ESP.triggers.next | — |
 | ms-018 | BAC Intraday Market Order + Fill Verify | medium | PMB order MARKET type | — |
 | ms-019 | Session Export + NVDA Put Protection | hard | PMB.session.export | — |
-| ms-020 | Events Stream Recovery + News Article | hard | NPP.events.stream | ✓ |
+| ms-020 | Events Stream Recovery + News Article | hard | ESP.events.stream | ✓ |

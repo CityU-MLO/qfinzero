@@ -3,7 +3,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/time";
-import type { NppEvent } from "@/lib/types";
+import type { EspEvent } from "@/lib/types";
 
 function importanceBadgeVariant(importance: string): "success" | "warn" | "danger" | "secondary" | "outline" {
   if (importance === "high") return "danger";
@@ -37,9 +37,9 @@ export function CalendarTable({
   selectedId,
   onSelect,
 }: {
-  rows: NppEvent[];
+  rows: EspEvent[];
   selectedId: string | null;
-  onSelect: (row: NppEvent) => void;
+  onSelect: (row: EspEvent) => void;
 }) {
   return (
     <div className="rounded-lg border bg-white/70">

@@ -71,7 +71,7 @@ log = logging.getLogger("multistep_runner")
 # {
 #   "plan": ["step description", ...],
 #   "tool_calls": [
-#       {"step_id": "s1", "tool": "NPP.calendar.earnings", "args": {...}},
+#       {"step_id": "s1", "tool": "ESP.calendar.earnings", "args": {...}},
 #       ...
 #   ],
 #   "final_answer": "short text report"
@@ -93,13 +93,13 @@ RULES:
   "final_answer": "<short text report>"
 }
 3. List tool_calls in dependency order (calls depending on prior results come later).
-4. "tool" must be one of the registered tool names below (e.g. "NPP.calendar.earnings").
+4. "tool" must be one of the registered tool names below (e.g. "ESP.calendar.earnings").
 5. For PMB endpoints that include {session_id} or {account_id} in the URL path,
    use the actual IDs provided in the instruction.
 6. Do NOT call create_account or create_session — session and account are pre-created.
 7. Date format: YYYY-MM-DD. Datetime: YYYY-MM-DDTHH:MM:SS. UTC: append Z.
 8. For UPQ GET calls put parameters in "args" as query params.
-   For NPP/PMB POST calls put parameters in "args" as request body.
+   For ESP/PMB POST calls put parameters in "args" as request body.
 
 AVAILABLE TOOLS:
 === UPQ (Unified Price Query) — base: http://127.0.0.1:19703 ===
@@ -109,15 +109,15 @@ UPQ.option.chain_query  GET /option/chain_query  args: underlying(str), date(dat
 UPQ.option.ticker_query GET /option/ticker_query args: contract(OPRA str), start, end, resolution(day|minute,opt)
 UPQ.rates.query      GET /rates/query        args: start(date), end(date), tenors(csv: 1M,3M,1Y,2Y,5Y,10Y,30Y, opt=all)
 
-=== NPP (News Pushing Pipeline) — base: http://127.0.0.1:19702 ===
-NPP.events.query     POST /npp/events/query  args: mode(upcoming|just_happened|window), event_types(list), tickers(list,opt), horizon_minutes(int,opt), start_utc/end_utc(opt), min_importance(opt), limit(opt)
-NPP.events.get       GET  /npp/events/{event_id}   (no args; event_id in URL)
-NPP.events.stream    POST /npp/events/stream args: cursor(str), event_types(list,opt), tickers(list,opt)
-NPP.triggers.next    POST /npp/triggers/next args: tickers(list,opt), min_importance(str), horizon_minutes(int)
-NPP.timeline         POST /npp/timeline      args: tickers(list,opt), start_utc, end_utc, bucket_minutes(int)
-NPP.calendar.econ    POST /npp/calendar/econ args: start_date(date), end_date(date), min_importance(str)
-NPP.calendar.earnings POST /npp/calendar/earnings args: start_date(date), end_date(date), tickers(list,opt)
-NPP.news.body        GET  /npp/news/{news_id}/body  (no args; news_id in URL)
+=== ESP (News Pushing Pipeline) — base: http://127.0.0.1:19702 ===
+ESP.events.query     POST /esp/events/query  args: mode(upcoming|just_happened|window), event_types(list), tickers(list,opt), horizon_minutes(int,opt), start_utc/end_utc(opt), min_importance(opt), limit(opt)
+ESP.events.get       GET  /esp/events/{event_id}   (no args; event_id in URL)
+ESP.events.stream    POST /esp/events/stream args: cursor(str), event_types(list,opt), tickers(list,opt)
+ESP.triggers.next    POST /esp/triggers/next args: tickers(list,opt), min_importance(str), horizon_minutes(int)
+ESP.timeline         POST /esp/timeline      args: tickers(list,opt), start_utc, end_utc, bucket_minutes(int)
+ESP.calendar.econ    POST /esp/calendar/econ args: start_date(date), end_date(date), min_importance(str)
+ESP.calendar.earnings POST /esp/calendar/earnings args: start_date(date), end_date(date), tickers(list,opt)
+ESP.news.body        GET  /esp/news/{news_id}/body  (no args; news_id in URL)
 
 === PMB (Paper Money Broker) — base: http://127.0.0.1:19701 ===
 PMB.account.positions GET /v1/accounts/{account_id}/positions   (no body args)
@@ -355,14 +355,14 @@ TOOL_DISPATCH: dict[str, tuple[str, str, str]] = {
     "UPQ.option.chain_query":    ("GET",  "{upq}/option/chain_query",       "query"),
     "UPQ.option.ticker_query":   ("GET",  "{upq}/option/ticker_query",      "query"),
     "UPQ.rates.query":           ("GET",  "{upq}/rates/query",              "query"),
-    "NPP.events.query":          ("POST", "{npp}/npp/events/query",         "body"),
-    "NPP.events.get":            ("GET",  "{npp}/npp/events/{event_id}",    "path"),
-    "NPP.events.stream":         ("POST", "{npp}/npp/events/stream",        "body"),
-    "NPP.triggers.next":         ("POST", "{npp}/npp/triggers/next",        "body"),
-    "NPP.timeline":              ("POST", "{npp}/npp/timeline",             "body"),
-    "NPP.calendar.econ":         ("POST", "{npp}/npp/calendar/econ",        "body"),
-    "NPP.calendar.earnings":     ("POST", "{npp}/npp/calendar/earnings",    "body"),
-    "NPP.news.body":             ("GET",  "{npp}/npp/news/{news_id}/body",  "path"),
+    "ESP.events.query":          ("POST", "{esp}/esp/events/query",         "body"),
+    "ESP.events.get":            ("GET",  "{esp}/esp/events/{event_id}",    "path"),
+    "ESP.events.stream":         ("POST", "{esp}/esp/events/stream",        "body"),
+    "ESP.triggers.next":         ("POST", "{esp}/esp/triggers/next",        "body"),
+    "ESP.timeline":              ("POST", "{esp}/esp/timeline",             "body"),
+    "ESP.calendar.econ":         ("POST", "{esp}/esp/calendar/econ",        "body"),
+    "ESP.calendar.earnings":     ("POST", "{esp}/esp/calendar/earnings",    "body"),
+    "ESP.news.body":             ("GET",  "{esp}/esp/news/{news_id}/body",  "path"),
     "PMB.account.positions":     ("GET",  "{pmb}/v1/accounts/{account_id}/positions", "path"),
     "PMB.account.orders":        ("GET",  "{pmb}/v1/accounts/{account_id}/orders",    "query"),
     "PMB.account.trades":        ("GET",  "{pmb}/v1/accounts/{account_id}/trades",    "query"),
@@ -384,7 +384,7 @@ def _substitute_url(url_template: str, args: dict, bases: dict) -> tuple[str, di
     """
     url = url_template.format(
         upq=bases["upq"],
-        npp=bases["npp"],
+        esp=bases["esp"],
         pmb=bases["pmb"],
         # Path params from args
         event_id=args.get("event_id", "UNKNOWN_EVENT_ID"),
@@ -659,7 +659,7 @@ def main() -> None:
 
     bases = {
         "upq": cfg["services"]["upq"]["base_url"].rstrip("/"),
-        "npp": cfg["services"]["npp"]["base_url"].rstrip("/"),
+        "esp": cfg["services"]["esp"]["base_url"].rstrip("/"),
         "pmb": cfg["services"]["pmb"]["base_url"].rstrip("/"),
     }
 

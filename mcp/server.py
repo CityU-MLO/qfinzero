@@ -1,7 +1,7 @@
 """
 QFinZero MCP Server
 
-Exposes all QFinZero tools (UPQ, NPP, PMB) as MCP tools for integration
+Exposes all QFinZero tools (UPQ, ESP, PMB) as MCP tools for integration
 with Claude and other LLM systems.
 
 Run:
@@ -21,26 +21,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mcp.server.fastmcp import FastMCP
 
 from clients.upq.client import UPQClient
-from clients.npp.client import NPPClient
+from clients.esp.client import ESPClient
 from clients.pmb.client import PMBClient
-from qfinzero.config import PMB_URL as DEFAULT_PMB_URL, NPP_URL as DEFAULT_NPP_URL, UPQ_URL as DEFAULT_UPQ_URL
+from qfinzero.config import PMB_URL as DEFAULT_PMB_URL, ESP_URL as DEFAULT_ESP_URL, UPQ_URL as DEFAULT_UPQ_URL
 
 # ── Service URLs (can be overridden via env vars) ────────────────────────────
 
 UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", DEFAULT_UPQ_URL)
-NPP_URL = os.environ.get("QFINZERO_NPP_URL", DEFAULT_NPP_URL)
+ESP_URL = os.environ.get("QFINZERO_ESP_URL", DEFAULT_ESP_URL)
 PMB_URL = os.environ.get("QFINZERO_PMB_URL", DEFAULT_PMB_URL)
 
 mcp = FastMCP(
     "QFinZero",
     instructions=(
         "QFinZero is a unified trading environment for LLM agents. "
-        "It provides three services: UPQ (market data), NPP (news & events), "
+        "It provides three services: UPQ (market data), ESP (news & events), "
         "and PMB (paper trading broker). "
         "Typical workflow: (1) create account via pmb_create_account, "
         "(2) create session via pmb_create_session, "
         "(3) loop pmb_step_session to advance time, "
-        "(4) use UPQ/NPP tools to gather context, "
+        "(4) use UPQ/ESP tools to gather context, "
         "(5) place orders via pmb_buy_stock / pmb_sell_stock, "
         "(6) call pmb_get_summary when session ends."
     ),
@@ -312,19 +312,19 @@ def upq_ns_to_iso(ns: int) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# NPP TOOLS — News & Events
+# ESP TOOLS — News & Events
 # ════════════════════════════════════════════════════════════════════════════
 
 
 @mcp.tool()
-def npp_health() -> str:
-    """Check health of the NPP (News Pushing Pipeline) service and data freshness."""
-    with NPPClient(NPP_URL) as client:
+def esp_health() -> str:
+    """Check health of the ESP (News Pushing Pipeline) service and data freshness."""
+    with ESPClient(ESP_URL) as client:
         return json.dumps(client.health())
 
 
 @mcp.tool()
-def npp_query_events(
+def esp_query_events(
     mode: str = "window",
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
@@ -370,7 +370,7 @@ def npp_query_events(
     if end_date and not end_utc:
         end_utc = f"{end_date}T23:59:59+00:00"
 
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.query_events(
                 mode=mode,
@@ -389,21 +389,21 @@ def npp_query_events(
 
 
 @mcp.tool()
-def npp_get_event(event_id: str) -> str:
+def esp_get_event(event_id: str) -> str:
     """Fetch a single event by its ID, including full payload.
 
     Args:
-        event_id: The unique event identifier (from npp_query_events results)
+        event_id: The unique event identifier (from esp_query_events results)
 
     Returns:
         JSON event object with full payload (earnings data, economic release values, etc.)
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(client.get_event(event_id))
 
 
 @mcp.tool()
-def npp_stream_events(
+def esp_stream_events(
     cursor: Optional[str] = None,
     event_types: Optional[list[str]] = None,
     tickers: Optional[list[str]] = None,
@@ -425,7 +425,7 @@ def npp_stream_events(
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.stream(
                 cursor=cursor,
@@ -438,7 +438,7 @@ def npp_stream_events(
 
 
 @mcp.tool()
-def npp_econ_calendar(
+def esp_econ_calendar(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     min_importance: Optional[str] = None,
@@ -459,7 +459,7 @@ def npp_econ_calendar(
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.econ_calendar(
                 start_date=start_date,
@@ -473,7 +473,7 @@ def npp_econ_calendar(
 
 
 @mcp.tool()
-def npp_earnings_calendar(
+def esp_earnings_calendar(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     tickers: Optional[list[str]] = None,
@@ -496,7 +496,7 @@ def npp_earnings_calendar(
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.earnings_calendar(
                 start_date=start_date,
@@ -511,7 +511,7 @@ def npp_earnings_calendar(
 
 
 @mcp.tool()
-def npp_next_triggers(
+def esp_next_triggers(
     tickers: Optional[list[str]] = None,
     min_importance: Optional[str] = None,
     horizon_minutes: int = 1440,
@@ -534,7 +534,7 @@ def npp_next_triggers(
         JSON with: server_time_utc, triggers[]
         Each trigger has: trigger_time_utc, event_id, event, reason_codes
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.next_triggers(
                 tickers=tickers,
@@ -547,22 +547,22 @@ def npp_next_triggers(
 
 
 @mcp.tool()
-def npp_news_body(news_id: str) -> str:
+def esp_news_body(news_id: str) -> str:
     """Fetch the full body of a news article.
 
     Args:
-        news_id: The news article ID (found in event payload from npp_query_events)
+        news_id: The news article ID (found in event payload from esp_query_events)
 
     Returns:
         JSON with: news_id, title, description, article_url, published_utc,
                    tickers, author, keywords, image_url, publisher, insights
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(client.news_body(news_id))
 
 
 @mcp.tool()
-def npp_search_news(
+def esp_search_news(
     tickers: Optional[list[str]] = None,
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
@@ -585,7 +585,7 @@ def npp_search_news(
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.search_news(
                 tickers=tickers,
@@ -600,7 +600,7 @@ def npp_search_news(
 
 
 @mcp.tool()
-def npp_timeline(
+def esp_timeline(
     tickers: Optional[list[str]] = None,
     start_utc: Optional[str] = None,
     end_utc: Optional[str] = None,
@@ -623,7 +623,7 @@ def npp_timeline(
         JSON with: server_time_utc, buckets[]
         Each bucket has: bucket_start_utc, bucket_end_utc, count, events[]
     """
-    with NPPClient(NPP_URL) as client:
+    with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.timeline(
                 tickers=tickers,

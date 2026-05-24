@@ -5,7 +5,7 @@
 
 ## Problem
 
-The MCP tools layer (34 tools across UPQ/NPP/PMB) and their underlying Python clients have zero test coverage. Any code change can silently break parameter forwarding, URL construction, error handling, or JSON serialization without detection.
+The MCP tools layer (34 tools across UPQ/ESP/PMB) and their underlying Python clients have zero test coverage. Any code change can silently break parameter forwarding, URL construction, error handling, or JSON serialization without detection.
 
 ## Decision
 
@@ -17,7 +17,7 @@ HTTP-level mock tests using the `responses` library. Tests intercept `requests` 
 tests/
 ├── conftest.py              # Shared fixtures, mock URL constants
 ├── test_upq_client.py       # UPQ client + MCP tools (9 tools, ~27 tests)
-├── test_npp_client.py       # NPP client + MCP tools (11 tools, ~33 tests)
+├── test_esp_client.py       # ESP client + MCP tools (11 tools, ~33 tests)
 ├── test_pmb_client.py       # PMB client + MCP tools (14 tools, ~42 tests)
 └── test_pure_utils.py       # Pure functions: make_opra, ns_to_iso, StepResult (~15 tests)
 ```
@@ -40,8 +40,8 @@ Each tool gets 2-4 tests:
 
 ## conftest.py Fixtures
 
-- `MOCK_UPQ_URL`, `MOCK_NPP_URL`, `MOCK_PMB_URL` — base URL constants
-- `mock_upq_url` / `mock_npp_url` / `mock_pmb_url` — fixtures that patch env vars
+- `MOCK_UPQ_URL`, `MOCK_ESP_URL`, `MOCK_PMB_URL` — base URL constants
+- `mock_upq_url` / `mock_esp_url` / `mock_pmb_url` — fixtures that patch env vars
 - Helper functions for building common mock responses
 
 ## Dependencies

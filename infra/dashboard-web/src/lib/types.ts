@@ -1,6 +1,6 @@
 export type HealthStatus = "running" | "down" | "stale";
 
-export type ServiceName = "UPQ" | "NPP" | "PMB";
+export type ServiceName = "UPQ" | "ESP" | "PMB";
 
 export type ServiceHealthPayload = {
   status?: string;
@@ -80,7 +80,7 @@ export type StatusSummaryResponse = {
   cards: ServiceStatusCard[];
 };
 
-export type NppEvent = {
+export type EspEvent = {
   event_id: string;
   event_type: "macro_calendar" | "earnings" | "breaking_news" | "daily_news";
   title: string;
@@ -97,7 +97,7 @@ export type NppEvent = {
 
 export type PaginatedEventsResponse = {
   server_time_utc: string;
-  events: NppEvent[];
+  events: EspEvent[];
   next_cursor: string | null;
 };
 

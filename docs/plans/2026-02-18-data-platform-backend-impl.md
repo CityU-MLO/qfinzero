@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add data freshness APIs to UPQ (Rust) and NPP (Python), enhance NPP with news search/stats/export/calendar coverage, integrate freshness into Dashboard, and add basic sanity checks.
+**Goal:** Add data freshness APIs to UPQ (Rust) and ESP (Python), enhance ESP with news search/stats/export/calendar coverage, integrate freshness into Dashboard, and add basic sanity checks.
 
-**Architecture:** Each service owns its freshness endpoint (`/health/freshness`). NPP gets new route files for stats, export, and admin. Dashboard aggregates freshness from all services. All changes are in-place on existing services — no new services.
+**Architecture:** Each service owns its freshness endpoint (`/health/freshness`). ESP gets new route files for stats, export, and admin. Dashboard aggregates freshness from all services. All changes are in-place on existing services — no new services.
 
-**Tech Stack:** Rust/Axum/DuckDB (UPQ), Python/FastAPI/MongoDB/SQLite (NPP), Python/FastAPI/httpx (Dashboard), pytest (Python tests), cargo test (Rust tests)
+**Tech Stack:** Rust/Axum/DuckDB (UPQ), Python/FastAPI/MongoDB/SQLite (ESP), Python/FastAPI/httpx (Dashboard), pytest (Python tests), cargo test (Rust tests)
 
 **Branch:** `feat/data-platform-backend` (already created, design doc committed)
 
@@ -326,17 +326,17 @@ git commit -m "feat(upq-client): add freshness() method"
 
 ---
 
-## Task 3: NPP — News Search Endpoint with Keyword + Publisher Filtering
+## Task 3: ESP — News Search Endpoint with Keyword + Publisher Filtering
 
 **Files:**
-- Modify: `infra/npp/services/data_sources.py:168-203` (MongoNewsSource.query_window — add keyword/publisher support)
-- Modify: `infra/npp/models.py` (add NewsSearchRequest model)
-- Modify: `infra/npp/routes/news.py` (add POST /npp/news/search)
-- Modify: `infra/npp/main.py` (no change needed — news router already registered)
+- Modify: `infra/esp/services/data_sources.py:168-203` (MongoNewsSource.query_window — add keyword/publisher support)
+- Modify: `infra/esp/models.py` (add NewsSearchRequest model)
+- Modify: `infra/esp/routes/news.py` (add POST /esp/news/search)
+- Modify: `infra/esp/main.py` (no change needed — news router already registered)
 
 ### Step 1: Add the `NewsSearchRequest` model
 
-In `infra/npp/models.py`, after the `EarningsCalendarRequest` class (line ~113):
+In `infra/esp/models.py`, after the `EarningsCalendarRequest` class (line ~113):
 
 ```python
 class NewsSearchRequest(BaseModel):
@@ -352,7 +352,7 @@ class NewsSearchRequest(BaseModel):
 
 ### Step 2: Add `search_news()` method to `MongoNewsSource`
 
-In `infra/npp/services/data_sources.py`, add a new method to `MongoNewsSource` after `query_window` (line ~203):
+In `infra/esp/services/data_sources.py`, add a new method to `MongoNewsSource` after `query_window` (line ~203):
 
 ```python
     async def search_news(
@@ -400,7 +400,7 @@ In `infra/npp/services/data_sources.py`, add a new method to `MongoNewsSource` a
 
 ### Step 3: Add the route
 
-In `infra/npp/routes/news.py`, add:
+In `infra/esp/routes/news.py`, add:
 
 ```python
 from models import NewsSearchRequest, PaginatedResponse
@@ -417,7 +417,7 @@ def _encode_cursor(time_utc: str, event_id: str) -> str:
     return base64.b64encode(json.dumps([time_utc, event_id]).encode()).decode()
 
 
-@router.post("/npp/news/search")
+@router.post("/esp/news/search")
 async def search_news(req: NewsSearchRequest, request: Request):
     ds = request.app.state.data_sources
     now = datetime.fromisoformat(req.now_utc) if req.now_utc else datetime.now(timezone.utc)
@@ -452,12 +452,12 @@ async def search_news(req: NewsSearchRequest, request: Request):
     ).model_dump()
 ```
 
-### Step 4: Run NPP locally and test with curl
+### Step 4: Run ESP locally and test with curl
 
-Run: `cd infra/npp && python main.py` (in another terminal)
+Run: `cd infra/esp && python main.py` (in another terminal)
 
 ```bash
-curl -X POST http://127.0.0.1:19702/npp/news/search \
+curl -X POST http://127.0.0.1:19702/esp/news/search \
   -H "Content-Type: application/json" \
   -d '{"keyword":"earnings","limit":5}'
 ```
@@ -467,21 +467,21 @@ Expected: 200 with paginated news results (or empty if MongoDB is not available)
 ### Step 5: Commit
 
 ```bash
-git add infra/npp/models.py infra/npp/services/data_sources.py infra/npp/routes/news.py
-git commit -m "feat(npp): add POST /npp/news/search with keyword and publisher filtering"
+git add infra/esp/models.py infra/esp/services/data_sources.py infra/esp/routes/news.py
+git commit -m "feat(esp): add POST /esp/news/search with keyword and publisher filtering"
 ```
 
 ---
 
-## Task 4: NPP — News Statistics API
+## Task 4: ESP — News Statistics API
 
 **Files:**
-- Create: `infra/npp/routes/stats.py`
-- Modify: `infra/npp/main.py:29,91-96` (import and register router)
+- Create: `infra/esp/routes/stats.py`
+- Modify: `infra/esp/main.py:29,91-96` (import and register router)
 
 ### Step 1: Create the stats route
 
-Create `infra/npp/routes/stats.py`:
+Create `infra/esp/routes/stats.py`:
 
 ```python
 from fastapi import APIRouter, Request, Query
@@ -489,7 +489,7 @@ from fastapi import APIRouter, Request, Query
 router = APIRouter(tags=["stats"])
 
 
-@router.get("/npp/news/stats")
+@router.get("/esp/news/stats")
 async def news_stats(request: Request, days: int = Query(default=7, ge=1, le=90)):
     ds = request.app.state.data_sources
     if not ds.news.available:
@@ -578,7 +578,7 @@ async def news_stats(request: Request, days: int = Query(default=7, ge=1, le=90)
 
 ### Step 2: Register the router
 
-In `infra/npp/main.py`, add import and registration:
+In `infra/esp/main.py`, add import and registration:
 
 ```python
 # In the imports section (line ~29):
@@ -590,27 +590,27 @@ app.include_router(stats.router)
 
 ### Step 3: Verify
 
-Run: `curl http://127.0.0.1:19702/npp/news/stats?days=7`
+Run: `curl http://127.0.0.1:19702/esp/news/stats?days=7`
 Expected: 200 with statistics JSON
 
 ### Step 4: Commit
 
 ```bash
-git add infra/npp/routes/stats.py infra/npp/main.py
-git commit -m "feat(npp): add GET /npp/news/stats with daily counts, top tickers, and duplicate detection"
+git add infra/esp/routes/stats.py infra/esp/main.py
+git commit -m "feat(esp): add GET /esp/news/stats with daily counts, top tickers, and duplicate detection"
 ```
 
 ---
 
-## Task 5: NPP — Export Endpoints
+## Task 5: ESP — Export Endpoints
 
 **Files:**
-- Create: `infra/npp/routes/export.py`
-- Modify: `infra/npp/main.py` (register router)
+- Create: `infra/esp/routes/export.py`
+- Modify: `infra/esp/main.py` (register router)
 
 ### Step 1: Create the export route
 
-Create `infra/npp/routes/export.py`:
+Create `infra/esp/routes/export.py`:
 
 ```python
 import csv
@@ -627,7 +627,7 @@ router = APIRouter(tags=["export"])
 EXPORT_LIMIT = 10_000
 
 
-@router.get("/npp/news/export")
+@router.get("/esp/news/export")
 async def export_news(
     request: Request,
     format: str = Query(..., regex="^(jsonl|csv)$"),
@@ -701,7 +701,7 @@ async def export_news(
         )
 
 
-@router.get("/npp/calendar/earnings/export")
+@router.get("/esp/calendar/earnings/export")
 async def export_earnings(
     request: Request,
     format: str = Query(default="csv", regex="^(jsonl|csv)$"),
@@ -750,7 +750,7 @@ async def export_earnings(
         )
 
 
-@router.get("/npp/calendar/economic/export")
+@router.get("/esp/calendar/economic/export")
 async def export_economic(
     request: Request,
     format: str = Query(default="csv", regex="^(jsonl|csv)$"),
@@ -801,7 +801,7 @@ async def export_economic(
 
 ### Step 2: Register the router
 
-In `infra/npp/main.py`:
+In `infra/esp/main.py`:
 
 ```python
 from routes import health, events, triggers, calendar, news, timeline, stats, export
@@ -812,27 +812,27 @@ app.include_router(export.router)
 ### Step 3: Verify
 
 ```bash
-curl "http://127.0.0.1:19702/npp/news/export?format=jsonl&start=2025-01-01T00:00:00Z&end=2025-01-03T00:00:00Z"
-curl "http://127.0.0.1:19702/npp/calendar/earnings/export?start=2025-01-01&end=2025-01-31&format=csv"
+curl "http://127.0.0.1:19702/esp/news/export?format=jsonl&start=2025-01-01T00:00:00Z&end=2025-01-03T00:00:00Z"
+curl "http://127.0.0.1:19702/esp/calendar/earnings/export?start=2025-01-01&end=2025-01-31&format=csv"
 ```
 
 ### Step 4: Commit
 
 ```bash
-git add infra/npp/routes/export.py infra/npp/main.py
-git commit -m "feat(npp): add export endpoints for news, earnings, and economic events (JSONL/CSV)"
+git add infra/esp/routes/export.py infra/esp/main.py
+git commit -m "feat(esp): add export endpoints for news, earnings, and economic events (JSONL/CSV)"
 ```
 
 ---
 
-## Task 6: NPP — Calendar Coverage Statistics
+## Task 6: ESP — Calendar Coverage Statistics
 
 **Files:**
-- Modify: `infra/npp/routes/calendar.py` (add GET /npp/calendar/coverage)
+- Modify: `infra/esp/routes/calendar.py` (add GET /esp/calendar/coverage)
 
 ### Step 1: Add the coverage endpoint
 
-In `infra/npp/routes/calendar.py`, add:
+In `infra/esp/routes/calendar.py`, add:
 
 ```python
 from fastapi import Query
@@ -852,7 +852,7 @@ def _us_trading_days(start_date: str, end_date: str) -> set[str]:
     return days
 
 
-@router.get("/npp/calendar/coverage")
+@router.get("/esp/calendar/coverage")
 async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1, le=365)):
     ds = request.app.state.data_sources
     result = {}
@@ -952,32 +952,32 @@ async def calendar_coverage(request: Request, days: int = Query(default=30, ge=1
 ### Step 2: Verify
 
 ```bash
-curl http://127.0.0.1:19702/npp/calendar/coverage?days=30
+curl http://127.0.0.1:19702/esp/calendar/coverage?days=30
 ```
 
 ### Step 3: Commit
 
 ```bash
-git add infra/npp/routes/calendar.py
-git commit -m "feat(npp): add GET /npp/calendar/coverage with daily counts, missing dates, and breakdowns"
+git add infra/esp/routes/calendar.py
+git commit -m "feat(esp): add GET /esp/calendar/coverage with daily counts, missing dates, and breakdowns"
 ```
 
 ---
 
-## Task 7: NPP — `/npp/health/freshness` Endpoint
+## Task 7: ESP — `/esp/health/freshness` Endpoint
 
 **Files:**
-- Modify: `infra/npp/routes/health.py`
+- Modify: `infra/esp/routes/health.py`
 
 ### Step 1: Add the freshness endpoint
 
-In `infra/npp/routes/health.py`:
+In `infra/esp/routes/health.py`:
 
 ```python
 from datetime import datetime, timezone
 
 
-@router.get("/npp/health/freshness")
+@router.get("/esp/health/freshness")
 async def health_freshness(request: Request):
     ds = request.app.state.data_sources
     now = datetime.now(timezone.utc)
@@ -1028,7 +1028,7 @@ async def health_freshness(request: Request):
             }
 
     return {
-        "service": "npp",
+        "service": "esp",
         "checked_at": now.isoformat(),
         "sources": sources,
     }
@@ -1037,27 +1037,27 @@ async def health_freshness(request: Request):
 ### Step 2: Verify
 
 ```bash
-curl http://127.0.0.1:19702/npp/health/freshness
+curl http://127.0.0.1:19702/esp/health/freshness
 ```
 
 ### Step 3: Commit
 
 ```bash
-git add infra/npp/routes/health.py
-git commit -m "feat(npp): add GET /npp/health/freshness with standardized schema"
+git add infra/esp/routes/health.py
+git commit -m "feat(esp): add GET /esp/health/freshness with standardized schema"
 ```
 
 ---
 
-## Task 8: NPP — Sanity Check API
+## Task 8: ESP — Sanity Check API
 
 **Files:**
-- Create: `infra/npp/routes/admin.py`
-- Modify: `infra/npp/main.py` (register router)
+- Create: `infra/esp/routes/admin.py`
+- Modify: `infra/esp/main.py` (register router)
 
 ### Step 1: Create admin route
 
-Create `infra/npp/routes/admin.py`:
+Create `infra/esp/routes/admin.py`:
 
 ```python
 from datetime import datetime, timezone, timedelta
@@ -1074,7 +1074,7 @@ def _status(count: int) -> str:
     return "fail"
 
 
-@router.get("/npp/admin/sanity")
+@router.get("/esp/admin/sanity")
 async def sanity_check(request: Request):
     ds = request.app.state.data_sources
     now = datetime.now(timezone.utc)
@@ -1188,7 +1188,7 @@ async def sanity_check(request: Request):
 
 ### Step 2: Register the router
 
-In `infra/npp/main.py`:
+In `infra/esp/main.py`:
 
 ```python
 from routes import health, events, triggers, calendar, news, timeline, stats, export, admin
@@ -1199,14 +1199,14 @@ app.include_router(admin.router)
 ### Step 3: Verify
 
 ```bash
-curl http://127.0.0.1:19702/npp/admin/sanity
+curl http://127.0.0.1:19702/esp/admin/sanity
 ```
 
 ### Step 4: Commit
 
 ```bash
-git add infra/npp/routes/admin.py infra/npp/main.py
-git commit -m "feat(npp): add GET /npp/admin/sanity with data quality checks"
+git add infra/esp/routes/admin.py infra/esp/main.py
+git commit -m "feat(esp): add GET /esp/admin/sanity with data quality checks"
 ```
 
 ---
@@ -1228,7 +1228,7 @@ In `infra/dashboard/main.py`, update `SERVICES` dict to include freshness paths:
 ```python
 SERVICES = {
     "PMB": {"url": settings.pmb_url, "stats": "/_stats", "health": "/v1/health", "freshness": None},
-    "NPP": {"url": settings.npp_url, "stats": "/_stats", "health": "/npp/health", "freshness": "/npp/health/freshness"},
+    "ESP": {"url": settings.esp_url, "stats": "/_stats", "health": "/esp/health", "freshness": "/esp/health/freshness"},
     "UPQ": {"url": settings.upq_url, "stats": None, "health": "/health", "freshness": "/health/freshness"},
 }
 ```
@@ -1294,25 +1294,25 @@ In the `DASHBOARD_HTML` string, add a freshness section to `renderCard()`. After
 
 ### Step 4: Verify
 
-Run the Dashboard and check the rendered page shows freshness data for UPQ and NPP.
+Run the Dashboard and check the rendered page shows freshness data for UPQ and ESP.
 
 ### Step 5: Commit
 
 ```bash
 git add infra/dashboard/main.py
-git commit -m "feat(dashboard): integrate data freshness from UPQ and NPP into status page"
+git commit -m "feat(dashboard): integrate data freshness from UPQ and ESP into status page"
 ```
 
 ---
 
-## Task 10: NPP Client — New Methods
+## Task 10: ESP Client — New Methods
 
 **Files:**
-- Modify: `clients/npp/client.py` (add search_news, news_stats, export_news, calendar_coverage, freshness, sanity_check)
+- Modify: `clients/esp/client.py` (add search_news, news_stats, export_news, calendar_coverage, freshness, sanity_check)
 
 ### Step 1: Add all new methods
 
-In `clients/npp/client.py`, add after the `news_body` method (line ~278):
+In `clients/esp/client.py`, add after the `news_body` method (line ~278):
 
 ```python
     def search_news(
@@ -1339,11 +1339,11 @@ In `clients/npp/client.py`, add after the `news_body` method (line ~278):
             body["publisher"] = publisher
         if cursor:
             body["cursor"] = cursor
-        return self._post("/npp/news/search", body)
+        return self._post("/esp/news/search", body)
 
     def news_stats(self, days: int = 7) -> dict:
         """Get news statistics — daily counts, top tickers, duplicate rates."""
-        return self._get("/npp/news/stats", {"days": days})
+        return self._get("/esp/news/stats", {"days": days})
 
     def export_news(
         self,
@@ -1361,32 +1361,32 @@ In `clients/npp/client.py`, add after the `news_body` method (line ~278):
         if end:
             params["end"] = end
         resp = self._session.get(
-            f"{self.base_url}/npp/news/export",
+            f"{self.base_url}/esp/news/export",
             params=params,
             timeout=self.timeout,
         )
         if resp.status_code >= 400:
-            raise NPPError(resp.text, resp.status_code)
+            raise ESPError(resp.text, resp.status_code)
         return resp.content
 
     def calendar_coverage(self, days: int = 30) -> dict:
         """Get calendar coverage statistics — daily counts, missing dates, breakdowns."""
-        return self._get("/npp/calendar/coverage", {"days": days})
+        return self._get("/esp/calendar/coverage", {"days": days})
 
     def freshness(self) -> dict:
         """Data freshness — standardized schema with latest timestamps and record counts."""
-        return self._get("/npp/health/freshness")
+        return self._get("/esp/health/freshness")
 
     def sanity_check(self) -> dict:
         """Run data quality checks — future timestamps, duplicates, missing days."""
-        return self._get("/npp/admin/sanity")
+        return self._get("/esp/admin/sanity")
 ```
 
 ### Step 2: Commit
 
 ```bash
-git add clients/npp/client.py
-git commit -m "feat(npp-client): add search_news, news_stats, export, coverage, freshness, sanity_check methods"
+git add clients/esp/client.py
+git commit -m "feat(esp-client): add search_news, news_stats, export, coverage, freshness, sanity_check methods"
 ```
 
 ---
@@ -1484,45 +1484,45 @@ git commit -m "docs(upq): add /health/freshness to OpenAPI spec"
 
 ---
 
-## Task 12: Update NPP OpenAPI Spec
+## Task 12: Update ESP OpenAPI Spec
 
 **Files:**
-- Modify: `docs/npp/openapi.yaml` (rewrite to match actual API)
+- Modify: `docs/esp/openapi.yaml` (rewrite to match actual API)
 
-The current NPP OpenAPI doc is outdated (uses old paths like `/health`, `/news/push`, `/news/query`). It needs a full rewrite to match the actual `/npp/*` routes.
+The current ESP OpenAPI doc is outdated (uses old paths like `/health`, `/news/push`, `/news/query`). It needs a full rewrite to match the actual `/esp/*` routes.
 
-### Step 1: Rewrite `docs/npp/openapi.yaml`
+### Step 1: Rewrite `docs/esp/openapi.yaml`
 
 Replace the entire file with a spec that covers all current + new endpoints:
 
 **Existing endpoints to document:**
-- `GET /npp/health`
-- `POST /npp/events/query`
-- `GET /npp/events/{event_id}`
-- `POST /npp/events/stream`
-- `POST /npp/triggers/next`
-- `POST /npp/calendar/econ`
-- `POST /npp/calendar/earnings`
-- `POST /npp/timeline`
-- `GET /npp/news/{news_id}/body`
+- `GET /esp/health`
+- `POST /esp/events/query`
+- `GET /esp/events/{event_id}`
+- `POST /esp/events/stream`
+- `POST /esp/triggers/next`
+- `POST /esp/calendar/econ`
+- `POST /esp/calendar/earnings`
+- `POST /esp/timeline`
+- `GET /esp/news/{news_id}/body`
 
 **New endpoints to document:**
-- `GET /npp/health/freshness`
-- `POST /npp/news/search`
-- `GET /npp/news/stats`
-- `GET /npp/news/export`
-- `GET /npp/calendar/earnings/export`
-- `GET /npp/calendar/economic/export`
-- `GET /npp/calendar/coverage`
-- `GET /npp/admin/sanity`
+- `GET /esp/health/freshness`
+- `POST /esp/news/search`
+- `GET /esp/news/stats`
+- `GET /esp/news/export`
+- `GET /esp/calendar/earnings/export`
+- `GET /esp/calendar/economic/export`
+- `GET /esp/calendar/coverage`
+- `GET /esp/admin/sanity`
 
 Include schemas for all request/response models: `Event`, `EventQueryRequest`, `NewsSearchRequest`, `PaginatedResponse`, `TriggerResponse`, `TimelineResponse`, `FreshnessResponse`, `SanityResponse`, etc.
 
 ### Step 2: Commit
 
 ```bash
-git add docs/npp/openapi.yaml
-git commit -m "docs(npp): rewrite OpenAPI spec to match actual API routes and add new endpoints"
+git add docs/esp/openapi.yaml
+git commit -m "docs(esp): rewrite OpenAPI spec to match actual API routes and add new endpoints"
 ```
 
 ---
@@ -1553,14 +1553,14 @@ git commit -m "docs: update data platform requirements tracking with implementat
 |---|------|-------|
 | 1 | `feat(upq): add /health/freshness endpoint` | `app.rs`, `api_contract_tests.rs` |
 | 2 | `feat(upq-client): add freshness() method` | `clients/upq/client.py` |
-| 3 | `feat(npp): add POST /npp/news/search` | `models.py`, `data_sources.py`, `news.py` |
-| 4 | `feat(npp): add GET /npp/news/stats` | `routes/stats.py`, `main.py` |
-| 5 | `feat(npp): add export endpoints` | `routes/export.py`, `main.py` |
-| 6 | `feat(npp): add GET /npp/calendar/coverage` | `routes/calendar.py` |
-| 7 | `feat(npp): add GET /npp/health/freshness` | `routes/health.py` |
-| 8 | `feat(npp): add GET /npp/admin/sanity` | `routes/admin.py`, `main.py` |
+| 3 | `feat(esp): add POST /esp/news/search` | `models.py`, `data_sources.py`, `news.py` |
+| 4 | `feat(esp): add GET /esp/news/stats` | `routes/stats.py`, `main.py` |
+| 5 | `feat(esp): add export endpoints` | `routes/export.py`, `main.py` |
+| 6 | `feat(esp): add GET /esp/calendar/coverage` | `routes/calendar.py` |
+| 7 | `feat(esp): add GET /esp/health/freshness` | `routes/health.py` |
+| 8 | `feat(esp): add GET /esp/admin/sanity` | `routes/admin.py`, `main.py` |
 | 9 | `feat(dashboard): integrate freshness` | `dashboard/main.py` |
-| 10 | `feat(npp-client): add new methods` | `clients/npp/client.py` |
+| 10 | `feat(esp-client): add new methods` | `clients/esp/client.py` |
 | 11 | `docs(upq): add /health/freshness to OpenAPI spec` | `docs/upq/openapi.yaml`, `infra/upq/docs/openapi.yaml` |
-| 12 | `docs(npp): rewrite OpenAPI spec` | `docs/npp/openapi.yaml` |
+| 12 | `docs(esp): rewrite OpenAPI spec` | `docs/esp/openapi.yaml` |
 | 13 | `docs: update requirements tracking` | `data-platform-requirements.md` |

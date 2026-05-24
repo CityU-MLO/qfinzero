@@ -1,4 +1,4 @@
-import { NPP_BASE_URL, NPP_API_TOKEN, SERVICES, extractPort } from "@/lib/config";
+import { ESP_BASE_URL, ESP_API_TOKEN, SERVICES, extractPort } from "@/lib/config";
 import { computeServiceState, estimateFiveMinute, getFreshestPoint } from "@/lib/status";
 import type {
   CoverageResponse,
@@ -101,45 +101,45 @@ export async function getStatusSummary(): Promise<StatusSummaryResponse> {
   };
 }
 
-export async function nppSearchNews(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
-  return fetchJson<PaginatedEventsResponse>(`${NPP_BASE_URL}/npp/news/search`, {
+export async function espSearchNews(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
+  return fetchJson<PaginatedEventsResponse>(`${ESP_BASE_URL}/esp/news/search`, {
     method: "POST",
     body: JSON.stringify(payload),
-  }, NPP_API_TOKEN);
+  }, ESP_API_TOKEN);
 }
 
-export async function nppNewsStats(days: number): Promise<NewsStatsResponse> {
-  return fetchJson<NewsStatsResponse>(`${NPP_BASE_URL}/npp/news/stats?days=${days}`, undefined, NPP_API_TOKEN);
+export async function espNewsStats(days: number): Promise<NewsStatsResponse> {
+  return fetchJson<NewsStatsResponse>(`${ESP_BASE_URL}/esp/news/stats?days=${days}`, undefined, ESP_API_TOKEN);
 }
 
-export async function nppNewsBody(newsId: string): Promise<NewsBodyResponse> {
-  return fetchJson<NewsBodyResponse>(`${NPP_BASE_URL}/npp/news/${encodeURIComponent(newsId)}/body`, undefined, NPP_API_TOKEN);
+export async function espNewsBody(newsId: string): Promise<NewsBodyResponse> {
+  return fetchJson<NewsBodyResponse>(`${ESP_BASE_URL}/esp/news/${encodeURIComponent(newsId)}/body`, undefined, ESP_API_TOKEN);
 }
 
-export async function nppCalendarEarnings(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
-  return fetchJson<PaginatedEventsResponse>(`${NPP_BASE_URL}/npp/calendar/earnings`, {
+export async function espCalendarEarnings(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
+  return fetchJson<PaginatedEventsResponse>(`${ESP_BASE_URL}/esp/calendar/earnings`, {
     method: "POST",
     body: JSON.stringify(payload),
-  }, NPP_API_TOKEN);
+  }, ESP_API_TOKEN);
 }
 
-export async function nppCalendarEconomic(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
-  return fetchJson<PaginatedEventsResponse>(`${NPP_BASE_URL}/npp/calendar/econ`, {
+export async function espCalendarEconomic(payload: Record<string, unknown>): Promise<PaginatedEventsResponse> {
+  return fetchJson<PaginatedEventsResponse>(`${ESP_BASE_URL}/esp/calendar/econ`, {
     method: "POST",
     body: JSON.stringify(payload),
-  }, NPP_API_TOKEN);
+  }, ESP_API_TOKEN);
 }
 
-export async function nppCoverage(days: number): Promise<CoverageResponse> {
-  return fetchJson<CoverageResponse>(`${NPP_BASE_URL}/npp/calendar/coverage?days=${days}`, undefined, NPP_API_TOKEN);
+export async function espCoverage(days: number): Promise<CoverageResponse> {
+  return fetchJson<CoverageResponse>(`${ESP_BASE_URL}/esp/calendar/coverage?days=${days}`, undefined, ESP_API_TOKEN);
 }
 
-export async function nppSanity(): Promise<SanityResponse> {
-  return fetchJson<SanityResponse>(`${NPP_BASE_URL}/npp/admin/sanity`, undefined, NPP_API_TOKEN);
+export async function espSanity(): Promise<SanityResponse> {
+  return fetchJson<SanityResponse>(`${ESP_BASE_URL}/esp/admin/sanity`, undefined, ESP_API_TOKEN);
 }
 
 export async function proxyExport(path: string, request: Request): Promise<Response> {
-  const target = addTokenToUrl(`${NPP_BASE_URL}${path}`, NPP_API_TOKEN);
+  const target = addTokenToUrl(`${ESP_BASE_URL}${path}`, ESP_API_TOKEN);
   const upstream = await fetch(target, {
     method: "GET",
     cache: "no-store",
