@@ -26,10 +26,10 @@ load_env_defaults "$ROOT_DIR/.env"
 load_env_defaults "$ROOT_DIR/config/qfinzero.env"
 
 : "${QFZ_HOST:=127.0.0.1}"
-: "${DASHBOARD_PORT:=19700}"
-: "${PMB_PORT:=19701}"
-: "${ESP_PORT:=19702}"
-: "${UPQ_PORT:=19703}"
+: "${DASHBOARD_PORT:=19300}"
+: "${PMB_PORT:=19380}"
+: "${ESP_PORT:=19330}"
+: "${UPQ_PORT:=19350}"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'

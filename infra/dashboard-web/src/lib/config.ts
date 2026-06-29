@@ -12,14 +12,14 @@ export type ServiceConfig = {
 export const SERVICES: ServiceConfig[] = [
   {
     name: "PMB",
-    baseUrl: process.env.PMB_BASE_URL ?? "http://127.0.0.1:19701",
+    baseUrl: process.env.PMB_BASE_URL ?? "http://127.0.0.1:19380",
     healthPath: "/v1/health",
     statsPath: "/_stats",
     apiToken: process.env.PMB_API_TOKEN,
   },
   {
     name: "ESP",
-    baseUrl: process.env.ESP_BASE_URL ?? "http://127.0.0.1:19702",
+    baseUrl: process.env.ESP_BASE_URL ?? "http://127.0.0.1:19330",
     healthPath: "/esp/health",
     statsPath: "/_stats",
     freshnessPath: "/esp/health/freshness",
@@ -27,14 +27,14 @@ export const SERVICES: ServiceConfig[] = [
   },
   {
     name: "UPQ",
-    baseUrl: process.env.UPQ_BASE_URL ?? "http://127.0.0.1:19703",
+    baseUrl: process.env.UPQ_BASE_URL ?? "http://127.0.0.1:19350",
     healthPath: "/health",
     freshnessPath: "/health/freshness",
     apiToken: process.env.UPQ_API_TOKEN,
   },
 ];
 
-export const ESP_BASE_URL = process.env.ESP_BASE_URL ?? "http://127.0.0.1:19702";
+export const ESP_BASE_URL = process.env.ESP_BASE_URL ?? "http://127.0.0.1:19330";
 export const ESP_API_TOKEN = process.env.ESP_API_TOKEN;
 export const STATUS_REFRESH_MS = Number(process.env.NEXT_PUBLIC_STATUS_REFRESH_MS ?? "15000");
 

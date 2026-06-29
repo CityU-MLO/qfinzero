@@ -5,7 +5,7 @@ A step-driven paper trading broker for backtesting AI trading agents. Supports s
 ## Server
 
 - **Language**: Python (FastAPI)
-- **Default Port**: 19701
+- **Default Port**: 19380
 - **Entry Point**: `infra/pmb/main.py`
 - **Dependency**: Requires UPQ service running for market data
 
@@ -13,12 +13,12 @@ A step-driven paper trading broker for backtesting AI trading agents. Supports s
 cd infra/pmb
 pip install -r requirements.txt
 python main.py
-# http://127.0.0.1:19701
+# http://127.0.0.1:19380
 ```
 
 ## API Overview
 
-**Base URL**: `http://127.0.0.1:19701/v1`
+**Base URL**: `http://127.0.0.1:19380/v1`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -67,12 +67,12 @@ MARKET_TICK → ORDER_EVENT → TRADE_EVENT → ACCOUNT_SNAPSHOT → RISK_EVENT
 
 ```bash
 # Create account
-curl -X POST http://127.0.0.1:19701/v1/accounts \
+curl -X POST http://127.0.0.1:19380/v1/accounts \
   -H 'Content-Type: application/json' \
   -d '{"account_type": "MARGIN", "initial_cash": 100000.0, "start_date": "2025-01-06"}'
 
 # Create session
-curl -X POST http://127.0.0.1:19701/v1/sessions \
+curl -X POST http://127.0.0.1:19380/v1/sessions \
   -H 'Content-Type: application/json' \
   -d '{
     "account_id": "<account_id>",
@@ -83,12 +83,12 @@ curl -X POST http://127.0.0.1:19701/v1/sessions \
   }'
 
 # Step simulation
-curl -X POST http://127.0.0.1:19701/v1/sessions/<session_id>/step \
+curl -X POST http://127.0.0.1:19380/v1/sessions/<session_id>/step \
   -H 'Content-Type: application/json' \
   -d '{"step": 1}'
 
 # Place order
-curl -X POST http://127.0.0.1:19701/v1/orders \
+curl -X POST http://127.0.0.1:19380/v1/orders \
   -H 'Content-Type: application/json' \
   -d '{
     "session_id": "<session_id>",
@@ -191,8 +191,8 @@ except PMBError as e:
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `PMB_HOST` | 127.0.0.1 | Bind host |
-| `PMB_PORT` | 19701 | Bind port |
-| `PMB_UPQ_BASE_URL` | http://127.0.0.1:19703 | UPQ service URL |
+| `PMB_PORT` | 19380 | Bind port |
+| `PMB_UPQ_BASE_URL` | http://127.0.0.1:19350 | UPQ service URL |
 | `PMB_LOG_LEVEL` | INFO | Log level |
 
 ## References

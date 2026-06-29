@@ -8,7 +8,7 @@ Shows how to:
   - Convert nanosecond timestamps
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703
+  - UPQ running on http://127.0.0.1:19350
 
 Usage:
   cd qfinzero

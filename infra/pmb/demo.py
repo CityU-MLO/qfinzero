@@ -2,8 +2,8 @@
 Demo: AAPL single-day minute replay with stock trades.
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703 with AAPL minute data for 2025-01-06
-  - PMB running on http://127.0.0.1:19701 (python main.py)
+  - UPQ running on http://127.0.0.1:19350 with AAPL minute data for 2025-01-06
+  - PMB running on http://127.0.0.1:19380 (python main.py)
 
 Usage:
   python demo.py

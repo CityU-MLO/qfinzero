@@ -1,2 +1,3 @@
-mcp[cli]>=1.0.0
+# >=1.10 for streamable-http transport + resources/prompts
+mcp[cli]>=1.10.0
 requests>=2.32.0

@@ -8,8 +8,8 @@ Strategy:
   - Single day: 2025-01-06
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703 with AAPL minute data
-  - PMB running on http://127.0.0.1:19701
+  - UPQ running on http://127.0.0.1:19350 with AAPL minute data
+  - PMB running on http://127.0.0.1:19380
 
 Usage:
   python demos/intraday_5min_signal.py

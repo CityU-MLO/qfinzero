@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 
 const PLAYGROUND_URL =
-  process.env.PLAYGROUND_SERVICE_URL ?? "http://localhost:19704";
+  process.env.PLAYGROUND_SERVICE_URL ?? "http://localhost:19390";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();

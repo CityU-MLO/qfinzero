@@ -6,7 +6,7 @@ import pytest
 # Mock base URLs — no real servers needed
 MOCK_UPQ_URL = "http://mock-upq:19350"
 MOCK_ESP_URL = "http://mock-esp:19330"
-MOCK_PMB_URL = "http://mock-pmb:19320"
+MOCK_PMB_URL = "http://mock-pmb:19380"
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ This helps assess look-ahead bias when using MARKET orders
 (which fill at close) vs using next-bar open as fill price.
 
 Usage:
-    python3 scripts/analyze_gaps.py [--base http://127.0.0.1:19703]
+    python3 scripts/analyze_gaps.py [--base http://127.0.0.1:19350]
 """
 
 import argparse
@@ -20,7 +20,7 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlencode
 
 
-UPQ_BASE = "http://127.0.0.1:19703"
+UPQ_BASE = "http://127.0.0.1:19350"
 TICKERS = ["QQQ", "NVDA", "AAPL", "SPY"]
 START = "2024-01-02"
 END = "2024-12-31"

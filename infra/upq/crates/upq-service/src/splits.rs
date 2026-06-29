@@ -67,6 +67,22 @@ impl SplitCalendar {
         self.events.get(ticker).is_some_and(|v| !v.is_empty())
     }
 
+    /// Expose events as (ticker, [(effective_date, ratio_as_f64)]) for conversion
+    /// into the unified corporate-actions calendar (legacy fallback).
+    pub fn iter_events(&self) -> Vec<(String, Vec<(String, f64)>)> {
+        self.events
+            .iter()
+            .map(|(ticker, evs)| {
+                (
+                    ticker.clone(),
+                    evs.iter()
+                        .map(|e| (e.effective_date.clone(), e.ratio as f64))
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     /// Returns the price adjustment factor for a given trade_date.
     /// Factor < 1.0 means the price needs to be divided (pre-split data).
     /// Factor = 1.0 means no adjustment needed.

@@ -8,8 +8,8 @@ import subprocess
 import requests
 from datetime import datetime, timedelta
 
-PMB_BASE = "http://127.0.0.1:19701"
-UPQ_CHAIN = "http://127.0.0.1:19703"
+PMB_BASE = "http://127.0.0.1:19380"
+UPQ_CHAIN = "http://127.0.0.1:19350"
 QLIB_CONTEXT_DIR = "/home/qlib/news/llm_context_2025"
 
 

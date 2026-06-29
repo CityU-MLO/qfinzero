@@ -7,8 +7,8 @@ Strategy:
   - Uses daily frequency
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703 with AAPL daily data
-  - PMB running on http://127.0.0.1:19701
+  - UPQ running on http://127.0.0.1:19350 with AAPL daily data
+  - PMB running on http://127.0.0.1:19380
 
 Usage:
   python demos/daily_buy_close.py

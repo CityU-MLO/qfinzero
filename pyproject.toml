@@ -11,10 +11,18 @@ dependencies = ["requests>=2.28"]
 
 [project.optional-dependencies]
 dev = ["pytest", "responses"]
+# Data pipeline (raw-source management + UPQ conversion). DuckDB mirrors the
+# UPQ Rust ingester so emitted parquet is byte-compatible.
+pipeline = ["duckdb>=1.0", "pyarrow>=15", "polars>=1.0"]
+
+[project.scripts]
+qfz-data = "qfinzero.pipeline.cli:main"
 
 [tool.setuptools]
 packages = [
     "qfinzero",
+    "qfinzero.pipeline",
+    "qfinzero.pipeline.sources",
     "qfinzero.clients",
     "qfinzero.clients.pmb",
     "qfinzero.clients.upq",

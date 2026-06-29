@@ -26,4 +26,4 @@ def test_smoke_script_defaults_to_standard_upq_port(monkeypatch):
     args = module.parse_args()
 
     assert args.host == "127.0.0.1"
-    assert args.port == 19703
+    assert args.port == 19350

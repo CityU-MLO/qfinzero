@@ -7,8 +7,8 @@ import type { ServiceStatusCard } from "@/lib/types";
 
 const sample: ServiceStatusCard = {
   name: "ESP",
-  baseUrl: "http://127.0.0.1:19702",
-  port: "19702",
+  baseUrl: "http://127.0.0.1:19330",
+  port: "19330",
   healthPath: "/esp/health",
   state: "stale",
   version: "qfinzero:deadbee",

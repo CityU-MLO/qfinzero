@@ -6,7 +6,7 @@ This document describes the UPQ (Unified Price Query) client as a set of callabl
 
 ```python
 from qfinzero.clients.upq import UPQClient, UPQError
-upq = UPQClient()  # default: http://127.0.0.1:19703
+upq = UPQClient()  # default: http://127.0.0.1:19350
 ```
 
 ---

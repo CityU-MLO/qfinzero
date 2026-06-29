@@ -4,13 +4,13 @@ Three comprehensive demos showcasing different trading strategies using the Pape
 
 ## Prerequisites
 
-1. **UPQ Service Running** (port 19703)
+1. **UPQ Service Running** (port 19350)
    ```bash
    cd infra/upq
    cargo run -p upq-service
    ```
 
-2. **PMB Service Running** (port 19701)
+2. **PMB Service Running** (port 19380)
    ```bash
    cd infra/pmb
    python main.py
@@ -196,11 +196,11 @@ print(f"Max drawdown: {summary['max_drawdown']*100:.2f}%")
 
 **"UPQ_NOT_RUNNING"**:
 - Start UPQ service first
-- Verify port 19703 is accessible: `curl http://127.0.0.1:19703/health`
+- Verify port 19350 is accessible: `curl http://127.0.0.1:19350/health`
 
 **"session not found"**:
 - Ensure PMB service is running
-- Check port 19701: `curl http://127.0.0.1:19701/v1/health`
+- Check port 19380: `curl http://127.0.0.1:19380/v1/health`
 
 **"invalid_argument: limit_price required"**:
 - Check order type matches required fields

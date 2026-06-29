@@ -11,11 +11,11 @@
 #   -b <branch>   — use specific branch instead of default (main)
 #
 # Services run on the remote host accessible via `ssh qlib`.
-#   PMB         19701  /home/qlib/qfinzero/infra/pmb          (Python)
-#   ESP         19702  /home/qlib/qfinzero/infra/esp          (Python)
-#   UPQ         19703  /home/qlib/qfinzero/infra/upq          (Rust binary)
-#   PLAYGROUND  19704  /home/qlib/qfinzero/infra/playground   (Python / LangGraph)
-#   WEB         19700  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
+#   ESP         19330  /home/qlib/qfinzero/infra/esp          (Python)
+#   UPQ         19350  /home/qlib/qfinzero/infra/upq          (Rust binary)
+#   PMB         19380  /home/qlib/qfinzero/infra/pmb          (Python)
+#   PLAYGROUND  19390  /home/qlib/qfinzero/infra/playground   (Python / LangGraph)
+#   WEB         19300  /home/qlib/qfinzero/infra/dashboard-web (Next.js)
 
 set -euo pipefail
 
@@ -29,11 +29,11 @@ WEB_REMOTE_BRANCH="main"
 LOG_DIR="/tmp/efan"
 PID_DIR="/tmp/efan"
 
-PMB_PORT=19701
-ESP_PORT=19702
-UPQ_PORT=19703
-PLAYGROUND_PORT=19704
-WEB_PORT=19700
+PMB_PORT=19380
+ESP_PORT=19330
+UPQ_PORT=19350
+PLAYGROUND_PORT=19390
+WEB_PORT=19300
 
 PYTHON="/home/qlib/miniconda3/bin/python3.13"
 WEB_DIR="$REMOTE_ROOT/infra/dashboard-web"

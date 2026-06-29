@@ -6,10 +6,10 @@
 #   ./scripts/run_all.sh pmb esp  # start specific services
 #
 # Ports (defaults; override via environment or repo-root .env):
-#   DASHBOARD  19700   Next.js Dashboard (production)
-#   PMB        19701   Paper Money Broker
-#   ESP        19702   News Pushing Pipeline
-#   UPQ        19703   Unified Price Query
+#   DASHBOARD  19300   Next.js Dashboard (production)
+#   ESP        19330   News Pushing Pipeline
+#   UPQ        19350   Unified Price Query
+#   PMB        19380   Paper Money Broker
 
 set -e
 
@@ -43,10 +43,12 @@ load_env_defaults "$ROOT_DIR/.env"
 load_env_defaults "$ROOT_DIR/config/qfinzero.env"
 
 : "${QFZ_HOST:=127.0.0.1}"
-: "${DASHBOARD_PORT:=19700}"
-: "${PMB_PORT:=19701}"
-: "${ESP_PORT:=19702}"
-: "${UPQ_PORT:=19703}"
+: "${DASHBOARD_PORT:=19300}"
+: "${PMB_PORT:=19380}"
+: "${ESP_PORT:=19330}"
+: "${UPQ_PORT:=19350}"
+: "${QFZ_DATA_ROOT:=/data/qfinzero}"
+: "${STORAGE_ROOT:=$QFZ_DATA_ROOT/upq}"
 
 # ── Color helpers ────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -80,9 +82,9 @@ start_upq() {
     info "Starting UPQ (Unified Price Query) on port $UPQ_PORT..."
     cd "$ROOT_DIR/infra/upq"
     if [ -f "target/release/upq-service" ]; then
-        PORT="$UPQ_PORT" ./target/release/upq-service > "$LOG_DIR/upq.log" 2>&1 &
+        PORT="$UPQ_PORT" STORAGE_ROOT="$STORAGE_ROOT" ./target/release/upq-service > "$LOG_DIR/upq.log" 2>&1 &
     elif [ -f "target/debug/upq-service" ]; then
-        PORT="$UPQ_PORT" ./target/debug/upq-service > "$LOG_DIR/upq.log" 2>&1 &
+        PORT="$UPQ_PORT" STORAGE_ROOT="$STORAGE_ROOT" ./target/debug/upq-service > "$LOG_DIR/upq.log" 2>&1 &
     else
         warn "UPQ binary not found. Run 'cargo build --release' in infra/upq first."
         return 1

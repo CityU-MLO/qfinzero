@@ -33,8 +33,8 @@ use upq_core::validation::{
 
 use crate::dividends::DividendCalendar;
 use crate::greeks::{compute_greeks, IvStatus};
+use crate::corporate_actions::{AdjustMode, CorporateActions};
 use crate::rates_curve::RatesCurve;
-use crate::splits::SplitCalendar;
 
 const MAX_LIMIT: usize = 100_000;
 const RATES_CACHE_CAPACITY: usize = 512;
@@ -44,7 +44,7 @@ pub struct AppState {
     storage_root: PathBuf,
     rates_cache: Arc<RwLock<RatesCache>>,
     dividend_calendar: Arc<DividendCalendar>,
-    split_calendar: Arc<SplitCalendar>,
+    corporate_actions: Arc<CorporateActions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,7 +146,8 @@ pub struct GreekResult {
 }
 
 pub fn build_router() -> Router {
-    let storage_root = env::var("STORAGE_ROOT").unwrap_or_else(|_| "./storage".to_string());
+    let storage_root =
+        env::var("STORAGE_ROOT").unwrap_or_else(|_| "/data/qfinzero/upq".to_string());
     eprintln!("upq-service storage_root={storage_root}");
     build_router_with_storage_root(storage_root)
 }
@@ -170,28 +171,14 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         Arc::new(DividendCalendar::empty())
     };
 
-    let splits_path = storage_root.join("splits.json");
-    let split_calendar = if splits_path.is_file() {
-        match SplitCalendar::load(&splits_path) {
-            Ok(cal) => {
-                tracing::info!(path = %splits_path.display(), "loaded split calendar");
-                Arc::new(cal)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to load splits, using empty calendar");
-                Arc::new(SplitCalendar::empty())
-            }
-        }
-    } else {
-        tracing::info!("no splits.json found, using empty split calendar");
-        Arc::new(SplitCalendar::empty())
-    };
+    // Unified corporate-actions calendar (parquet, with legacy splits.json fallback).
+    let corporate_actions = Arc::new(CorporateActions::load_from_storage(&storage_root));
 
     let state = AppState {
         storage_root,
         rates_cache: Arc::new(RwLock::new(RatesCache::default())),
         dividend_calendar,
-        split_calendar,
+        corporate_actions,
     };
 
     Router::new()
@@ -220,6 +207,8 @@ struct StockQuery {
     fields: Option<String>,
     limit: Option<usize>,
     indicators: Option<String>,
+    /// Price adjustment: none (default, raw/as-traded) | split | total.
+    adjust: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +260,11 @@ async fn stock(
     if limit == 0 || limit > MAX_LIMIT {
         return invalid_argument("limit must be between 1 and 100000");
     }
+
+    let adjust = match AdjustMode::parse(params.adjust.as_deref()) {
+        Ok(mode) => mode,
+        Err(message) => return invalid_argument(&message),
+    };
 
     if validate_datetime(&params.start).is_err() || validate_datetime(&params.end).is_err() {
         return invalid_argument("start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS");
@@ -333,7 +327,7 @@ async fn stock(
 
     match run_sql_json_async(sql).await {
         Ok(mut rows) => {
-            apply_split_adjustment(&state.split_calendar, &mut rows);
+            apply_adjustment(&state.corporate_actions, &mut rows, adjust);
             (StatusCode::OK, Json(Value::Array(rows))).into_response()
         }
         Err(error) => internal_error(error),
@@ -347,6 +341,11 @@ async fn stock_daily(
     if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
         return invalid_argument("start/end must be date: YYYY-MM-DD");
     }
+
+    let adjust = match AdjustMode::parse(params.adjust.as_deref()) {
+        Ok(mode) => mode,
+        Err(message) => return invalid_argument(&message),
+    };
 
     let tickers = parse_csv_list(&params.tickers);
     if tickers.is_empty() {
@@ -413,7 +412,7 @@ async fn stock_daily(
 
     match run_sql_json_async(sql).await {
         Ok(mut rows) => {
-            apply_split_adjustment(&state.split_calendar, &mut rows);
+            apply_adjustment(&state.corporate_actions, &mut rows, adjust);
 
             if !indicator_list.is_empty() {
                 compute_indicators(&mut rows, &indicator_list);
@@ -432,10 +431,16 @@ async fn stock_daily(
     }
 }
 
-/// Apply split adjustments to JSON rows in-place.
-/// Each row must have a `ticker` field and either a `date` or `trade_date` field
-/// for the adjustment factor to be computed. Rows without these fields are skipped.
-fn apply_split_adjustment(split_calendar: &SplitCalendar, rows: &mut [Value]) {
+/// Apply on-read corporate-action adjustment to JSON rows in-place.
+///
+/// `adjust=none` (default) leaves raw/as-traded values untouched. `split` and
+/// `total` apply forward split (and, for `total`, dividend) factors per bar.
+/// Each row must have a `ticker` field and a `date` or `trade_date` field; rows
+/// missing these are skipped.
+fn apply_adjustment(ca: &CorporateActions, rows: &mut [Value], mode: AdjustMode) {
+    if mode == AdjustMode::None {
+        return;
+    }
     for row in rows.iter_mut() {
         let obj = match row.as_object_mut() {
             Some(o) => o,
@@ -447,42 +452,42 @@ fn apply_split_adjustment(split_calendar: &SplitCalendar, rows: &mut [Value]) {
             None => continue,
         };
 
-        if !split_calendar.has_splits(&ticker) {
+        if !ca.has_events(&ticker) {
             continue;
         }
 
-        // Extract trade_date from the "date" field (stock_daily uses "date" alias)
-        // or from "trade_date" field
+        // stock_daily exposes "date" (alias of trade_date); stock_minute "trade_date".
         let trade_date = obj
             .get("date")
             .or_else(|| obj.get("trade_date"))
             .and_then(|v| v.as_str())
-            .map(|s| s[..10].to_string()); // Take first 10 chars (YYYY-MM-DD)
+            .map(|s| s[..10].to_string()); // first 10 chars (YYYY-MM-DD)
 
         let trade_date = match trade_date {
             Some(d) => d,
             None => continue,
         };
 
-        let factor = split_calendar.adjustment_factor(&ticker, &trade_date);
-        if (factor - 1.0).abs() < 1e-12 {
+        let (price_factor, vol_factor) = ca.factors(&ticker, &trade_date, mode);
+        if (price_factor - 1.0).abs() < 1e-12 && (vol_factor - 1.0).abs() < 1e-12 {
             continue;
         }
 
-        // Adjust price fields if present
-        for field in &["open", "high", "low", "close"] {
-            if let Some(val) = obj.get_mut(*field) {
-                if let Some(price) = val.as_f64() {
-                    *val = Value::from(price * factor);
+        if (price_factor - 1.0).abs() >= 1e-12 {
+            for field in &["open", "high", "low", "close"] {
+                if let Some(val) = obj.get_mut(*field) {
+                    if let Some(price) = val.as_f64() {
+                        *val = Value::from(price * price_factor);
+                    }
                 }
             }
         }
 
-        // Adjust volume if present (inverse of price factor)
-        let vol_factor = (1.0 / factor).round() as i64;
-        if let Some(val) = obj.get_mut("volume") {
-            if let Some(vol) = val.as_i64() {
-                *val = Value::from(vol * vol_factor);
+        if (vol_factor - 1.0).abs() >= 1e-12 {
+            if let Some(val) = obj.get_mut("volume") {
+                if let Some(vol) = val.as_f64() {
+                    *val = Value::from((vol * vol_factor).round() as i64);
+                }
             }
         }
     }

@@ -26,7 +26,7 @@ class TestHealth:
     def test_default_base_url_uses_standard_upq_port(self):
         client = UPQClient()
         try:
-            assert client.base_url == "http://127.0.0.1:19703"
+            assert client.base_url == "http://127.0.0.1:19350"
         finally:
             client.close()
 

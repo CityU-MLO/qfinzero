@@ -8,7 +8,7 @@ Shows how to:
   - Filter by importance
 
 Prerequisites:
-  - ESP running on http://127.0.0.1:19702
+  - ESP running on http://127.0.0.1:19330
 
 Usage:
   cd qfinzero

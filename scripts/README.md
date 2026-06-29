@@ -36,11 +36,11 @@ Services and ports on qlib:
 
 | Service | Port | Description |
 |---|---|---|
-| PMB | 19701 | Paper Money Broker |
-| ESP | 19702 | News Pushing Pipeline |
-| UPQ | 19703 | Unified Price Query (Rust) |
-| Playground | 19704 | LangGraph playground |
-| Web | 19700 | Next.js dashboard |
+| Web | 19300 | Next.js dashboard |
+| ESP | 19330 | News Pushing Pipeline |
+| UPQ | 19350 | Unified Price Query (Rust) |
+| PMB | 19380 | Paper Money Broker |
+| Playground | 19390 | LangGraph playground |
 
 ---
 

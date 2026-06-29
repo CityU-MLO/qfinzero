@@ -23,7 +23,16 @@ from mcp.server.fastmcp import FastMCP
 from clients.upq.client import UPQClient
 from clients.esp.client import ESPClient
 from clients.pmb.client import PMBClient
-from qfinzero.config import PMB_URL as DEFAULT_PMB_URL, ESP_URL as DEFAULT_ESP_URL, UPQ_URL as DEFAULT_UPQ_URL
+from qfinzero.config import (
+    PMB_URL as DEFAULT_PMB_URL,
+    ESP_URL as DEFAULT_ESP_URL,
+    UPQ_URL as DEFAULT_UPQ_URL,
+    DASHBOARD_PORT,
+    PMB_PORT,
+    ESP_PORT,
+    UPQ_PORT,
+    PLAYGROUND_PORT,
+)
 
 # ── Service URLs (can be overridden via env vars) ────────────────────────────
 
@@ -31,8 +40,15 @@ UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", DEFAULT_UPQ_URL)
 ESP_URL = os.environ.get("QFINZERO_ESP_URL", DEFAULT_ESP_URL)
 PMB_URL = os.environ.get("QFINZERO_PMB_URL", DEFAULT_PMB_URL)
 
+# ── MCP transport (modern: stdio default; streamable-http for remote/HTTP) ────
+MCP_TRANSPORT = os.environ.get("QFINZERO_MCP_TRANSPORT", "stdio")
+MCP_HOST = os.environ.get("QFINZERO_MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.environ.get("QFINZERO_MCP_PORT", "19360"))
+
 mcp = FastMCP(
     "QFinZero",
+    host=MCP_HOST,
+    port=MCP_PORT,
     instructions=(
         "QFinZero is a unified trading environment for LLM agents. "
         "It provides three services: UPQ (market data), ESP (news & events), "
@@ -1077,8 +1093,106 @@ def pmb_cancel_order(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# RESOURCES — read-only reference data agents can pull on demand
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.resource("qfinzero://ports")
+def resource_ports() -> str:
+    """Canonical QFinZero service port map (193xx block)."""
+    return json.dumps(
+        {
+            "dashboard": DASHBOARD_PORT,
+            "esp": ESP_PORT,
+            "upq": UPQ_PORT,
+            "pmb": PMB_PORT,
+            "playground": PLAYGROUND_PORT,
+            "service_urls": {"upq": UPQ_URL, "esp": ESP_URL, "pmb": PMB_URL},
+        },
+        indent=2,
+    )
+
+
+@mcp.resource("qfinzero://data/freshness")
+def resource_data_freshness() -> str:
+    """Live UPQ market-data freshness (latest dates, record counts per store)."""
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.freshness(), indent=2)
+
+
+@mcp.resource("qfinzero://health")
+def resource_health() -> str:
+    """Combined health of UPQ, ESP, and PMB services."""
+    out = {}
+    try:
+        with UPQClient(UPQ_URL) as c:
+            out["upq"] = c.health()
+    except Exception as e:  # noqa: BLE001
+        out["upq"] = {"status": "down", "error": str(e)}
+    try:
+        with ESPClient(ESP_URL) as c:
+            out["esp"] = c.health()
+    except Exception as e:  # noqa: BLE001
+        out["esp"] = {"status": "down", "error": str(e)}
+    try:
+        with PMBClient(PMB_URL) as c:
+            out["pmb"] = c.health()
+    except Exception as e:  # noqa: BLE001
+        out["pmb"] = {"status": "down", "error": str(e)}
+    return json.dumps(out, indent=2)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PROMPTS — reusable agent workflow templates
+# ════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.prompt()
+def trading_session(
+    universe: str = "AAPL,NVDA",
+    frequency: Literal["1d", "1m"] = "1d",
+    start_date: str = "2025-01-06",
+    end_date: str = "2025-01-31",
+) -> str:
+    """Scaffold a complete QFinZero paper-trading session loop."""
+    return (
+        f"Run a paper-trading session over {universe} at {frequency} frequency "
+        f"from {start_date} to {end_date}.\n\n"
+        "Steps:\n"
+        "1. pmb_create_account(initial_cash=100000, start_date=...).\n"
+        "2. pmb_create_session(account_id, frequency, start_ts, end_ts, universe).\n"
+        "3. Loop while the session is running:\n"
+        "   a. pmb_step_session to advance time and read MARKET_TICK / events.\n"
+        "   b. esp_query_events / upq_stock_daily for context at the current time.\n"
+        "   c. pmb_buy_stock / pmb_sell_stock to act.\n"
+        "4. pmb_get_summary for performance (return, drawdown, Sharpe).\n\n"
+        "Use adjust=none for raw prints; adjust=split or adjust=total when you need "
+        "split/dividend-adjusted history."
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Entry point
 # ════════════════════════════════════════════════════════════════════════════
 
+
+def main() -> None:
+    """Run the MCP server.
+
+    Transport via QFINZERO_MCP_TRANSPORT:
+      * ``stdio``           (default) — local Claude Desktop / Claude Code.
+      * ``streamable-http`` — modern HTTP transport for remote/multi-client use
+                              (listens on QFINZERO_MCP_HOST:QFINZERO_MCP_PORT).
+      * ``sse``             — legacy HTTP+SSE transport.
+    """
+    transport = MCP_TRANSPORT.strip().lower()
+    if transport in ("http", "streamable-http", "streamable_http"):
+        mcp.run(transport="streamable-http")
+    elif transport == "sse":
+        mcp.run(transport="sse")
+    else:
+        mcp.run()
+
+
 if __name__ == "__main__":
-    mcp.run()
+    main()

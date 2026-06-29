@@ -1,3 +1,4 @@
+pub mod corporate_actions;
 pub mod dividends;
 pub mod indicators;
 pub mod splits;

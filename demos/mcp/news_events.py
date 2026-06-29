@@ -14,7 +14,7 @@ Covers:
   - esp_timeline         — time-bucketed event summary
 
 Prerequisites:
-  - ESP running on http://127.0.0.1:19702
+  - ESP running on http://127.0.0.1:19330
   - MCP server deps: pip install "mcp[cli]>=1.0.0"
 
 Usage:

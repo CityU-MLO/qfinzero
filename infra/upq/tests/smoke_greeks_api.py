@@ -2,7 +2,7 @@
 """Smoke test for UPQ realtime Greeks endpoints.
 
 Usage:
-  python3 infra/upq/tests/smoke_greeks_api.py --host 127.0.0.1 --port 19703
+  python3 infra/upq/tests/smoke_greeks_api.py --host 127.0.0.1 --port 19350
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def check_ticker_minute(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="UPQ realtime Greeks smoke test")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=19703)
+    parser.add_argument("--port", type=int, default=19350)
     parser.add_argument("--underlying", default="AAPL")
     parser.add_argument("--date", default="2025-12-30")
     parser.add_argument("--expiry", default="2026-01-16")

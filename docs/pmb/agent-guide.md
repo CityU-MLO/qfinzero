@@ -8,7 +8,7 @@ PMB is a step-driven paper trading simulator. The typical workflow is: **create 
 
 ```python
 from qfinzero.clients.pmb import PMBClient, StepResult, PMBError
-pmb = PMBClient()  # default: http://127.0.0.1:19701
+pmb = PMBClient()  # default: http://127.0.0.1:19380
 ```
 
 ---

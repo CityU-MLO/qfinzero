@@ -26,7 +26,7 @@ cp .env.example .env
 cargo run -p upq-service
 
 # 6. Test
-curl http://127.0.0.1:19703/health
+curl http://127.0.0.1:19350/health
 ```
 
 ## Configuration
@@ -42,12 +42,12 @@ cp .env.example .env
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `STORAGE_ROOT` | Yes | - | Path to ingested parquet data directory |
-| `PORT` | No | 19703 | Server port to bind |
+| `PORT` | No | 19350 | Server port to bind |
 | `RUST_LOG` | No | info | Log level (trace, debug, info, warn, error) |
 
 Example `.env`:
 ```bash
-PORT=19703
+PORT=19350
 STORAGE_ROOT=/home/qlib/upq_storage
 RUST_LOG=info
 ```
@@ -102,7 +102,7 @@ Expected output:
 ```bash
 cargo run -p upq-service
 ```
-Default bind: `127.0.0.1:19703`
+Default bind: `127.0.0.1:19350`
 
 API routes:
 - `GET /health`
@@ -164,11 +164,11 @@ sudo systemctl status upq
 
 6. Health check:
 ```bash
-curl -sS http://127.0.0.1:19703/health
+curl -sS http://127.0.0.1:19350/health
 ```
 
 Notes:
-- Service currently binds `127.0.0.1:19703`; expose externally via reverse proxy if needed.
+- Service currently binds `127.0.0.1:19350`; expose externally via reverse proxy if needed.
 - Rollback: keep previous binary under `/opt/upq/bin` and restart `upq` service.
 
 ## Ingest Sample Data

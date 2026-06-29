@@ -8,8 +8,8 @@ Strategy:
   - Run for 3 months with detailed tracking
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703 with NVDA stock data
-  - PMB running on http://127.0.0.1:19701
+  - UPQ running on http://127.0.0.1:19350 with NVDA stock data
+  - PMB running on http://127.0.0.1:19380
 
 Note: This demo simulates a rolling covered call strategy.
       If actual option data is unavailable from UPQ, it will track stock only.

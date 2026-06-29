@@ -10,7 +10,7 @@ Shows how to:
   - Use replay mode with now_utc
 
 Prerequisites:
-  - ESP running on http://127.0.0.1:19702
+  - ESP running on http://127.0.0.1:19330
 
 Usage:
   cd qfinzero

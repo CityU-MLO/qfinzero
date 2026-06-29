@@ -11,8 +11,8 @@ Tracks three key metrics:
   3. Equity curve — LLM agent vs rule-based vs buy-and-hold
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703
-  - PMB running on http://127.0.0.1:19701
+  - UPQ running on http://127.0.0.1:19350
+  - PMB running on http://127.0.0.1:19380
   - DeepSeek API key in eval/models.yaml
 
 Usage:

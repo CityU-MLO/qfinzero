@@ -18,21 +18,21 @@ Large language model (LLM) agents are increasingly applied to financial decision
 
 | Service | Full Name | Port | Description |
 |---------|-----------|------|-------------|
-| **Dashboard Web** | Next.js monitoring frontend | 19700 | Status dashboard and web UI for service browsing and playground access |
-| **PMB** | Paper Money Broker | 19701 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
-| **ESP** | News Pushing Pipeline | 19702 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
-| **UPQ** | Unified Price Query | 19703 | Multi-resolution stock, option, and rates data (Rust/Axum) |
-| **Playground** | Agent playground service | 19704 | LLM agent backend used by the web playground UI |
+| **Dashboard Web** | Next.js monitoring frontend | 19300 | Status dashboard and web UI for service browsing and playground access |
+| **PMB** | Paper Money Broker | 19380 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
+| **ESP** | News Pushing Pipeline | 19330 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
+| **UPQ** | Unified Price Query | 19350 | Multi-resolution stock, option, and rates data (Rust/Axum) |
+| **Playground** | Agent playground service | 19390 | LLM agent backend used by the web playground UI |
 
 ### Port Layout
 
 | Port | Service | Primary Endpoint |
 |------|---------|------------------|
-| `19700` | Dashboard Web | `http://127.0.0.1:19700/` |
-| `19701` | PMB | `http://127.0.0.1:19701/v1/health` |
-| `19702` | ESP | `http://127.0.0.1:19702/esp/health` |
-| `19703` | UPQ | `http://127.0.0.1:19703/health` |
-| `19704` | Playground | `http://127.0.0.1:19704/health` |
+| `19300` | Dashboard Web | `http://127.0.0.1:19300/` |
+| `19380` | PMB | `http://127.0.0.1:19380/v1/health` |
+| `19330` | ESP | `http://127.0.0.1:19330/esp/health` |
+| `19350` | UPQ | `http://127.0.0.1:19350/health` |
+| `19390` | Playground | `http://127.0.0.1:19390/health` |
 
 ## Architecture
 
@@ -50,7 +50,7 @@ Large language model (LLM) agents are increasingly applied to financial decision
          v              v              v
     ┌─────────┐    ┌─────────┐    ┌─────────┐
     │   UPQ   │    │   ESP   │    │   PMB   │
-    │ :19703  │    │ :19702  │    │ :19701  │
+    │ :19350  │    │ :19330  │    │ :19380  │
     └─────────┘    └────┬────┘    └────┬────┘
          ▲              │              │
          │              v              │
@@ -65,7 +65,7 @@ Large language model (LLM) agents are increasingly applied to financial decision
 
 ### Core Components
 
-**Unified Price Query (UPQ)** provides multi-resolution price data (minute and daily bars) for equities, options (OPRA), and treasury yields through a single API. Agents query structured market states without handling vendor-specific formatting.
+**Unified Price Query (UPQ)** provides multi-resolution price data (minute and daily bars) for equities (US + CN A-shares), options (OPRA), and treasury yields through a single API. Agents query structured market states without handling vendor-specific formatting. Stock prices are stored raw/as-traded; pass `adjust=split` or `adjust=total` to apply split / split+dividend adjustment on read (default `none`).
 
 **News Pushing Pipeline (ESP)** aggregates news articles (MongoDB), earnings calendars (Benzinga), and US economic events (NASDAQ) into a canonical event schema. Supports three query modes: upcoming events, recently occurred events, and arbitrary time windows. All times normalized to UTC.
 
@@ -76,6 +76,54 @@ Large language model (LLM) agents are increasingly applied to financial decision
 - **PMB -> UPQ**: PMB fetches market data from UPQ at session creation.
 - **ESP -> MongoDB + SQLite**: ESP reads from three local data sources.
 - **UPQ** is fully independent.
+
+## Data Pipeline
+
+UPQ is fed by a built-in, out-of-the-box pipeline (`qfz-data`) that manages two
+raw market-data sources **in place** (never copied) and converts them into UPQ's
+storage format:
+
+| Vendor | Markets | Raw location (default) |
+|--------|---------|------------------------|
+| massive | US stocks, options (OPRA), treasury yields, corporate actions | `/data/massive_data` |
+| tushare | CN A-shares (+ dividends) | `/data/tushare_data` |
+
+Both sources are normalized into one storage root with a single unified
+**corporate-actions** table. Splits use fractional ratios (e.g. CN 送转 "10转15"
+→ 1.5; reverse splits supported), and each dividend carries a precomputed price
+ratio so UPQ applies split / dividend adjustment on read without re-deriving it.
+
+```bash
+pip install -e ".[pipeline]"          # adds duckdb + pyarrow + polars
+
+# Defaults live under the data root (QFZ_DATA_ROOT=/data/qfinzero); override if needed:
+export QFZ_DATA_ROOT=/data/qfinzero    # STORAGE_ROOT defaults to $QFZ_DATA_ROOT/upq
+export RAW_MASSIVE_DIR=/data/massive_data
+export RAW_TUSHARE_DIR=/data/tushare_data
+
+qfz-data status                       # what raw data exists + conversion state
+qfz-data convert --market us --all    # US stocks + options + rates + corp actions
+qfz-data convert --market cn --all    # CN A-shares + corp actions
+qfz-data convert --all                # everything (incremental + idempotent)
+qfz-data validate                     # row-count / schema checks on storage
+```
+
+The converter writes byte-compatible parquet (`stock_daily/`, `stock_minute/`,
+`option_day/`, `option_minute/` partitioned by `trade_date=`; plus `rates/` and
+`corporate_actions/`) that the UPQ service reads directly. Point the UPQ service
+at the same `STORAGE_ROOT`.
+
+### Data root
+
+All QFinZero-owned data lives under a single root, `QFZ_DATA_ROOT` (default
+`/data/qfinzero`):
+
+```
+/data/qfinzero/
+├── upq/    UPQ price storage (STORAGE_ROOT) — built by `qfz-data convert`
+├── esp/    ESP event databases (benzinga_earnings.sqlite3, nasdaq_econ_events.sqlite3)
+└── raw/    symlinks to shared raw vendor data (massive, tushare) — read in place
+```
 
 ## Installation
 
@@ -93,7 +141,7 @@ from qfinzero.clients.pmb import PMBClient
 
 ## Quick Start
 
-Ports default to `19700` to `19704`. Override them with environment variables, or create a root `.env` from `.env.example` for local development overrides.
+Ports default to `19300` to `19390`. Override them with environment variables, or create a root `.env` from `.env.example` for local development overrides.
 
 ### Start All Services
 
@@ -111,41 +159,41 @@ Ports default to `19700` to `19704`. Override them with environment variables, o
 cd infra/dashboard-web
 pnpm install --no-frozen-lockfile
 pnpm build
-PORT=19700 \
-PMB_BASE_URL=http://127.0.0.1:19701 \
-ESP_BASE_URL=http://127.0.0.1:19702 \
-UPQ_BASE_URL=http://127.0.0.1:19703 \
-PLAYGROUND_SERVICE_URL=http://127.0.0.1:19704 \
+PORT=19300 \
+PMB_BASE_URL=http://127.0.0.1:19380 \
+ESP_BASE_URL=http://127.0.0.1:19330 \
+UPQ_BASE_URL=http://127.0.0.1:19350 \
+PLAYGROUND_SERVICE_URL=http://127.0.0.1:19390 \
 pnpm start
-# open http://127.0.0.1:19700
+# open http://127.0.0.1:19300
 
 # UPQ (Rust — build first)
 cd infra/upq
 cargo build --release
 STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# curl http://127.0.0.1:19703/health
+# curl http://127.0.0.1:19350/health
 
 # ESP (Python)
 cd infra/esp
 pip install -r requirements.txt
 python main.py
-# curl http://127.0.0.1:19702/esp/health
+# curl http://127.0.0.1:19330/esp/health
 
 # PMB (Python — requires UPQ running)
 cd infra/pmb
 pip install -r requirements.txt
 python main.py
-# curl http://127.0.0.1:19701/v1/health
+# curl http://127.0.0.1:19380/v1/health
 
 # Playground (Python — expects PMB/ESP/UPQ running)
 cd infra/playground
 pip install -r requirements.txt
-PLAYGROUND_PORT=19704 \
-QFINZERO_PMB_URL=http://127.0.0.1:19701 \
-QFINZERO_ESP_URL=http://127.0.0.1:19702 \
-QFINZERO_UPQ_URL=http://127.0.0.1:19703 \
+PLAYGROUND_PORT=19390 \
+QFINZERO_PMB_URL=http://127.0.0.1:19380 \
+QFINZERO_ESP_URL=http://127.0.0.1:19330 \
+QFINZERO_UPQ_URL=http://127.0.0.1:19350 \
 python main.py
-# curl http://127.0.0.1:19704/health
+# curl http://127.0.0.1:19390/health
 ```
 
 ### Start Monitoring Frontend (Dev Mode)
@@ -211,15 +259,19 @@ qfinzero/
 │   ├── upq/                    #   UPQ API docs + OpenAPI
 │   ├── esp/                    #   ESP API docs + OpenAPI
 │   └── pmb/                    #   PMB API docs + OpenAPI
+├── qfinzero/pipeline/          # qfz-data pipeline (raw-source mgmt + UPQ conversion)
 ├── .env.example                # Example local overrides
-├── data/                       # Local databases
-│   ├── benzinga_earnings.sqlite3
-│   └── nasdaq_econ_events.sqlite3
 ├── scripts/                    # Service management
 │   ├── run_all.sh
 │   ├── stop_all.sh
 │   └── status.sh
 └── pyproject.toml
+
+# Data lives OUTSIDE the repo under QFZ_DATA_ROOT (default /data/qfinzero):
+/data/qfinzero/
+├── upq/                        # UPQ price storage (parquet)
+├── esp/                        # ESP databases (benzinga_earnings, nasdaq_econ_events)
+└── raw/                        # symlinks to shared raw vendor data (massive, tushare)
 ```
 
 ## Configuration
@@ -228,7 +280,7 @@ Configuration follows a simple layered model:
 
 1. Environment variables take highest priority.
 2. Root `.env` is an optional local development override.
-3. Code defaults fall back to the standard `19700` to `19704` port range.
+3. Code defaults fall back to the standard `19300` to `19390` port range.
 
 Start by copying `.env.example` if you want local overrides:
 
@@ -240,17 +292,28 @@ cp .env.example .env
 
 | Service | Port | Env Override |
 |---------|------|-------------|
-| Dashboard Web | 19700 | `DASHBOARD_PORT` |
-| PMB | 19701 | `PMB_PORT` |
-| ESP | 19702 | `ESP_PORT` |
-| UPQ | 19703 | `UPQ_PORT` (service reads `PORT`) |
-| Playground | 19704 | `PLAYGROUND_PORT` |
+| Dashboard Web | 19300 | `DASHBOARD_PORT` |
+| PMB | 19380 | `PMB_PORT` |
+| ESP | 19330 | `ESP_PORT` |
+| UPQ | 19350 | `UPQ_PORT` (service reads `PORT`) |
+| Playground | 19390 | `PLAYGROUND_PORT` |
 
 Related service URL overrides:
 
 - `PMB_BASE_URL`, `ESP_BASE_URL`, `UPQ_BASE_URL` for `dashboard-web`
 - `PLAYGROUND_SERVICE_URL` for the web playground proxy
 - `QFINZERO_PMB_URL`, `QFINZERO_ESP_URL`, `QFINZERO_UPQ_URL` for `playground`
+
+Data paths (all default under `QFZ_DATA_ROOT`, default `/data/qfinzero`):
+
+| Data | Default | Env Override |
+|------|---------|-------------|
+| Data root | `/data/qfinzero` | `QFZ_DATA_ROOT` |
+| UPQ price storage | `$QFZ_DATA_ROOT/upq` | `STORAGE_ROOT` |
+| ESP earnings DB | `$QFZ_DATA_ROOT/esp/benzinga_earnings.sqlite3` | `EARNINGS_DB` |
+| ESP econ-events DB | `$QFZ_DATA_ROOT/esp/nasdaq_econ_events.sqlite3` | `ECON_EVENTS_DB` |
+| Raw massive (shared) | `/data/massive_data` | `RAW_MASSIVE_DIR` |
+| Raw tushare (shared) | `/data/tushare_data` | `RAW_TUSHARE_DIR` |
 
 ## Documentation
 

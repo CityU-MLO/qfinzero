@@ -26,7 +26,7 @@ class TestHealth:
     def test_default_base_url_uses_standard_esp_port(self):
         client = ESPClient()
         try:
-            assert client.base_url == "http://127.0.0.1:19702"
+            assert client.base_url == "http://127.0.0.1:19330"
         finally:
             client.close()
 

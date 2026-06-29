@@ -9,7 +9,7 @@ UPQ service running with data loaded:
 ```bash
 cd infra/upq
 STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# Verify: curl http://127.0.0.1:19703/health
+# Verify: curl http://127.0.0.1:19350/health
 ```
 
 ## Demos

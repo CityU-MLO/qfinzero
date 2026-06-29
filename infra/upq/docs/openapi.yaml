@@ -21,7 +21,7 @@ info:
     name: UPQ Team
 
 servers:
-  - url: http://localhost:19703
+  - url: http://localhost:19350
     description: Local development server
 
 paths:
@@ -89,6 +89,17 @@ paths:
             minimum: 1
             maximum: 100000
             default: 10000
+        - name: adjust
+          in: query
+          required: false
+          description: |
+            Corporate-action price adjustment applied on read:
+            `none` (default, raw), `split`, or `total` (split + dividend).
+            Volume is inversely split-adjusted.
+          schema:
+            type: string
+            enum: [none, split, total]
+            default: none
       responses:
         '200':
           description: Successful query
@@ -150,11 +161,24 @@ paths:
             Comma-separated technical indicators to compute on close price.
             Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average),
             macd (MACD 12/26/9). Example: "ma_5,ma_20,ema_12,macd".
-            All computed from split-adjusted close price. Early rows where window
-            is insufficient return null for that indicator.
+            Early rows where window is insufficient return null for that indicator.
           schema:
             type: string
             example: "ma_20,ema_12,macd"
+        - name: adjust
+          in: query
+          required: false
+          description: |
+            Corporate-action price adjustment applied on read.
+            - `none` (default): raw / as-traded prints.
+            - `split`: forward split adjustment (fractional ratios supported).
+            - `total`: split + dividend (total-return) adjustment.
+            Volume is inversely split-adjusted. Driven by the unified
+            corporate_actions store produced by the qfz-data pipeline.
+          schema:
+            type: string
+            enum: [none, split, total]
+            default: none
       responses:
         '200':
           description: Successful query

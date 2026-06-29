@@ -29,7 +29,7 @@ import matplotlib.ticker as mticker
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-UPQ_BASE = "http://127.0.0.1:19703"
+UPQ_BASE = "http://127.0.0.1:19350"
 STOCK_QTY = 10_000
 CASH_BUFFER_PCT = 0.20
 ETF_BENCHMARKS = {"QQQ": "JEPQ", "NVDA": "NVDY"}

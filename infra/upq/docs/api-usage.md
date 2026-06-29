@@ -1,6 +1,6 @@
 # UPQ API Usage Guide
 
-Base URL: `http://127.0.0.1:19703`
+Base URL: `http://127.0.0.1:19350`
 
 ---
 
@@ -27,7 +27,7 @@ All endpoints return JSON arrays (except `/health` and `/option`). All errors re
 Returns `{"status": "ok"}` when the service is running.
 
 ```bash
-curl http://127.0.0.1:19703/health
+curl http://127.0.0.1:19350/health
 ```
 
 ---
@@ -51,7 +51,7 @@ Query minute-level stock price bars.
 **Example:**
 
 ```bash
-curl "http://127.0.0.1:19703/stock?tickers=AAPL&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00&fields=ticker,window_start,close,volume"
+curl "http://127.0.0.1:19350/stock?tickers=AAPL&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00&fields=ticker,window_start,close,volume"
 ```
 
 **Response:**
@@ -91,7 +91,7 @@ Query daily stock price bars.
 **Example:**
 
 ```bash
-curl "http://127.0.0.1:19703/stock/daily?tickers=AAPL,MSFT&start=2025-01-06&end=2025-01-10"
+curl "http://127.0.0.1:19350/stock/daily?tickers=AAPL,MSFT&start=2025-01-06&end=2025-01-10"
 ```
 
 **Response:**
@@ -120,7 +120,7 @@ Sort order: `ticker, trade_date`.
 Returns available option query paths.
 
 ```bash
-curl http://127.0.0.1:19703/option
+curl http://127.0.0.1:19350/option
 ```
 
 ```json
@@ -159,7 +159,7 @@ Example: `O:NVDA250117C00136000` = NVDA call, expires 2025-01-17, strike $136.00
 **Example (day):**
 
 ```bash
-curl "http://127.0.0.1:19703/option/ticker_query?contract=O:NVDA250117C00136000&start=2025-01-06&end=2025-01-10&resolution=day"
+curl "http://127.0.0.1:19350/option/ticker_query?contract=O:NVDA250117C00136000&start=2025-01-06&end=2025-01-10&resolution=day"
 ```
 
 ```json
@@ -184,7 +184,7 @@ curl "http://127.0.0.1:19703/option/ticker_query?contract=O:NVDA250117C00136000&
 **Example (minute):**
 
 ```bash
-curl "http://127.0.0.1:19703/option/ticker_query?contract=O:NVDA250117C00136000&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00&resolution=minute"
+curl "http://127.0.0.1:19350/option/ticker_query?contract=O:NVDA250117C00136000&start=2025-01-06T09:30:00&end=2025-01-06T16:00:00&resolution=minute"
 ```
 
 Sort order: `window_start`.
@@ -225,7 +225,7 @@ Query the full option chain for an underlying on a given date.
 **Example:**
 
 ```bash
-curl "http://127.0.0.1:19703/option/chain_query?underlying=NVDA&date=2025-01-06&type=C&strike_min=130&strike_max=140&expiry_max=2025-02-21"
+curl "http://127.0.0.1:19350/option/chain_query?underlying=NVDA&date=2025-01-06&type=C&strike_min=130&strike_max=140&expiry_max=2025-02-21"
 ```
 
 ```json
@@ -262,7 +262,7 @@ Query U.S. Treasury yield rates.
 **Example:**
 
 ```bash
-curl "http://127.0.0.1:19703/rates/query?start=2025-01-02&end=2025-01-10&tenors=1M,10Y"
+curl "http://127.0.0.1:19350/rates/query?start=2025-01-02&end=2025-01-10&tenors=1M,10Y"
 ```
 
 ```json
@@ -329,7 +329,7 @@ All endpoints use GET with query parameters. URL-encode parameter values.
 ```python
 import requests
 
-BASE = "http://127.0.0.1:19703"
+BASE = "http://127.0.0.1:19350"
 
 # Stock minute bars
 resp = requests.get(f"{BASE}/stock", params={

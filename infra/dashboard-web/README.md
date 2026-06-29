@@ -24,16 +24,16 @@ Open `http://127.0.0.1:19400`.
 
 By default this app connects to:
 
-- `UPQ_BASE_URL=http://127.0.0.1:19703`
-- `ESP_BASE_URL=http://127.0.0.1:19702`
-- `PMB_BASE_URL=http://127.0.0.1:19701`
+- `UPQ_BASE_URL=http://127.0.0.1:19350`
+- `ESP_BASE_URL=http://127.0.0.1:19330`
+- `PMB_BASE_URL=http://127.0.0.1:19380`
 
 Override with env vars:
 
 ```bash
-UPQ_BASE_URL=http://127.0.0.1:19703 \
-ESP_BASE_URL=http://127.0.0.1:19702 \
-PMB_BASE_URL=http://127.0.0.1:19701 \
+UPQ_BASE_URL=http://127.0.0.1:19350 \
+ESP_BASE_URL=http://127.0.0.1:19330 \
+PMB_BASE_URL=http://127.0.0.1:19380 \
 pnpm dev
 ```
 

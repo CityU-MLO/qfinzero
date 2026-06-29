@@ -21,7 +21,7 @@ info:
     name: UPQ Team
 
 servers:
-  - url: http://localhost:19703
+  - url: http://localhost:19350
     description: Local development server
 
 paths:

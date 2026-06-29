@@ -10,8 +10,8 @@ Paper parameters:
   - Period: 2025-01-02 to 2025-12-31
 
 Prerequisites:
-  - UPQ running on http://127.0.0.1:19703
-  - PMB running on http://127.0.0.1:19701
+  - UPQ running on http://127.0.0.1:19350
+  - PMB running on http://127.0.0.1:19380
 
 Usage:
   python demos/overlay_hedging_v2.py [--ticker QQQ] [--mode spread|protective]

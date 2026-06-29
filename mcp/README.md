@@ -25,6 +25,32 @@ python mcp/server.py
 mcp run mcp/server.py
 ```
 
+### Transports
+
+The server selects its transport from `QFINZERO_MCP_TRANSPORT`:
+
+| Value | Description |
+|-------|-------------|
+| `stdio` (default) | Local clients (Claude Desktop / Claude Code) |
+| `streamable-http` | Modern HTTP transport for remote / multi-client use; listens on `QFINZERO_MCP_HOST:QFINZERO_MCP_PORT` (default `127.0.0.1:19360`) |
+| `sse` | Legacy HTTP + SSE transport |
+
+```bash
+# Run over modern streamable HTTP
+QFINZERO_MCP_TRANSPORT=streamable-http QFINZERO_MCP_PORT=19360 python mcp/server.py
+```
+
+### Resources & Prompts
+
+Beyond the 37 tools, the server exposes MCP **resources** and a **prompt**:
+
+| Kind | Name | Description |
+|------|------|-------------|
+| resource | `qfinzero://ports` | Canonical service port map (193xx) + service URLs |
+| resource | `qfinzero://data/freshness` | Live UPQ data freshness (latest dates, record counts) |
+| resource | `qfinzero://health` | Combined UPQ/ESP/PMB health |
+| prompt | `trading_session` | Scaffolds a full paper-trading session loop |
+
 ## Connecting to Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -36,9 +62,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "python",
       "args": ["/path/to/qfinzero/mcp/server.py"],
       "env": {
-        "QFINZERO_UPQ_URL": "http://127.0.0.1:19703",
-        "QFINZERO_ESP_URL": "http://127.0.0.1:19702",
-        "QFINZERO_PMB_URL": "http://127.0.0.1:19701"
+        "QFINZERO_UPQ_URL": "http://127.0.0.1:19350",
+        "QFINZERO_ESP_URL": "http://127.0.0.1:19330",
+        "QFINZERO_PMB_URL": "http://127.0.0.1:19380"
       }
     }
   }
@@ -57,9 +83,9 @@ Service URLs can be set via environment variables:
 
 | Variable              | Default                   | Description         |
 |-----------------------|---------------------------|---------------------|
-| `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19703` | Market data service |
-| `QFINZERO_ESP_URL`   | `http://127.0.0.1:19702` | News/events service |
-| `QFINZERO_PMB_URL`   | `http://127.0.0.1:19701` | Trading broker      |
+| `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19350` | Market data service |
+| `QFINZERO_ESP_URL`   | `http://127.0.0.1:19330` | News/events service |
+| `QFINZERO_PMB_URL`   | `http://127.0.0.1:19380` | Trading broker      |
 
 ## Available Tools
 

@@ -145,7 +145,7 @@ def api_get(path):
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 19703
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 19350
     global API_BASE
     API_BASE = f"http://localhost:{port}"
 

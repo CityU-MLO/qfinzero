@@ -7,7 +7,7 @@ import responses
 
 from clients.pmb.client import PMBClient, PMBError, StepResult
 
-MOCK_URL = "http://mock-pmb:19320"
+MOCK_URL = "http://mock-pmb:19380"
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ class TestHealth:
     def test_default_base_url_uses_standard_pmb_port(self):
         client = PMBClient()
         try:
-            assert client.base_url == "http://127.0.0.1:19701"
+            assert client.base_url == "http://127.0.0.1:19380"
         finally:
             client.close()
 

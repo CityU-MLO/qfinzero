@@ -55,15 +55,15 @@ def test_default_port_allocation(monkeypatch):
     config = _reload_module("qfinzero.config")
 
     assert config.DEFAULT_HOST == "127.0.0.1"
-    assert config.DASHBOARD_PORT == 19700
-    assert config.PMB_PORT == 19701
-    assert config.ESP_PORT == 19702
-    assert config.UPQ_PORT == 19703
-    assert config.PLAYGROUND_PORT == 19704
-    assert config.PMB_URL == "http://127.0.0.1:19701"
-    assert config.ESP_URL == "http://127.0.0.1:19702"
-    assert config.UPQ_URL == "http://127.0.0.1:19703"
-    assert config.PLAYGROUND_URL == "http://127.0.0.1:19704"
+    assert config.DASHBOARD_PORT == 19300
+    assert config.PMB_PORT == 19380
+    assert config.ESP_PORT == 19330
+    assert config.UPQ_PORT == 19350
+    assert config.PLAYGROUND_PORT == 19390
+    assert config.PMB_URL == "http://127.0.0.1:19380"
+    assert config.ESP_URL == "http://127.0.0.1:19330"
+    assert config.UPQ_URL == "http://127.0.0.1:19350"
+    assert config.PLAYGROUND_URL == "http://127.0.0.1:19390"
 
 
 def test_qfinzero_version_uses_env_hash(monkeypatch):
@@ -122,7 +122,7 @@ def test_playground_health_includes_standard_version(monkeypatch):
     fake_agent.run_agent_stream = lambda **_: None
     fake_config = ModuleType("config")
     fake_config.HOST = "127.0.0.1"
-    fake_config.PORT = 19704
+    fake_config.PORT = 19390
     fake_sse_package = ModuleType("sse_starlette")
     fake_sse_module = ModuleType("sse_starlette.sse")
 

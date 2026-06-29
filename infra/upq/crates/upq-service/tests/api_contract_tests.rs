@@ -2391,8 +2391,23 @@ async fn test_stock_daily_applies_split_adjustment() -> Result<(), Box<dyn std::
     ))?;
 
     let app = upq_service::app::build_router_with_storage_root(tmp.path());
-    let request = Request::builder()
+
+    // Default (no adjust param) returns RAW / as-traded prices.
+    let raw_req = Request::builder()
         .uri("/stock/daily?tickers=NVDA&start=2024-06-07&end=2024-06-07&fields=ticker,date,close,volume")
+        .body(Body::empty())?;
+    let raw_resp = unwrap_infallible(app.clone().oneshot(raw_req).await);
+    assert_eq!(raw_resp.status(), StatusCode::OK);
+    let raw_payload: Value = serde_json::from_slice(&to_bytes(raw_resp.into_body(), usize::MAX).await?)?;
+    let raw = raw_payload.as_array().unwrap();
+    assert!((raw[0]["close"].as_f64().unwrap() - 1210.0).abs() < 0.01,
+        "default (none) close should be raw 1210.0, got {}", raw[0]["close"]);
+    assert_eq!(raw[0]["volume"].as_i64().unwrap(), 5_000_000,
+        "default (none) volume should be raw 5M");
+
+    // adjust=split applies the (legacy splits.json fallback) forward adjustment.
+    let request = Request::builder()
+        .uri("/stock/daily?tickers=NVDA&start=2024-06-07&end=2024-06-07&fields=ticker,date,close,volume&adjust=split")
         .body(Body::empty())?;
     let response = unwrap_infallible(app.oneshot(request).await);
     assert_eq!(response.status(), StatusCode::OK);
