@@ -15,25 +15,25 @@ models:
   # ── Remote models ────────────────────────────────────────────────────────
   - model_name: gpt-4o
     base_url: https://api.openai-proxy.com/v1
-    api_key: "${OPENAI_PROXY_API_KEY}"
+    api_key: "${OPENAI_PROXY_API_KEY}"   # set via env; do NOT commit real keys
     provider_type: openai_compatible
     call_latency_s: 1.0   # ~60 RPM safe default for GPT-4o tier
 
   - model_name: gpt-4.1-mini
     base_url: https://api.openai-proxy.com/v1
-    api_key: "${OPENAI_PROXY_API_KEY}"
+    api_key: "${OPENAI_PROXY_API_KEY}"   # set via env; do NOT commit real keys
     provider_type: openai_compatible
     call_latency_s: 0.5
 
   - model_name: gemini-2.5-flash
     base_url: https://gemini-openai-proxy.deno.dev/v1
-    api_key: "${GOOGLE_API_KEY}"
+    api_key: "${GOOGLE_API_KEY}"   # set via env; do NOT commit real keys
     provider_type: openai_compatible
     call_latency_s: 4.0   # free tier: ~15 RPM → 4s gap keeps under limit
 
   - model_name: deepseek-chat
     base_url: https://api.deepseek.com/v1
-    api_key: "${DEEPSEEK_API_KEY}"
+    api_key: "${DEEPSEEK_API_KEY}"   # set via env; do NOT commit real keys
     provider_type: openai_compatible
     call_latency_s: 1.0
 
