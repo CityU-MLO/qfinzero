@@ -112,6 +112,10 @@ def load_model_configs(path: str, global_call_latency_s: float = 0.0) -> list[di
         if "model_name" not in m or "base_url" not in m:
             raise ValueError(f"Each model needs model_name and base_url: {m}")
         m.setdefault("api_key", None)
+        # Resolve ${ENV_VAR} placeholders from the environment (keys live in the
+        # shell env / ~/.bashrc, never in the repo).
+        if m.get("api_key"):
+            m["api_key"] = os.path.expandvars(m["api_key"])
         m.setdefault("provider_type", "openai_compatible")
         # Per-model YAML setting takes precedence; CLI global default fills the rest
         m.setdefault("call_latency_s", global_call_latency_s)

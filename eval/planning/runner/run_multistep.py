@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -150,6 +151,10 @@ def load_models(path: str, global_call_latency_s: float = 0.0) -> list[dict[str,
         raise ValueError(f"No models in {path}")
     for m in models:
         m.setdefault("api_key", None)
+        # Resolve ${ENV_VAR} placeholders from the environment (keys live in the
+        # shell env / ~/.bashrc, never in the repo).
+        if m.get("api_key"):
+            m["api_key"] = os.path.expandvars(m["api_key"])
         m.setdefault("provider_type", "openai_compatible")
         # Per-model YAML setting takes precedence; CLI global default fills the rest
         m.setdefault("call_latency_s", global_call_latency_s)
