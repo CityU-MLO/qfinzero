@@ -158,6 +158,28 @@ async def get_account_status(account_id: str, request: Request):
     return _require_status(request, account_id)
 
 
+@router.get("/v1/accounts/{account_id}/quote")
+async def get_quote(account_id: str, request: Request, symbols: str):
+    """Real UPQ market prices for symbols at the account's current trading day.
+
+    Lets an agent see the price it would fill at before trading (trades with no
+    price execute at exactly these levels, per the broker's price rule).
+    """
+    account = _svc(request).get_account(account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "account not found"})
+    syms = [s.strip() for s in symbols.split(",") if s.strip()]
+    prices = await _latest_daily_closes(request, syms, account.current_date)
+    cfg = getattr(request.app.state, "pmb_config", {}) or {}
+    return {
+        "account_id": account_id,
+        "as_of": account.current_date[:10],
+        "price_rule": cfg.get("price_rule", "close"),
+        "prices": prices,
+        "missing": [s.upper() for s in syms if s.upper() not in prices],
+    }
+
+
 @router.get("/v1/accounts/{account_id}/history")
 async def get_account_history(account_id: str, request: Request, limit: int | None = None):
     """Step-by-step trading history (one record per closed trading day)."""

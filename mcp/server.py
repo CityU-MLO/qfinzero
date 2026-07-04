@@ -53,12 +53,15 @@ mcp = FastMCP(
         "QFinZero is a unified trading environment for LLM agents. "
         "It provides three services: UPQ (market data), ESP (news & events), "
         "and PMB (paper trading broker). "
-        "Typical workflow: (1) create account via pmb_create_account, "
-        "(2) create session via pmb_create_session, "
-        "(3) loop pmb_step_session to advance time, "
-        "(4) use UPQ/ESP tools to gather context, "
-        "(5) place orders via pmb_buy_stock / pmb_sell_stock, "
-        "(6) call pmb_get_summary when session ends."
+        "Simple day-based trading (recommended for agents): (1) pmb_create_account "
+        "with a start_date, (2) gather context via UPQ/ESP tools, (3) pmb_quote / "
+        "pmb_trade — omit the price to fill at the REAL UPQ market price, "
+        "(4) pmb_end_day then pmb_next_day to advance the trading calendar, "
+        "(5) pmb_get_status / pmb_get_history to review. Tune fills, fees, and "
+        "leverage via pmb_get_config. "
+        "Bar-stepped backtests (advanced): pmb_create_session over a universe, "
+        "loop pmb_step_session, place orders with pmb_buy_stock / pmb_sell_stock, "
+        "then pmb_get_summary."
     ),
 )
 
@@ -665,17 +668,17 @@ def pmb_health() -> str:
 
 @mcp.tool()
 def pmb_create_account(
-    initial_cash: float,
     start_date: str,
-    market: Literal["us", "cn", "hk"] = "us",
+    initial_cash: Optional[float] = None,
+    market: Optional[Literal["us", "cn", "hk"]] = None,
     account_type: Literal["MARGIN", "CASH"] = "MARGIN",
 ) -> str:
     """Allocate a new paper trading (broker) account.
 
     Args:
-        initial_cash: Starting cash balance, e.g. 100000.0
         start_date: Account open date "YYYY-MM-DD" (required — the first trading day)
-        market: Market to trade — "us" (default), "cn", or "hk". Determines the
+        initial_cash: Starting cash; omit to use the broker default (pmb_get_config)
+        market: "us", "cn", or "hk"; omit to use the broker default. Determines the
                 account-number prefix, base currency, and exchange timezone.
         account_type: "MARGIN" (default) or "CASH"
 
@@ -802,27 +805,57 @@ def pmb_trade(
     symbol: str,
     side: Literal["BUY", "SELL"],
     qty: int,
-    price: float,
+    price: Optional[float] = None,
     note: Optional[str] = None,
 ) -> str:
     """Execute an immediate paper trade against the account's broker book.
 
-    Only allowed while the account is ACTIVE (rejected when FROZEN). The trade
-    fills instantly at the supplied price.
+    Only allowed while the account is ACTIVE (rejected when FROZEN). Leave
+    ``price`` unset to fill at the REAL UPQ market price for the account's
+    current trading day (recommended — the response's ``price_source`` shows
+    ``upq:close``). Use ``pmb_quote`` first if you want to see the price.
 
     Args:
         account_id: The 10-digit account number
         symbol: Ticker, e.g. "AAPL"
         side: "BUY" or "SELL"
         qty: Number of shares (positive integer)
-        price: Execution price per share
+        price: Optional override; omit to fill at the real market price
         note: Optional free-text note attached to the fill
 
     Returns:
-        JSON with the executed fill and the updated account status.
+        JSON with the executed fill (incl. price_source) and updated account status.
     """
     with PMBClient(PMB_URL) as client:
         return json.dumps(client.trade(account_id, symbol, side, qty, price, note=note))
+
+
+@mcp.tool()
+def pmb_quote(account_id: str, symbols: str) -> str:
+    """Get the real UPQ market price for symbols at the account's trading day.
+
+    This is the exact price a no-price ``pmb_trade`` would fill at.
+
+    Args:
+        account_id: The 10-digit account number
+        symbols: Comma-separated tickers, e.g. "AAPL,MSFT"
+
+    Returns:
+        JSON with as_of date, the price rule, prices per symbol, and any missing.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.quote(account_id, symbols))
+
+
+@mcp.tool()
+def pmb_get_config() -> str:
+    """Get the broker settings that govern fills, fees, leverage, and defaults.
+
+    Returns fees (per share / per option contract), slippage, buying-power
+    leverage, initial cash, default market/frequency, and the fill price rule.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.get_config())
 
 
 @mcp.tool()

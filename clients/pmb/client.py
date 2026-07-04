@@ -126,6 +126,10 @@ class PMBClient:
         resp = self._session.post(self._url(path), json=json, timeout=self.timeout)
         return self._handle(resp)
 
+    def _put(self, path: str, json: dict = None) -> dict:
+        resp = self._session.put(self._url(path), json=json, timeout=self.timeout)
+        return self._handle(resp)
+
     def _handle(self, resp: requests.Response) -> dict:
         try:
             data = resp.json()
@@ -145,9 +149,9 @@ class PMBClient:
 
     def create_account(
         self,
-        initial_cash: float = 100000.0,
+        initial_cash: float = None,
         account_type: str = "MARGIN",
-        market: str = "us",
+        market: str = None,
         start_date: str = None,
         open_date: str = None,
         margin_config: dict = None,
@@ -156,15 +160,14 @@ class PMBClient:
         """Allocate a broker account. Returns a 10-digit account id under
         ``account_id`` plus the initial broker status under ``account``.
 
-        ``market`` is one of "us", "cn", "hk" and determines the leading digit
-        of the account number, the base currency, and the exchange timezone.
+        ``initial_cash`` / ``market`` default to the broker config (see
+        ``get_config``) when omitted. ``market`` is one of "us", "cn", "hk".
         """
-        body = {
-            "account_type": account_type,
-            "initial_cash": initial_cash,
-            "market": market,
-            **kwargs,
-        }
+        body = {"account_type": account_type, **kwargs}
+        if initial_cash is not None:
+            body["initial_cash"] = initial_cash
+        if market is not None:
+            body["market"] = market
         # open_date is the canonical field; start_date kept for back-compat.
         if open_date:
             body["open_date"] = open_date
@@ -198,20 +201,42 @@ class PMBClient:
         symbol: str,
         side: str,
         qty: int,
-        price: float,
+        price: float = None,
         note: str = None,
     ) -> dict:
-        """Execute an immediate paper fill against the broker book."""
-        body = {"symbol": symbol, "side": side, "qty": qty, "price": price}
+        """Execute an immediate paper fill against the broker book.
+
+        Omit ``price`` to fill at the real UPQ market price for the account's
+        current trading day (recommended for agents).
+        """
+        body = {"symbol": symbol, "side": side, "qty": qty}
+        if price is not None:
+            body["price"] = price
         if note:
             body["note"] = note
         return self._post(f"/accounts/{account_id}/trade", body)
 
-    def broker_buy(self, account_id: str, symbol: str, qty: int, price: float, note: str = None) -> dict:
+    def broker_buy(self, account_id: str, symbol: str, qty: int, price: float = None, note: str = None) -> dict:
         return self.trade(account_id, symbol, "BUY", qty, price, note)
 
-    def broker_sell(self, account_id: str, symbol: str, qty: int, price: float, note: str = None) -> dict:
+    def broker_sell(self, account_id: str, symbol: str, qty: int, price: float = None, note: str = None) -> dict:
         return self.trade(account_id, symbol, "SELL", qty, price, note)
+
+    def quote(self, account_id: str, symbols) -> dict:
+        """Real UPQ prices for symbols at the account's current trading day."""
+        if isinstance(symbols, (list, tuple)):
+            symbols = ",".join(symbols)
+        return self._get(f"/accounts/{account_id}/quote", {"symbols": symbols})
+
+    # ── Broker settings ───────────────────────────────────────────
+
+    def get_config(self) -> dict:
+        """Broker settings (fees, slippage, leverage, pricing rule, defaults)."""
+        return self._get("/config")
+
+    def put_config(self, patch: dict) -> dict:
+        """Update broker settings; applies live."""
+        return self._put("/config", patch)
 
     def end_day(self, account_id: str) -> dict:
         """Close the current trading day and freeze the account."""
