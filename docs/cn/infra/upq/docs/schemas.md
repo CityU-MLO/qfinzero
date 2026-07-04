@@ -1,17 +1,16 @@
-> 中文: [../../../docs/cn/infra/upq/docs/schemas.md](../../../docs/cn/infra/upq/docs/schemas.md)
-
+> English: [../../../../../infra/upq/docs/schemas.md](../../../../../infra/upq/docs/schemas.md)
 
 # UPQ Schemas
 
-## Source Discovery Summary
-Data inspected from server with read-only commands and sampled rows.
+## 数据源探查摘要
+使用只读命令并抽样行，从服务器上检查数据。
 
-### Stocks (`/home/qlib/data/stock`)
-Files:
+### Stocks（`/home/qlib/data/stock`）
+文件：
 - `us_stocks_sip_day_aggs_v1_*.csv.gz`
 - `us_stocks_sip_minute_aggs_v1_*.csv.gz`
 
-Columns:
+列：
 - `ticker` (string)
 - `volume` (int64)
 - `open` (float64)
@@ -21,12 +20,12 @@ Columns:
 - `window_start` (int64, ns epoch)
 - `transactions` (int64)
 
-### Options (`/home/qlib/data/us_options_opra`)
-Files:
+### Options（`/home/qlib/data/us_options_opra`）
+文件：
 - `day_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz`
 - `minute_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz`
 
-Columns (same as stocks):
+列（与 stocks 相同）：
 - `ticker` (string, OPRA contract)
 - `volume` (int64)
 - `open` (float64)
@@ -36,15 +35,15 @@ Columns (same as stocks):
 - `window_start` (int64, ns epoch)
 - `transactions` (int64)
 
-Derived fields from OPRA `ticker`:
+从 OPRA `ticker` 派生的字段：
 - `underlying` (string)
 - `expiry` (date)
 - `right` (string, `C`/`P`)
 - `strike` (float64)
 - `contract` (string, normalized ticker)
 
-### Rates (`/home/qlib/data/assets/treasury_yields.csv`)
-Columns:
+### Rates（`/home/qlib/data/assets/treasury_yields.csv`）
+列：
 - `date` (date)
 - `yield_1_year` (float64)
 - `yield_5_year` (float64)
@@ -54,15 +53,15 @@ Columns:
 - `yield_3_month` (float64)
 - `yield_1_month` (float64)
 
-### Dividends (`qlib:/home/qlib/news/massive_dividends.sqlite`)
-Source format: SQLite database with a single `dividends` table.
+### Dividends（`qlib:/home/qlib/news/massive_dividends.sqlite`）
+源格式：包含单个 `dividends` 表的 SQLite 数据库。
 
-Columns used during ingest (filtered to `currency = 'USD'`):
+摄取时使用的列（筛选条件为 `currency = 'USD'`）：
 - `ticker` (text)
 - `ex_dividend_date` (text, YYYY-MM-DD)
 - `split_adjusted_cash_amount` (real)
 
-## Logical Tables
+## 逻辑表
 
 ### `stock_minute`
 - `ticker TEXT`
@@ -75,15 +74,15 @@ Columns used during ingest (filtered to `currency = 'USD'`):
 - `volume BIGINT`
 - `transactions BIGINT`
 
-Sort key: `(ticker, window_start)`
-Partition: `trade_date`
+排序键：`(ticker, window_start)`
+分区：`trade_date`
 
 ### `stock_daily`
-- Same columns as `stock_minute`
-- Daily data still keyed by `window_start` and `trade_date`
+- 与 `stock_minute` 相同的列
+- 日线数据仍以 `window_start` 和 `trade_date` 为键
 
-Sort key: `(ticker, window_start)`
-Partition: `trade_date`
+排序键：`(ticker, window_start)`
+分区：`trade_date`
 
 ### `option_day`
 - `contract TEXT`
@@ -100,25 +99,25 @@ Partition: `trade_date`
 - `volume BIGINT`
 - `transactions BIGINT`
 
-Sort key: `(underlying, expiry, strike, right, window_start)`
-Partition: `trade_date`
+排序键：`(underlying, expiry, strike, right, window_start)`
+分区：`trade_date`
 
 ### `option_minute`
-- Same columns as `option_day`
+- 与 `option_day` 相同的列
 
-Sort key: `(contract, window_start)`
-Partition: `trade_date`
+排序键：`(contract, window_start)`
+分区：`trade_date`
 
 ### `rates`
 - `date DATE`
-- tenor columns as doubles
+- 各期限列为 double 类型
 
-Stored in a single Parquet file in `storage/rates/`.
+存储为 `storage/rates/` 中的单个 Parquet 文件。
 
 ### `dividends`
 - `ticker TEXT`
 - `ex_dividend_date DATE`
-- `amount DOUBLE` (split-adjusted cash dividend, USD only)
+- `amount DOUBLE`（拆股调整后的现金分红，仅限 USD）
 
-Stored in a single Parquet file in `storage/dividends/`.
-Used by `DividendCalendar` for discrete dividend adjustment in Greeks calculations (`S_adj = S - Σ PV(D_i)`).
+存储为 `storage/dividends/` 中的单个 Parquet 文件。
+由 `DividendCalendar` 用于希腊字母计算中的离散分红调整（`S_adj = S - Σ PV(D_i)`）。
