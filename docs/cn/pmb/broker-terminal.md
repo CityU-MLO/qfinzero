@@ -23,7 +23,7 @@ REST/MCP 接口，包括**期权与期权策略**。
 | 区域 | 作用 |
 |---|---|
 | **Watchlist（自选）** | 实时报价，含**相对开盘的涨跌幅 %**。在底部输入框添加标的（会把其行情加载进当前会话）；点垃圾桶图标移除。 |
-| **Chart（图表）** | 切换 **Candles**（K 线，逐分钟生成）或 **Line**（折线）。含价格轴、最新价标记、ET 时间轴。 |
+| **Chart（图表）** | 切换 **Candles**（K 线，逐分钟生成）或 **Line**（折线）。K 线叠加 **MA5/MA20** 均线与**成交量**柱，含价格轴、最新价标记、ET 时间轴。 |
 | **Option chain（期权链）** | 从 *Chart* 切换。见 §4。 |
 | **Order ticket（下单）** | BUY/SELL、数量、**MARKET**/**LIMIT**。显示预计成本/收入，以及下单后的**剩余购买力**。 |
 | **Blotter（记录）** | *Positions*（一键 **Flatten** 平仓）、*Orders*（**Cancel all** 撤单）、*Trades*。**Close all** 平掉全部持仓。 |
@@ -40,13 +40,18 @@ REST/MCP 接口，包括**期权与期权策略**。
 
 ## 4. 期权与期权链
 
-将中间面板切换到 **Option chain**：
+将中间面板切换到 **Option chain** —— 一个**双边、实时、分钟级**的期权链
+（calls | 行权价 | puts），如同真实券商：
 
-- 合约按所选标的与到期日的**行权价**排列，含 **last、IV、delta、volume**；
-  **平值（ATM）** 行权价会高亮。
-- 切换 **Calls / Puts** 并选择**到期日（expiry）**。
-- 点击某行的 **B** / **S** 交易该合约：券商会把合约加载进会话（`add_contracts`）
-  并提交市价单。
+- 每个行权价在 call 与 put 两侧都显示 **bid / ask / last / volume**，
+  **平值（ATM）** 行权价高亮，并显示标的**现价（spot）**。
+- 它会**随时钟跳动而闪烁**——近平值的腿逐分钟更新（上涨/下跌以绿/红显示）。
+  流动性差的行权价回退到当日的标记价。
+- 选择**到期日（expiry）**；点击任一侧的 **B** / **S** 交易该合约
+  （券商会把它加载进会话并提交市价单）。
+
+性能：当日期权链骨架（行权价 + 希腊字母）只获取一次，近平值合约的分钟 bar 也只加载一次
+（`GET /v1/sessions/{id}/option_chain`）；之后每一步都是快速的缓存读取，因此闪烁保持流畅。
 
 底层的期权链来自 UPQ `/option/chain_query`（Black–Scholes 欧式希腊字母）。合约 id
 为 OPRA 格式，例如 `O:AAPL240328C00170000`（标的 `AAPL`、到期 `2024-03-28`、
@@ -92,6 +97,7 @@ REST/MCP 接口，包括**期权与期权策略**。
 | `POST /v1/sessions/{id}/rewind` | `pmb_rewind` | **时间旅行**回到 `target_ts`，撤销之后的订单 |
 | `POST /v1/sessions/{id}/add_stocks` | `pmb_add_stocks` | 实时扩充自选/交易范围 |
 | `POST /v1/sessions/{id}/add_contracts` | `pmb_add_contracts` | 加载期权合约以便交易 |
+| `GET /v1/sessions/{id}/option_chain` | — | 当前 bar 的实时双边分钟期权链 |
 | `POST /v1/orders` | `pmb_buy_stock` / `pmb_sell_stock` / `pmb_buy_option` / `pmb_sell_option` | 下单（股票或 `OPTION:<contract>`） |
 | `POST /v1/orders/{id}/cancel` | `pmb_cancel_order` | 撤销挂单 |
 | `GET /option/chain_query`（UPQ） | `upq_option_chain` | 发现期权合约 + 希腊字母 |

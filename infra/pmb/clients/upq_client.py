@@ -120,6 +120,19 @@ class UPQClient:
             for r in rows
         ]
 
+    async def option_chain(self, underlying: str, date: str, expiry_min: str | None = None) -> list[dict]:
+        """GET /option/chain_query — the day's option chain (strikes, greeks) for an underlying."""
+        params = {
+            "underlying": underlying,
+            "date": date,
+            "include_greeks": "true",
+        }
+        if expiry_min:
+            params["expiry_min"] = expiry_min
+        resp = await self._client.get("/option/chain_query", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
     async def get_option_daily_bars(
         self, contract: str, start: str, end: str
     ) -> list[OptionBar]:

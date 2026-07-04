@@ -26,7 +26,7 @@ The landing page has two actions:
 | Area | What it does |
 |---|---|
 | **Watchlist** | Live quotes with **% change from the open**. Add a symbol in the box at the bottom (loads its bars into the live session); remove with the trash icon. |
-| **Chart** | Toggle **Candles** (K-line, built minute-by-minute) or **Line**. Price axis, last-price marker, ET time axis. |
+| **Chart** | Toggle **Candles** (K-line, built minute-by-minute) or **Line**. Candles overlay **MA5/MA20** moving averages and a **volume** histogram, with price axis, last-price marker and ET time axis. |
 | **Option chain** | Toggle from *Chart*. See §4. |
 | **Order ticket** | BUY/SELL, quantity, **MARKET**/**LIMIT**. Shows est. cost/proceeds and **buying power after** the order. |
 | **Blotter** | *Positions* (with one-click **Flatten**), *Orders* (with **Cancel all**), *Trades*. **Close all** flattens every position. |
@@ -45,13 +45,19 @@ The status bar at the bottom is the market clock:
 
 ## 4. Options & the option chain
 
-Switch the center panel to **Option chain**:
+Switch the center panel to **Option chain** — a **two-sided, live, minute-level**
+chain (calls | strike | puts), like a real broker:
 
-- Contracts are listed by **strike** for the selected underlying and expiry,
-  with **last, IV, delta, volume**; the **ATM** strike is highlighted.
-- Toggle **Calls / Puts** and pick an **expiry**.
-- Click **B** / **S** on a row to trade that contract: the broker loads the
-  contract into the session (`add_contracts`) and submits a market order.
+- Each strike shows **bid / ask / last / volume** on both the call and put side,
+  with the **ATM** strike highlighted and the underlying **spot** shown.
+- It **flashes as the clock ticks** — the near-ATM legs update minute-by-minute
+  (green/red on an up/down tick). Illiquid strikes fall back to the day's mark.
+- Pick an **expiry**; click **B** / **S** on either side to trade that contract
+  (the broker loads it into the session and submits a market order).
+
+Performance: the day chain skeleton (strikes + greeks) is fetched once and the
+near-ATM contracts' minute bars are loaded once (`GET /v1/sessions/{id}/option_chain`);
+subsequent steps are fast cache reads, so the flash stays responsive.
 
 Under the hood the chain comes from UPQ `/option/chain_query` (Black–Scholes
 European greeks). Contract ids are OPRA, e.g. `O:AAPL240328C00170000`
@@ -101,6 +107,7 @@ service (or `…/api/pmb/v1` through the web BFF, `…/svc/pmb` through the hub)
 | `POST /v1/sessions/{id}/rewind` | `pmb_rewind` | **Time-travel** back to `target_ts`, undoing later orders |
 | `POST /v1/sessions/{id}/add_stocks` | `pmb_add_stocks` | Grow the watchlist/universe live |
 | `POST /v1/sessions/{id}/add_contracts` | `pmb_add_contracts` | Load option contracts for trading |
+| `GET /v1/sessions/{id}/option_chain` | — | Live two-sided minute chain at the current bar |
 | `POST /v1/orders` | `pmb_buy_stock` / `pmb_sell_stock` / `pmb_buy_option` / `pmb_sell_option` | Place orders (stock or `OPTION:<contract>`) |
 | `POST /v1/orders/{id}/cancel` | `pmb_cancel_order` | Cancel a working order |
 | `GET /option/chain_query` (UPQ) | `upq_option_chain` | Discover option contracts + greeks |

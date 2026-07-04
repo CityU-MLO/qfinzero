@@ -173,6 +173,25 @@ async def export_session(
     return data
 
 
+@router.get("/v1/sessions/{session_id}/option_chain")
+async def get_option_chain(
+    session_id: str,
+    request: Request,
+    underlying: str,
+    expiry: str | None = None,
+    window: int = 12,
+):
+    """Live, minute-level two-sided option chain (calls|strike|puts) at the current bar."""
+    session_svc = request.app.state.session_service
+    result = await session_svc.get_option_chain(session_id, underlying, expiry, window)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": result.get("error", "unknown")},
+        )
+    return result
+
+
 @router.post("/v1/sessions/{session_id}/add_stocks")
 async def add_stocks(session_id: str, request: Request):
     body = await request.json()

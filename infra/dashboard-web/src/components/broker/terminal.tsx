@@ -25,13 +25,11 @@ import {
   cancelOrder,
   addStocks,
   etMinutes,
-  etDate,
   money,
   num,
   fmtET,
   type FullState,
   type Position,
-  type OptionRow,
 } from "./api";
 import { PriceChart, type PricePoint } from "./price-chart";
 import { CandleChart, type Candle } from "./candle-chart";
@@ -120,7 +118,7 @@ export function Terminal({
         const next = { ...prev };
         for (const q of s.market.stocks) {
           const arr = (next[q.symbol] ?? []).filter((p) => p.ts <= curTs);
-          const bar: Candle = { ts: curTs, o: q.open, h: q.high, l: q.low, c: q.close };
+          const bar: Candle = { ts: curTs, o: q.open, h: q.high, l: q.low, c: q.close, v: q.volume };
           if (!arr.length || arr[arr.length - 1].ts !== curTs) arr.push(bar);
           else arr[arr.length - 1] = bar;
           next[q.symbol] = arr;
@@ -255,21 +253,21 @@ export function Terminal({
     }
   }, [sessionId, accountId, selected, side, qty, orderType, limit, apply]);
 
-  const tradeOption = useCallback(
-    async (row: OptionRow, oside: "BUY" | "SELL") => {
+  const tradeContract = useCallback(
+    async (contract: string, oside: "BUY" | "SELL") => {
       setErr(null);
       try {
         await placeOptionOrder({
           session_id: sessionId,
           account_id: accountId,
-          contract: row.ticker,
+          contract,
           side: oside,
           qty: Math.max(1, Math.round(qty / 100) || 1),
           order_type: "MARKET",
         });
         const s = await getState(sessionId);
         apply(s, true);
-        setToast(`${oside} ${row.ticker} submitted`);
+        setToast(`${oside} ${contract} submitted`);
         setTimeout(() => setToast(null), 2500);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -582,10 +580,10 @@ export function Terminal({
               )
             ) : (
               <OptionChain
+                sessionId={sessionId}
                 underlying={selected}
-                date={state ? etDate(state.clock.current_ts) : ""}
-                spot={sel?.close}
-                onTrade={tradeOption}
+                clockIndex={state?.clock.index ?? -1}
+                onTrade={tradeContract}
               />
             )}
           </div>

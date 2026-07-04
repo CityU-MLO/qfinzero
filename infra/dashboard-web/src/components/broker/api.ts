@@ -246,6 +246,47 @@ export async function optionChain(
   return text ? (JSON.parse(text) as OptionRow[]) : [];
 }
 
+// ── Live minute-level option chain (session-based, two-sided) ────────────────
+
+export interface ChainLeg {
+  contract: string;
+  last: number | null;
+  bid: number | null;
+  ask: number | null;
+  volume: number | null;
+  iv: number | null;
+  delta: number | null;
+  live: boolean;
+}
+
+export interface ChainRow {
+  strike: number;
+  call: ChainLeg | null;
+  put: ChainLeg | null;
+}
+
+export interface ChainResponse {
+  ok: boolean;
+  underlying: string;
+  ts: string;
+  expiry: string | null;
+  expiries: string[];
+  spot: number | null;
+  rows: ChainRow[];
+}
+
+/** Live two-sided option chain at the session's current bar (flashes as the clock ticks). */
+export function sessionOptionChain(
+  sessionId: string,
+  underlying: string,
+  expiry?: string,
+  window = 12,
+) {
+  const qs = new URLSearchParams({ underlying: underlying.toUpperCase(), window: String(window) });
+  if (expiry) qs.set("expiry", expiry);
+  return req<ChainResponse>(`/sessions/${sessionId}/option_chain?${qs.toString()}`);
+}
+
 /** Add stock symbols to a running session's watchlist (loads their bars). */
 export function addStocks(sessionId: string, symbols: string[]) {
   return req<{ ok: boolean; loaded: number; skipped: number }>(

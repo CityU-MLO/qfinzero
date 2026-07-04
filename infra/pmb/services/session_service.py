@@ -53,6 +53,8 @@ class SessionState:
     # Ordered log of user actions (order place/cancel) for deterministic replay.
     # Each entry: {seq, index, ts, kind: "place"|"cancel", ...payload}.
     action_log: list[dict] = field(default_factory=list)
+    # Cached day option-chain skeletons keyed by (underlying, date) → rows.
+    chain_skeleton: dict = field(default_factory=dict)
 
     def next_event_id(self) -> str:
         self.event_seq += 1
@@ -609,11 +611,15 @@ class SessionService:
                     opt_bars = await self._upq.get_option_daily_bars(
                         contract, start_date, end_date
                     )
-                # Align option bar timestamps to stock bar timestamps
-                for bar in opt_bars:
-                    opt_date = ns_to_iso(bar.window_start_ns)[:10]
-                    if opt_date in date_to_stock_ns:
-                        bar.window_start_ns = date_to_stock_ns[opt_date]
+                # For DAILY sessions, snap option (ET-midnight) bars onto the
+                # stock (UTC-midnight) date grid. MINUTE sessions already share
+                # the same minute grid, so keep the real minute timestamps —
+                # that lets the option mark update minute-by-minute.
+                if state.clock.frequency == Frequency.DAILY:
+                    for bar in opt_bars:
+                        opt_date = ns_to_iso(bar.window_start_ns)[:10]
+                        if opt_date in date_to_stock_ns:
+                            bar.window_start_ns = date_to_stock_ns[opt_date]
                 state.cache.load_option_bars(contract, opt_bars)
                 loaded += 1
             except Exception:
@@ -657,6 +663,106 @@ class SessionService:
         if loaded:
             state.cache._rebuild_timestamps()
         return {"ok": True, "loaded": loaded, "skipped": skipped}
+
+    async def get_option_chain(
+        self, session_id: str, underlying: str, expiry: str | None = None, window: int = 12
+    ) -> dict:
+        """Live, minute-level two-sided option chain at the current bar.
+
+        The day chain skeleton (strikes + greeks) is fetched once from UPQ and
+        cached; the near-ATM contracts are loaded into the session and their
+        marks are read from the current bar — so the chain "flashes" as the
+        clock advances without re-querying the whole chain each step.
+        """
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {"ok": False, "error": "session not found"}
+
+        underlying = underlying.upper()
+        ts_ns = state.clock.current_ns
+        cur_ts = state.clock.current_ts
+        date = (ns_to_iso(ts_ns) if ts_ns is not None else cur_ts)[:10]
+
+        # 1. Day chain skeleton (cached per underlying+date).
+        key = f"{underlying}:{date}"
+        rows = state.chain_skeleton.get(key)
+        if rows is None:
+            try:
+                rows = await self._upq.option_chain(underlying, date)
+            except Exception:  # noqa: BLE001
+                rows = []
+            state.chain_skeleton[key] = rows
+        if not rows:
+            return {"ok": True, "underlying": underlying, "ts": cur_ts, "expiry": expiry,
+                    "expiries": [], "spot": None, "rows": []}
+
+        expiries = sorted({r.get("expiry") for r in rows if r.get("expiry")})
+        if expiry not in expiries:
+            expiry = next((e for e in expiries if e >= date), expiries[0])
+
+        # 2. Spot from the underlying's current stock bar.
+        spot = None
+        if ts_ns is not None:
+            sb = state.cache.get_stock_bars_at(ts_ns).get(underlying)
+            if sb is not None:
+                spot = sb.close
+
+        exp_rows = [r for r in rows if r.get("expiry") == expiry]
+        strikes = sorted({r["strike"] for r in exp_rows})
+        if spot is not None and strikes:
+            atm_i = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot))
+            lo, hi = max(0, atm_i - window), min(len(strikes), atm_i + window + 1)
+            strikes = strikes[lo:hi]
+        strike_set = set(strikes)
+
+        by_key: dict[tuple, dict] = {}
+        contracts: list[str] = []
+        for r in exp_rows:
+            if r["strike"] not in strike_set:
+                continue
+            by_key[(r["strike"], r.get("type"))] = r
+            if r.get("ticker"):
+                contracts.append(r["ticker"])
+
+        # 3. Ensure near-ATM contracts are loaded (once), then read minute marks.
+        await self.add_option_contracts(session_id, contracts)
+        marks = state.cache.get_option_bars_at(ts_ns) if ts_ns is not None else {}
+
+        def leg(strike: float, typ: str) -> dict | None:
+            r = by_key.get((strike, typ))
+            if r is None:
+                return None
+            contract = r.get("ticker")
+            mb = marks.get(contract)
+            last = mb.close if mb is not None else r.get("close")
+            vol = mb.volume if mb is not None else r.get("volume")
+            spread = 0.03  # synthetic bid/ask around the mark
+            bid = round(last * (1 - spread), 2) if last else None
+            ask = round(last * (1 + spread), 2) if last else None
+            return {
+                "contract": contract,
+                "last": last,
+                "bid": bid,
+                "ask": ask,
+                "volume": vol,
+                "iv": r.get("iv"),
+                "delta": r.get("delta"),
+                "live": mb is not None,
+            }
+
+        out_rows = []
+        for k in strikes:
+            out_rows.append({"strike": k, "call": leg(k, "C"), "put": leg(k, "P")})
+
+        return {
+            "ok": True,
+            "underlying": underlying,
+            "ts": cur_ts,
+            "expiry": expiry,
+            "expiries": expiries,
+            "spot": spot,
+            "rows": out_rows,
+        }
 
     # ── Playback state & time-travel (rewind / undo) ────────────────────
 
