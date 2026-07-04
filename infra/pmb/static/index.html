@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="modern">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Paper Money Broker — Terminal</title>
+<script>
+  // Apply the skin from the embedding URL before first paint (no flash). The console
+  // adds ?theme=win98 when serving the terminal under its /legacy route.
+  (function () {
+    var t = (new URLSearchParams(location.search).get("theme")
+          || new URLSearchParams(location.search).get("skin") || "").toLowerCase();
+    document.documentElement.setAttribute(
+      "data-theme", (t === "win98" || t === "98" || t === "legacy") ? "win98" : "modern");
+  })();
+</script>
+<style>
+/* ============================================================
+   PMB Broker Terminal — two themes share one DOM.
+   Theme is selected via the data-theme attribute on <html>:
+     "modern"  → dark glassy trading terminal
+     "win98"   → classic Windows 98 silver chrome
+   Generic class names (.window, .titlebar, .btn, .field …) are
+   restyled per theme below.
+   ============================================================ */
+
+:root {
+  --gap: 16px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; min-height: 100%; }
+body { font-size: 14px; line-height: 1.4; }
+.hidden { display: none !important; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.grow { flex: 1 1 auto; }
+.muted { opacity: .7; }
+.mono { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.pos { color: var(--up); }
+.neg { color: var(--down); }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+
+.layout {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--gap);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+.layout .span2 { grid-column: 1 / -1; }
+@media (max-width: 820px) { .layout { grid-template-columns: 1fr; } .layout .span2 { grid-column: auto; } }
+
+/* ---- window / titlebar / body ---- */
+.window { display: flex; flex-direction: column; overflow: hidden; }
+.titlebar { display: flex; align-items: center; justify-content: space-between; user-select: none; }
+.titlebar .title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.titlebar .controls { display: flex; gap: 4px; }
+.win-ctl { width: 16px; height: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
+.window-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ---- fields ---- */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12px; letter-spacing: .02em; }
+input, select { font: inherit; padding: 7px 9px; width: 100%; }
+.field.short { max-width: 140px; }
+.field.tiny { max-width: 110px; }
+
+/* ---- buttons ---- */
+.btn { font: inherit; cursor: pointer; padding: 7px 14px; white-space: nowrap; }
+.btn:disabled { cursor: not-allowed; opacity: .5; }
+.btnbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---- stat grid ---- */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 10px; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.stat .v { font-size: 18px; font-weight: 600; }
+
+/* ---- tables ---- */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 6px 8px; text-align: left; }
+th.r, td.r { text-align: right; }
+.empty { padding: 14px; text-align: center; }
+
+/* ---- badges / pills ---- */
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; font-size: 12px; font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* ---- account id chip ---- */
+.acctchip { font-size: 22px; font-weight: 700; letter-spacing: 3px; }
+
+/* ---- top bar ---- */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.toggle { display: flex; align-items: center; gap: 8px; }
+
+/* ---- log ---- */
+#log { font-family: ui-monospace, "Courier New", monospace; font-size: 12px; max-height: 130px; overflow: auto; padding: 8px 10px; white-space: pre-wrap; }
+
+/* ============================================================
+   MODERN THEME
+   ============================================================ */
+html[data-theme="modern"] {
+  --bg: radial-gradient(1200px 700px at 80% -10%, #1b2a4a 0%, #0b1020 55%, #070a14 100%);
+  --panel: rgba(20, 27, 45, .72);
+  --panel-border: rgba(120, 140, 190, .18);
+  --header: linear-gradient(90deg, rgba(99,102,241,.20), rgba(16,185,129,.08));
+  --text: #e7ecf5;
+  --muted: #9aa6c0;
+  --accent: #6366f1;
+  --accent-2: #10b981;
+  --field-bg: rgba(8, 12, 24, .65);
+  --field-border: rgba(120, 140, 190, .28);
+  --up: #34d399;
+  --down: #f87171;
+  --warn: #fbbf24;
+}
+html[data-theme="modern"] body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  background-attachment: fixed;
+}
+html[data-theme="modern"] .window {
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 14px; backdrop-filter: blur(8px);
+  box-shadow: 0 20px 50px -24px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04);
+}
+html[data-theme="modern"] .titlebar {
+  background: var(--header); padding: 11px 14px;
+  border-bottom: 1px solid var(--panel-border); font-size: 13px;
+}
+html[data-theme="modern"] .titlebar .controls { display: none; }
+html[data-theme="modern"] .title .ico { color: var(--accent); }
+html[data-theme="modern"] input,
+html[data-theme="modern"] select {
+  background: var(--field-bg); color: var(--text);
+  border: 1px solid var(--field-border); border-radius: 9px; outline: none;
+}
+html[data-theme="modern"] input:focus,
+html[data-theme="modern"] select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+html[data-theme="modern"] .field label { color: var(--muted); }
+html[data-theme="modern"] .btn {
+  background: linear-gradient(180deg, #2b3656, #202944); color: var(--text);
+  border: 1px solid var(--field-border); border-radius: 9px;
+  transition: transform .05s ease, border-color .15s ease, background .15s ease;
+}
+html[data-theme="modern"] .btn:hover:not(:disabled) { border-color: var(--accent); }
+html[data-theme="modern"] .btn:active:not(:disabled) { transform: translateY(1px); }
+html[data-theme="modern"] .btn.primary { background: linear-gradient(180deg, #6366f1, #4f46e5); border-color: transparent; }
+html[data-theme="modern"] .btn.buy { background: linear-gradient(180deg, #059669, #047857); border-color: transparent; }
+html[data-theme="modern"] .btn.sell { background: linear-gradient(180deg, #dc2626, #b91c1c); border-color: transparent; }
+html[data-theme="modern"] .stat { background: var(--field-bg); border: 1px solid var(--panel-border); border-radius: 11px; }
+html[data-theme="modern"] .stat .k { color: var(--muted); }
+html[data-theme="modern"] th { color: var(--muted); border-bottom: 1px solid var(--panel-border); font-weight: 500; }
+html[data-theme="modern"] td { border-bottom: 1px solid rgba(120,140,190,.10); }
+html[data-theme="modern"] tr:last-child td { border-bottom: none; }
+html[data-theme="modern"] .pill { border-radius: 999px; }
+html[data-theme="modern"] .acctchip { color: var(--accent-2); text-shadow: 0 0 18px rgba(16,185,129,.35); }
+html[data-theme="modern"] #log { background: rgba(0,0,0,.35); border: 1px solid var(--panel-border); border-radius: 10px; color: #9fe6c4; }
+html[data-theme="modern"] .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
+
+/* status pill colors (modern) */
+html[data-theme="modern"] .st-ACTIVE { background: rgba(16,185,129,.16); color: var(--up); }
+html[data-theme="modern"] .st-FROZEN { background: rgba(251,191,36,.16); color: var(--warn); }
+html[data-theme="modern"] .st-CLOSED { background: rgba(248,113,113,.16); color: var(--down); }
+
+/* ============================================================
+   WINDOWS 98 THEME
+   ============================================================ */
+html[data-theme="win98"] {
+  --silver: #c0c0c0;
+  --silver-d: #808080;
+  --silver-dd: #404040;
+  --white: #ffffff;
+  --navy1: #000080;
+  --navy2: #1084d0;
+  --text: #000000;
+  --up: #008000;
+  --down: #800000;
+  --warn: #808000;
+}
+html[data-theme="win98"] body {
+  background: #008080; color: var(--text);
+  font-family: "Tahoma", "MS Sans Serif", "Segoe UI", sans-serif; font-size: 12px;
+}
+html[data-theme="win98"] .window {
+  background: var(--silver);
+  border: 2px solid;
+  border-color: var(--white) var(--silver-dd) var(--silver-dd) var(--white);
+  box-shadow: 1px 1px 0 0 var(--silver-d);
+  border-radius: 0;
+}
+/* extra inner bevel to mimic the classic raised window frame */
+html[data-theme="win98"] .window { padding: 2px; }
+html[data-theme="win98"] .titlebar {
+  background: linear-gradient(90deg, var(--navy1), var(--navy2));
+  color: var(--white); padding: 3px 4px 3px 6px; font-weight: 700; font-size: 12px;
+}
+html[data-theme="win98"] .title .ico { filter: grayscale(0); }
+html[data-theme="win98"] .win-ctl {
+  background: var(--silver); color: #000;
+  border: 1px solid; border-color: var(--white) var(--silver-dd) var(--silver-dd) var(--white);
+  font-weight: 700; line-height: 1; cursor: default;
+}
+html[data-theme="win98"] .window-body { padding: 12px; }
+html[data-theme="win98"] .field label { color: #000; font-weight: 400; }
+html[data-theme="win98"] input,
+html[data-theme="win98"] select {
+  background: var(--white); color: #000; border: 2px solid; border-radius: 0;
+  border-color: var(--silver-d) var(--white) var(--white) var(--silver-d);
+  padding: 4px 5px;
+}
+html[data-theme="win98"] input:focus, html[data-theme="win98"] select:focus { outline: 1px dotted #000; }
+html[data-theme="win98"] .btn {
+  background: var(--silver); color: #000; border: 2px solid; border-radius: 0;
+  border-color: var(--white) var(--silver-dd) var(--silver-dd) var(--white);
+  box-shadow: 1px 1px 0 0 var(--silver-d); font-weight: 400; min-width: 78px; text-align: center;
+}
+html[data-theme="win98"] .btn:active:not(:disabled) {
+  border-color: var(--silver-dd) var(--white) var(--white) var(--silver-dd);
+  box-shadow: none; padding: 8px 13px 6px 15px;
+}
+html[data-theme="win98"] .btn.primary { font-weight: 700; }
+html[data-theme="win98"] .btn.buy { color: var(--up); font-weight: 700; }
+html[data-theme="win98"] .btn.sell { color: var(--down); font-weight: 700; }
+/* sunken group boxes */
+html[data-theme="win98"] .stat {
+  background: var(--silver);
+  border: 2px solid; border-color: var(--silver-d) var(--white) var(--white) var(--silver-d);
+}
+html[data-theme="win98"] .stat .k { color: #000; }
+html[data-theme="win98"] .stats { gap: 6px; }
+/* sunken table well */
+html[data-theme="win98"] .tablewrap {
+  background: var(--white);
+  border: 2px solid; border-color: var(--silver-d) var(--white) var(--white) var(--silver-d);
+}
+html[data-theme="win98"] th { background: var(--silver); border: 1px solid; border-color: var(--white) var(--silver-d) var(--silver-d) var(--white); font-weight: 700; }
+html[data-theme="win98"] td { border-bottom: 1px solid #dfdfdf; }
+html[data-theme="win98"] .pill { border: 2px solid; border-color: var(--silver-dd) var(--white) var(--white) var(--silver-dd); background: var(--silver); border-radius: 0; }
+html[data-theme="win98"] .acctchip { font-family: "Courier New", monospace; color: var(--navy1); }
+html[data-theme="win98"] #log { background: var(--white); border: 2px solid; border-color: var(--silver-d) var(--white) var(--white) var(--silver-d); color: #000; font-family: "Courier New", monospace; }
+html[data-theme="win98"] .brand .logo { width: 22px; height: 22px; border-radius: 0; background: var(--navy1); color: var(--white); display: inline-flex; align-items: center; justify-content: center; border: 2px solid; border-color: var(--white) var(--silver-dd) var(--silver-dd) var(--white); }
+html[data-theme="win98"] .st-ACTIVE { color: var(--up); }
+html[data-theme="win98"] .st-FROZEN { color: var(--warn); }
+html[data-theme="win98"] .st-CLOSED { color: var(--down); }
+
+/* theme switch (shared, styled minimally) */
+.switch { display: inline-flex; border: 1px solid currentColor; border-radius: 6px; overflow: hidden; }
+html[data-theme="win98"] .switch { border-radius: 0; }
+.switch button { font: inherit; cursor: pointer; padding: 5px 10px; border: 0; background: transparent; color: inherit; }
+html[data-theme="modern"] .switch { border-color: var(--field-border); }
+html[data-theme="modern"] .switch button.on { background: var(--accent); color: #fff; }
+html[data-theme="win98"] .switch button { background: var(--silver); border: 2px solid; border-color: var(--white) var(--silver-dd) var(--silver-dd) var(--white); }
+html[data-theme="win98"] .switch button.on { border-color: var(--silver-dd) var(--white) var(--white) var(--silver-dd); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ───────── Top bar ───────── -->
+  <div class="span2 topbar">
+    <div class="brand">
+      <span class="logo">▦</span>
+      <span>Paper Money Broker <span class="muted">· Agent Terminal</span></span>
+    </div>
+    <div class="toggle">
+      <span class="muted" id="connState">●</span>
+    </div>
+  </div>
+
+  <!-- ───────── Allocate / Open account ───────── -->
+  <section class="window">
+    <div class="titlebar">
+      <span class="title"><span class="ico">＋</span> Open Account</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="row">
+        <div class="field tiny">
+          <label for="market">Market</label>
+          <select id="market">
+            <option value="us">US</option>
+            <option value="cn">CN</option>
+            <option value="hk">HK</option>
+          </select>
+        </div>
+        <div class="field short">
+          <label for="initialCash">Initial cash</label>
+          <input id="initialCash" type="number" value="100000" min="0" step="1000" />
+        </div>
+        <div class="field short">
+          <label for="openDate">Open date</label>
+          <input id="openDate" type="date" value="2024-01-02" />
+        </div>
+        <button class="btn primary" id="allocateBtn">Allocate account →</button>
+      </div>
+      <div class="row">
+        <div class="field grow">
+          <label for="acctInput">…or load an existing 10-digit account id</label>
+          <input id="acctInput" inputmode="numeric" placeholder="e.g. 1840293756" maxlength="10" />
+        </div>
+        <button class="btn" id="loadBtn">Query status</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Account status ───────── -->
+  <section class="window">
+    <div class="titlebar">
+      <span class="title"><span class="ico">▤</span> Account Status</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <span class="acctchip" id="acctId">— — — —</span>
+        <span class="pill" id="statusPill"><span class="dot"></span><span id="statusText">no account</span></span>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="k">Market</span><span class="v" id="sMarket">—</span></div>
+        <div class="stat"><span class="k">Trading day</span><span class="v mono" id="sDay">—</span></div>
+        <div class="stat"><span class="k">Current date</span><span class="v mono" id="sDate">—</span></div>
+        <div class="stat"><span class="k">Equity</span><span class="v mono" id="sEquity">—</span></div>
+        <div class="stat"><span class="k">Cash</span><span class="v mono" id="sCash">—</span></div>
+        <div class="stat"><span class="k">Day P&L</span><span class="v mono" id="sDayPnl">—</span></div>
+        <div class="stat"><span class="k">Realized P&L</span><span class="v mono" id="sRealized">—</span></div>
+        <div class="stat"><span class="k">Unrealized P&L</span><span class="v mono" id="sUnreal">—</span></div>
+        <div class="stat"><span class="k">Total return</span><span class="v mono" id="sReturn">—</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Trade ticket + day controls ───────── -->
+  <section class="window">
+    <div class="titlebar">
+      <span class="title"><span class="ico">⇄</span> Trade Ticket</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="row">
+        <div class="field tiny">
+          <label for="tSymbol">Symbol</label>
+          <input id="tSymbol" placeholder="AAPL" />
+        </div>
+        <div class="field tiny">
+          <label for="tQty">Qty</label>
+          <input id="tQty" type="number" value="100" min="1" step="1" />
+        </div>
+        <div class="field tiny">
+          <label for="tPrice">Price</label>
+          <input id="tPrice" type="number" value="0" min="0" step="0.01" />
+        </div>
+      </div>
+      <div class="btnbar">
+        <button class="btn buy" id="buyBtn">Buy</button>
+        <button class="btn sell" id="sellBtn">Sell</button>
+      </div>
+      <hr style="width:100%; opacity:.25;" />
+      <div class="btnbar">
+        <button class="btn" id="endDayBtn">⏸ End day (freeze)</button>
+        <button class="btn primary" id="nextDayBtn">⏵ Next day</button>
+        <button class="btn" id="closeBtn">Close account</button>
+      </div>
+      <div class="muted" id="freezeNote" style="font-size:12px;">
+        Trading is allowed while <b>ACTIVE</b>. After <b>End day</b> the account is
+        <b>FROZEN</b> and rejects orders until <b>Next day</b>.
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Positions ───────── -->
+  <section class="window">
+    <div class="titlebar">
+      <span class="title"><span class="ico">▣</span> Positions</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Symbol</th><th class="r">Qty</th><th class="r">Avg</th><th class="r">Last</th><th class="r">Mkt val</th><th class="r">Unreal P&L</th></tr></thead>
+          <tbody id="positionsBody"><tr><td class="empty muted" colspan="6">No open positions</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Today's trades ───────── -->
+  <section class="window span2">
+    <div class="titlebar">
+      <span class="title"><span class="ico">≣</span> Today's Trades <span class="muted" id="todayCount"></span></span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Trade id</th><th>Side</th><th>Symbol</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Gross</th><th class="r">Realized</th><th>Note</th></tr></thead>
+          <tbody id="tradesBody"><tr><td class="empty muted" colspan="8">No trades today</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Trading history (by step / day) ───────── -->
+  <section class="window span2">
+    <div class="titlebar">
+      <span class="title"><span class="ico">🗓</span> Trading History — by step</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th class="r">Day</th><th>Date</th><th class="r">Open equity</th><th class="r">Close equity</th><th class="r">Day P&L</th><th class="r">Realized</th><th class="r">Trades</th><th class="r">Fees</th></tr></thead>
+          <tbody id="historyBody"><tr><td class="empty muted" colspan="8">No closed trading days yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── Event log ───────── -->
+  <section class="window span2">
+    <div class="titlebar">
+      <span class="title"><span class="ico">›_</span> Activity Log</span>
+      <span class="controls"><span class="win-ctl">_</span><span class="win-ctl">□</span><span class="win-ctl">×</span></span>
+    </div>
+    <div class="window-body">
+      <div id="log"></div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const API = "/v1";
+  const $ = (id) => document.getElementById(id);
+  const CCY = { us: { sym: "$", code: "USD" }, cn: { sym: "¥", code: "CNY" }, hk: { sym: "HK$", code: "HKD" } };
+
+  let currentId = null;
+  let currentMarket = "us";
+
+  // ---- helpers ----------------------------------------------------------
+  function log(msg, kind = "info") {
+    const t = new Date().toLocaleTimeString();
+    const prefix = kind === "err" ? "✗" : kind === "ok" ? "✓" : "·";
+    $("log").textContent = `[${t}] ${prefix} ${msg}\n` + $("log").textContent;
+  }
+  function money(n) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    const c = CCY[currentMarket] || CCY.us;
+    return c.sym + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function num(n, d = 2) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    return Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function pct(n) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    return (n * 100).toFixed(2) + "%";
+  }
+  function signClass(n) { return n > 0 ? "pos" : n < 0 ? "neg" : ""; }
+
+  async function api(path, opts) {
+    const res = await fetch(API + path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const msg = (data && (data.detail?.message || data.message || data.detail)) || res.statusText;
+      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+    return data;
+  }
+
+  // ---- theme ------------------------------------------------------------
+  // The skin is chosen by the embedding console via the URL (?theme=win98 / ?skin=98),
+  // so the terminal tracks the /legacy route automatically. No in-page toggle.
+  function setTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme === "win98" ? "win98" : "modern");
+  }
+
+  // ---- rendering --------------------------------------------------------
+  function render(st) {
+    if (!st) return;
+    currentId = st.account_id;
+    currentMarket = st.market || "us";
+    localStorage.setItem("pmb_acct", currentId);
+
+    $("acctId").textContent = st.account_id;
+    $("acctInput").value = st.account_id;
+
+    const status = st.status || "—";
+    const pill = $("statusPill");
+    pill.className = "pill st-" + status;
+    $("statusText").textContent = status;
+    pill.querySelector(".dot").style.background = "currentColor";
+
+    $("sMarket").textContent = (st.market || "—").toUpperCase() + " · " + (st.base_currency || "");
+    $("sDay").textContent = st.trading_day ?? "—";
+    $("sDate").textContent = st.current_date || "—";
+    $("sEquity").textContent = money(st.equity);
+    $("sCash").textContent = money(st.cash ?? st.cash_available);
+
+    setSigned("sDayPnl", st.day_pnl, money);
+    setSigned("sRealized", st.realized_pnl, money);
+    setSigned("sUnreal", st.unrealized_pnl, money);
+    setSigned("sReturn", st.total_return, pct);
+
+    renderPositions(st.positions || []);
+    renderTrades(st.trades_today || []);
+    $("todayCount").textContent = (st.num_trades_today ? `(${st.num_trades_today})` : "");
+
+    // enable/disable controls by status
+    const active = status === "ACTIVE";
+    const closed = status === "CLOSED";
+    $("buyBtn").disabled = !active;
+    $("sellBtn").disabled = !active;
+    $("endDayBtn").disabled = !active;
+    $("nextDayBtn").disabled = closed;
+    $("closeBtn").disabled = closed;
+  }
+
+  function setSigned(id, val, fmt) {
+    const el = $(id);
+    el.textContent = fmt(val);
+    el.className = "v mono " + signClass(Number(val));
+  }
+
+  function renderPositions(rows) {
+    const body = $("positionsBody");
+    if (!rows.length) { body.innerHTML = `<tr><td class="empty muted" colspan="6">No open positions</td></tr>`; return; }
+    body.innerHTML = rows.map(p => `
+      <tr>
+        <td><b>${esc(p.symbol)}</b></td>
+        <td class="r mono">${p.qty}</td>
+        <td class="r mono">${num(p.avg_price, 4)}</td>
+        <td class="r mono">${num(p.last_price, 4)}</td>
+        <td class="r mono">${money(p.market_value)}</td>
+        <td class="r mono ${signClass(p.unrealized_pnl)}">${money(p.unrealized_pnl)}</td>
+      </tr>`).join("");
+  }
+
+  function renderTrades(rows) {
+    const body = $("tradesBody");
+    if (!rows.length) { body.innerHTML = `<tr><td class="empty muted" colspan="8">No trades today</td></tr>`; return; }
+    body.innerHTML = rows.slice().reverse().map(t => `
+      <tr>
+        <td class="mono">${esc(t.trade_id)}</td>
+        <td class="${t.side === "BUY" ? "pos" : "neg"}"><b>${t.side}</b></td>
+        <td><b>${esc(t.symbol)}</b></td>
+        <td class="r mono">${t.qty}</td>
+        <td class="r mono">${num(t.price, 4)}</td>
+        <td class="r mono">${money(t.gross)}</td>
+        <td class="r mono ${signClass(t.realized_pnl)}">${money(t.realized_pnl)}</td>
+        <td class="muted">${esc(t.note || "")}</td>
+      </tr>`).join("");
+  }
+
+  function renderHistory(days) {
+    const body = $("historyBody");
+    if (!days || !days.length) { body.innerHTML = `<tr><td class="empty muted" colspan="8">No closed trading days yet</td></tr>`; return; }
+    body.innerHTML = days.slice().reverse().map(d => `
+      <tr>
+        <td class="r mono"><b>${d.trading_day}</b></td>
+        <td class="mono">${esc(d.date)}</td>
+        <td class="r mono">${money(d.opening_equity)}</td>
+        <td class="r mono">${money(d.closing_equity)}</td>
+        <td class="r mono ${signClass(d.closing_equity - d.opening_equity)}">${money(d.closing_equity - d.opening_equity)}</td>
+        <td class="r mono ${signClass(d.realized_pnl)}">${money(d.realized_pnl)}</td>
+        <td class="r mono">${d.num_trades}</td>
+        <td class="r mono">${money(d.fees)}</td>
+      </tr>`).join("");
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  // ---- actions ----------------------------------------------------------
+  async function refresh() {
+    if (!currentId) return;
+    try {
+      const st = await api(`/accounts/${currentId}/status`);
+      render(st);
+      const hist = await api(`/accounts/${currentId}/history`);
+      renderHistory(hist.days);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  async function allocate() {
+    const market = $("market").value;
+    const body = {
+      market,
+      initial_cash: Number($("initialCash").value) || 100000,
+      open_date: $("openDate").value || undefined,
+    };
+    try {
+      const r = await api("/accounts", { method: "POST", body: JSON.stringify(body) });
+      log(`Allocated ${market.toUpperCase()} account ${r.account_id}`, "ok");
+      render(r.account);
+      renderHistory([]);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  async function loadStatus() {
+    const id = ($("acctInput").value || "").trim();
+    if (!/^\d{10}$/.test(id)) { log("account id must be 10 digits", "err"); return; }
+    currentId = id;
+    await refresh();
+    if (currentId) log(`Loaded account ${id}`, "ok");
+  }
+
+  async function doTrade(side) {
+    if (!currentId) { log("no account loaded", "err"); return; }
+    const symbol = ($("tSymbol").value || "").trim().toUpperCase();
+    const qty = Number($("tQty").value);
+    const price = Number($("tPrice").value);
+    if (!symbol) { log("enter a symbol", "err"); return; }
+    if (!(qty > 0)) { log("qty must be positive", "err"); return; }
+    if (!(price > 0)) { log("enter a positive price", "err"); return; }
+    try {
+      const r = await api(`/accounts/${currentId}/trade`, {
+        method: "POST",
+        body: JSON.stringify({ symbol, side, qty, price }),
+      });
+      log(`${side} ${qty} ${symbol} @ ${price} → ${r.fill.trade_id}`, "ok");
+      render(r.account);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  async function endDay() {
+    if (!currentId) return;
+    try {
+      const r = await api(`/accounts/${currentId}/end_day`, { method: "POST", body: "{}" });
+      log(`Day ${r.day.trading_day} closed · equity ${money(r.day.closing_equity)} · FROZEN`, "ok");
+      render(r.account);
+      const hist = await api(`/accounts/${currentId}/history`);
+      renderHistory(hist.days);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  async function nextDay() {
+    if (!currentId) return;
+    try {
+      const r = await api(`/accounts/${currentId}/next_day`, { method: "POST", body: "{}" });
+      log(`Advanced to day ${r.account.trading_day} · ${r.account.current_date} · ACTIVE`, "ok");
+      render(r.account);
+      const hist = await api(`/accounts/${currentId}/history`);
+      renderHistory(hist.days);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  async function closeAccount() {
+    if (!currentId) return;
+    if (!confirm("Permanently close this account?")) return;
+    try {
+      const r = await api(`/accounts/${currentId}/close`, { method: "POST", body: "{}" });
+      log(`Account ${currentId} closed`, "ok");
+      render(r.account);
+    } catch (e) { log(e.message, "err"); }
+  }
+
+  // ---- wiring -----------------------------------------------------------
+  $("allocateBtn").addEventListener("click", allocate);
+  $("loadBtn").addEventListener("click", loadStatus);
+  $("buyBtn").addEventListener("click", () => doTrade("BUY"));
+  $("sellBtn").addEventListener("click", () => doTrade("SELL"));
+  $("endDayBtn").addEventListener("click", endDay);
+  $("nextDayBtn").addEventListener("click", nextDay);
+  $("closeBtn").addEventListener("click", closeAccount);
+  $("acctInput").addEventListener("keydown", (e) => { if (e.key === "Enter") loadStatus(); });
+
+  // ---- boot -------------------------------------------------------------
+  {
+    const q = new URLSearchParams(location.search);
+    const t = (q.get("theme") || q.get("skin") || "").toLowerCase();
+    setTheme(t === "win98" || t === "98" || t === "legacy" ? "win98" : "modern");
+  }
+  (async () => {
+    try { await api("/health"); $("connState").textContent = "● connected"; $("connState").className = "pos"; }
+    catch (e) { $("connState").textContent = "● offline"; $("connState").className = "neg"; log("PMB API not reachable: " + e.message, "err"); }
+    const saved = localStorage.getItem("pmb_acct");
+    if (saved) { $("acctInput").value = saved; currentId = saved; refresh(); }
+  })();
+})();
+</script>
+</body>
+</html>

@@ -93,19 +93,36 @@ start_upq() {
     info "UPQ started (PID: $(cat "$LOG_DIR/upq.pid"))"
 }
 
+start_data_admin() {
+    info "Starting data-admin (data protocol control plane) on port ${DATA_ADMIN_PORT:-19340}..."
+    cd "$ROOT_DIR/infra/data-admin"
+    QFZ_HOST="$QFZ_HOST" DATA_ADMIN_PORT="${DATA_ADMIN_PORT:-19340}" python main.py > "$LOG_DIR/data-admin.log" 2>&1 &
+    echo $! > "$LOG_DIR/data-admin.pid"
+    info "data-admin started (PID: $(cat "$LOG_DIR/data-admin.pid"))"
+}
+
 start_dashboard() {
     info "Starting Dashboard (Next.js) on port $DASHBOARD_PORT..."
     cd "$ROOT_DIR/infra/dashboard-web"
+    # The base conda `node` on this box is broken (libnode: undefined symbol
+    # sqlite3session_attach), and `next`'s `#!/usr/bin/env node` shebang would pick it
+    # up. Prefer the working `node` conda env if present so build/start don't crash.
+    local NODE_ENV_BIN="${QFZ_NODE_BIN:-$HOME/miniconda3/envs/node/bin}"
+    if [ -x "$NODE_ENV_BIN/node" ]; then
+        local PATH="$NODE_ENV_BIN:$PATH"
+    fi
     if [ ! -d ".next" ]; then
         warn "Next.js build not found. Running pnpm build first..."
         PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
         ESP_BASE_URL="http://$QFZ_HOST:$ESP_PORT" \
         UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
+        DATA_ADMIN_BASE_URL="http://$QFZ_HOST:${DATA_ADMIN_PORT:-19340}" \
         pnpm build
     fi
     PMB_BASE_URL="http://$QFZ_HOST:$PMB_PORT" \
     ESP_BASE_URL="http://$QFZ_HOST:$ESP_PORT" \
     UPQ_BASE_URL="http://$QFZ_HOST:$UPQ_PORT" \
+    DATA_ADMIN_BASE_URL="http://$QFZ_HOST:${DATA_ADMIN_PORT:-19340}" \
     node_modules/.bin/next start -p "$DASHBOARD_PORT" > "$LOG_DIR/dashboard.log" 2>&1 &
     echo $! > "$LOG_DIR/dashboard.pid"
     info "Dashboard started (PID: $(cat "$LOG_DIR/dashboard.pid"))"
@@ -114,7 +131,7 @@ start_dashboard() {
 
 # ── Main ─────────────────────────────────────────────────────────
 
-SERVICES="${@:-pmb esp upq dashboard}"
+SERVICES="${@:-pmb esp upq data-admin dashboard}"
 
 echo ""
 echo "=========================================="
@@ -127,8 +144,9 @@ for svc in $SERVICES; do
         pmb) start_pmb ;;
         esp) start_esp ;;
         upq) start_upq ;;
+        data-admin) start_data_admin ;;
         dashboard) start_dashboard ;;
-        *)   warn "Unknown service: $svc (valid: pmb, esp, upq, dashboard)" ;;
+        *)   warn "Unknown service: $svc (valid: pmb, esp, upq, data-admin, dashboard)" ;;
     esac
 done
 

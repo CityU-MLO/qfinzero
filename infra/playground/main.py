@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import HOST, PORT
+from config import HOST, PORT, LLM_PROXY
 from agent import run_agent_stream
 from qfinzero.runtime import qfinzero_version
 
@@ -43,6 +43,7 @@ class ChatRequest(BaseModel):
     base_url: str
     api_key: str
     as_of_date: str  # "YYYY-MM-DD"
+    proxy: str | None = None  # optional per-request LLM egress proxy; overrides server default
 
 
 @app.get("/health")
@@ -53,14 +54,16 @@ async def health():
 class TestConnectionRequest(BaseModel):
     base_url: str
     api_key: str
+    proxy: str | None = None  # optional per-request LLM egress proxy; overrides server default
 
 
 @app.post("/test-connection")
 async def test_connection(req: TestConnectionRequest):
     """Test LLM provider connectivity by hitting the /models endpoint."""
     url = req.base_url.rstrip("/") + "/models"
+    proxy = (req.proxy or LLM_PROXY) or None
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, proxy=proxy) as client:
             resp = await client.get(
                 url, headers={"Authorization": f"Bearer {req.api_key}"}
             )
@@ -85,6 +88,7 @@ async def chat(req: ChatRequest):
             base_url=req.base_url,
             api_key=req.api_key,
             as_of_date=req.as_of_date,
+            proxy=(req.proxy or LLM_PROXY) or None,
         ):
             yield {"data": json.dumps(event)}
 

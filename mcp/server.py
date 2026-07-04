@@ -667,17 +667,20 @@ def pmb_health() -> str:
 def pmb_create_account(
     initial_cash: float,
     start_date: str,
+    market: Literal["us", "cn", "hk"] = "us",
     account_type: Literal["MARGIN", "CASH"] = "MARGIN",
 ) -> str:
-    """Create a new paper trading account.
+    """Allocate a new paper trading (broker) account.
 
     Args:
         initial_cash: Starting cash balance, e.g. 100000.0
-        start_date: Account start date "YYYY-MM-DD" (required — use the earliest date you will trade)
+        start_date: Account open date "YYYY-MM-DD" (required — the first trading day)
+        market: Market to trade — "us" (default), "cn", or "hk". Determines the
+                account-number prefix, base currency, and exchange timezone.
         account_type: "MARGIN" (default) or "CASH"
 
     Returns:
-        JSON with: account_id, created_at, account_state
+        JSON with: account_id (a unique 10-digit number), market, created_at, account.
         Save the account_id — you'll need it for all subsequent calls.
     """
     with PMBClient(PMB_URL) as client:
@@ -685,7 +688,8 @@ def pmb_create_account(
             client.create_account(
                 initial_cash=initial_cash,
                 account_type=account_type,
-                start_date=start_date,
+                market=market,
+                open_date=start_date,
             )
         )
 
@@ -755,6 +759,105 @@ def pmb_get_trades(
     """
     with PMBClient(PMB_URL) as client:
         return json.dumps(client.get_trades(account_id=account_id, session_id=session_id))
+
+
+# ── Broker account: day-gated trading -----------------------------------
+
+
+@mcp.tool()
+def pmb_get_status(account_id: str) -> str:
+    """Query the broker status of an account by its 10-digit id.
+
+    Args:
+        account_id: The 10-digit account number
+
+    Returns:
+        JSON with: market, status (ACTIVE/FROZEN/CLOSED), trading_day, current_date,
+        cash, equity, realized_pnl, unrealized_pnl, total_return, positions,
+        trades_today. When status is FROZEN you must call pmb_next_day before trading.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.get_status(account_id))
+
+
+@mcp.tool()
+def pmb_get_history(account_id: str, limit: Optional[int] = None) -> str:
+    """Get an account's step-by-step trading history (one record per trading day).
+
+    Args:
+        account_id: The 10-digit account number
+        limit: Optional — return only the most recent N days
+
+    Returns:
+        JSON list of day records: trading_day, date, opening_equity, closing_equity,
+        realized_pnl, num_trades, fees, trades[], positions[].
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.get_history(account_id, limit=limit))
+
+
+@mcp.tool()
+def pmb_trade(
+    account_id: str,
+    symbol: str,
+    side: Literal["BUY", "SELL"],
+    qty: int,
+    price: float,
+    note: Optional[str] = None,
+) -> str:
+    """Execute an immediate paper trade against the account's broker book.
+
+    Only allowed while the account is ACTIVE (rejected when FROZEN). The trade
+    fills instantly at the supplied price.
+
+    Args:
+        account_id: The 10-digit account number
+        symbol: Ticker, e.g. "AAPL"
+        side: "BUY" or "SELL"
+        qty: Number of shares (positive integer)
+        price: Execution price per share
+        note: Optional free-text note attached to the fill
+
+    Returns:
+        JSON with the executed fill and the updated account status.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.trade(account_id, symbol, side, qty, price, note=note))
+
+
+@mcp.tool()
+def pmb_end_day(account_id: str) -> str:
+    """Close the current trading day and FREEZE the account.
+
+    Records the day into the account's trading history. While frozen, trades are
+    rejected until pmb_next_day is called.
+
+    Args:
+        account_id: The 10-digit account number
+
+    Returns:
+        JSON with the closed day record and the updated (frozen) account status.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.end_day(account_id))
+
+
+@mcp.tool()
+def pmb_next_day(account_id: str, date: Optional[str] = None) -> str:
+    """Unfreeze the account and advance to the next trading day.
+
+    If the current day was not explicitly ended, it is auto-closed first so the
+    history stays contiguous.
+
+    Args:
+        account_id: The 10-digit account number
+        date: Optional explicit "YYYY-MM-DD"; otherwise advances to the next weekday.
+
+    Returns:
+        JSON with the updated (active) account status on the new trading day.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.next_day(account_id, date=date))
 
 
 @mcp.tool()

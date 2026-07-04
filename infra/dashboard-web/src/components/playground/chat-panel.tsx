@@ -66,6 +66,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
           base_url: config.baseUrl,
           api_key: config.apiKey,
           as_of_date: config.asOfDate,
+          proxy: config.proxy || undefined,
         }),
         signal: controller.signal,
       });

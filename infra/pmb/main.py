@@ -9,7 +9,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 # Add pmb root to path for absolute imports
 sys.path.insert(0, CURRENT_DIR)
@@ -21,7 +22,7 @@ from services.account_service import AccountService
 from services.session_service import SessionService
 from services.order_service import OrderService
 from services.history_service import HistoryService
-from routes import health, accounts, sessions, orders, market
+from routes import health, accounts, sessions, orders, market, config as config_route
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("pmb")
@@ -33,12 +34,19 @@ async def lifespan(app: FastAPI):
     upq = UPQClient(settings.upq_base_url)
     await upq.start()
 
-    account_svc = AccountService()
+    from services import config_store
+    pmb_cfg = config_store.load()
+
+    account_svc = AccountService(
+        fee_per_share=float(pmb_cfg["fee_per_share"]),
+        buying_power_multiplier=float(pmb_cfg["buying_power_multiplier"]),
+    )
     session_svc = SessionService(upq)
     order_svc = OrderService(session_svc)
     history_svc = HistoryService(session_svc)
 
     app.state.upq = upq
+    app.state.pmb_config = pmb_cfg
     app.state.account_service = account_svc
     app.state.session_service = session_svc
     app.state.order_service = order_svc
@@ -74,10 +82,24 @@ from qfinzero.metrics import attach_metrics
 attach_metrics(app, service_name="pmb")
 
 app.include_router(health.router)
+app.include_router(config_route.router)
 app.include_router(accounts.router)
 app.include_router(sessions.router)
 app.include_router(orders.router)
 app.include_router(market.router)
+
+
+# ── Broker Terminal UI ───────────────────────────────────────────────
+# Static, dependency-free single-page UI (modern + Windows 98 themes).
+# Served same-origin so it talks to /v1 without CORS.
+_STATIC_DIR = os.path.join(CURRENT_DIR, "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/ui", StaticFiles(directory=_STATIC_DIR, html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/ui/")
 
 
 if __name__ == "__main__":

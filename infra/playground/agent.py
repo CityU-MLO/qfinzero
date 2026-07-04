@@ -4,6 +4,7 @@ from typing import AsyncIterator, Any
 import json
 import traceback
 
+import httpx
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -68,6 +69,7 @@ async def run_agent_stream(
     base_url: str,
     api_key: str,
     as_of_date: str,
+    proxy: str | None = None,
 ) -> AsyncIterator[dict]:
     """
     Run the ReAct agent for one user turn and yield SSE-ready event dicts.
@@ -81,15 +83,21 @@ async def run_agent_stream(
         {"type": "done"}
         {"type": "error",      "message": str}
     """
+    # Route LLM API calls through the egress proxy when configured; local MCP tool
+    # calls are unaffected (they run over stdio, not this client).
+    http_client = httpx.AsyncClient(proxy=proxy) if proxy else None
     try:
         async with get_tools() as tools:
-            llm = init_chat_model(
+            llm_kwargs: dict[str, Any] = dict(
                 model=model,
                 model_provider="openai",
                 base_url=base_url,
                 api_key=api_key,
                 streaming=True,
             )
+            if http_client is not None:
+                llm_kwargs["http_async_client"] = http_client
+            llm = init_chat_model(**llm_kwargs)
 
             system_msg = build_system_prompt(as_of_date)
             agent = create_react_agent(
@@ -145,3 +153,6 @@ async def run_agent_stream(
             return [f"{type(exc).__name__}: {exc}"]
         leaves = unwrap(e)
         yield {"type": "error", "message": " | ".join(leaves)}
+    finally:
+        if http_client is not None:
+            await http_client.aclose()

@@ -1,0 +1,296 @@
+/* legacy.css — a Windows-98 desktop skin for the QFinZero Console, applied whenever
+ * the <body> carries class="legacy" (set by the root layout when the /legacy cookie
+ * is present). Ported from Assay's src/assay/api/static/legacy.css and adapted to this
+ * app's shadcn/Tailwind token system.
+ *
+ * The whole console is reskinned at once by two moves:
+ *   1. re-declaring the shadcn HSL design TOKENS on body.legacy — every component that
+ *      paints with bg-card / bg-primary / text-muted-foreground / border-border picks
+ *      up the Win98 palette automatically, so pages conform without per-page work;
+ *   2. classic Win98 3D bevels (raised / sunken box-shadows) on the generic widgets
+ *      every page reuses — cards, buttons, inputs, tables, badges, the nav bar.
+ *
+ * Everything is scoped under body.legacy, so this file is completely inert in the
+ * default modern theme. Font: Win98 shipped 8pt "MS Sans Serif"; on the web we fall
+ * back to Tahoma/Verdana — the same proportions — so it stays crisp and offline-safe. */
+
+body.legacy {
+  /* ---- Win98 palette mapped onto the shadcn HSL tokens (H S% L%, no hsl()) ---- */
+  --background: 0 0% 75%; /* silver button-face — the Win98 client colour */
+  --foreground: 0 0% 0%;
+  --card: 0 0% 75%;
+  --card-foreground: 0 0% 0%;
+  --popover: 0 0% 75%;
+  --popover-foreground: 0 0% 0%;
+  --primary: 240 100% 25%; /* navy #000080 — the one accent */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 75%;
+  --secondary-foreground: 0 0% 0%;
+  --muted: 0 0% 75%;
+  --muted-foreground: 0 0% 25%; /* still dark for contrast on silver */
+  --accent: 240 100% 25%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 100% 33%; /* #aa0000 */
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 50%; /* mid-grey 1px rules */
+  --input: 0 0% 50%;
+  --ring: 240 100% 25%;
+
+  /* Win98 3D bevel kits (reused via box-shadow below) */
+  --w98-raised: inset -1px -1px #0a0a0a, inset 1px 1px #ffffff, inset -2px -2px #808080,
+    inset 2px 2px #dfdfdf;
+  --w98-sunken: inset -1px -1px #ffffff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf,
+    inset 2px 2px #808080;
+  --w98-window: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080,
+    inset 2px 2px #ffffff;
+  --w98-field: inset -1px -1px #ffffff, inset 1px 1px #808080, inset -2px -2px #dfdfdf,
+    inset 2px 2px #0a0a0a;
+
+  --font-sans: "Tahoma", "Geneva", "MS Sans Serif", "Segoe UI", sans-serif;
+  --font-mono: "Lucida Console", "Courier New", monospace;
+
+  /* the classic teal desktop, no gradients */
+  background: #008080 !important;
+  background-image: none !important;
+  background-attachment: fixed;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: #000;
+}
+
+body.legacy,
+body.legacy * {
+  font-family: var(--font-sans);
+}
+body.legacy .font-mono,
+body.legacy code,
+body.legacy pre,
+body.legacy [class*="-json"] {
+  font-family: var(--font-mono) !important;
+}
+
+/* square off every rounded corner the app asks for */
+body.legacy [class*="rounded"] {
+  border-radius: 0 !important;
+}
+
+/* headings: bold Tahoma; h1 sits on the teal desktop so it goes white-on-shadow */
+body.legacy h1 {
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+}
+body.legacy h2,
+body.legacy h3 {
+  color: #000080;
+}
+
+/* links: classic underlined navy/blue, purple visited */
+body.legacy a {
+  color: #0000c0;
+  text-decoration: underline;
+}
+body.legacy a:visited {
+  color: #600080;
+}
+body.legacy a:hover {
+  color: #0000ff;
+}
+
+/* ---- .ui-card == a Win98 window: silver, raised window bevel, square ---- */
+body.legacy .ui-card {
+  background: #c0c0c0 !important;
+  border: 0 !important;
+  box-shadow: var(--w98-window) !important;
+  padding: 3px !important;
+}
+
+/* ---- buttons: raised silver, sunken when pressed ---- */
+body.legacy button {
+  background: #c0c0c0 !important;
+  color: #000 !important;
+  border: 0 !important;
+  box-shadow: var(--w98-raised) !important;
+}
+body.legacy button:active {
+  box-shadow: var(--w98-sunken) !important;
+}
+body.legacy button:focus-visible {
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+/* a "selected" button/tab (Tailwind bg-primary / aria-pressed) reads as pressed-in */
+body.legacy button[class*="bg-primary"],
+body.legacy button[aria-pressed="true"],
+body.legacy [role="tab"][data-state="active"],
+body.legacy [data-state="active"][class*="bg-primary"] {
+  box-shadow: var(--w98-sunken) !important;
+  font-weight: bold;
+}
+
+/* ---- inputs / selects / textareas: sunken white fields ---- */
+body.legacy input,
+body.legacy select,
+body.legacy textarea {
+  background: #ffffff !important;
+  color: #000 !important;
+  border: 0 !important;
+  box-shadow: var(--w98-field) !important;
+}
+body.legacy input[type="checkbox"],
+body.legacy input[type="radio"] {
+  box-shadow: none !important;
+}
+body.legacy textarea {
+  font-family: var(--font-mono) !important;
+}
+
+/* ---- badges: tiny raised silver chips; keep semantic colour in the text ---- */
+body.legacy .ui-badge {
+  border: 0 !important;
+  box-shadow: var(--w98-raised);
+  background: #c0c0c0 !important;
+  color: #000 !important;
+}
+
+/* ---- tables: sunken white list with grey gridlines + navy header ---- */
+body.legacy table {
+  background: #fff !important;
+  box-shadow: var(--w98-field);
+  border: 0 !important;
+  border-collapse: separate !important;
+}
+body.legacy th,
+body.legacy td {
+  border: 1px solid #c0c0c0 !important;
+}
+body.legacy thead th {
+  background: #000080 !important;
+  color: #fff !important;
+  font-weight: bold;
+}
+body.legacy tbody tr:hover {
+  background: #d8e0ff !important;
+}
+
+/* ---- top nav: a Win98 toolbar; tabs as raised buttons (active = sunken) ---- */
+body.legacy .site-nav {
+  background: #c0c0c0 !important;
+  border: 0 !important;
+  box-shadow: var(--w98-raised) !important;
+  backdrop-filter: none !important;
+}
+body.legacy .site-nav .nav-logo {
+  background: #000080 !important;
+  color: #fff !important;
+  box-shadow: var(--w98-raised);
+}
+body.legacy .site-nav a {
+  color: #000 !important;
+  text-decoration: none !important;
+  background: #c0c0c0 !important;
+  box-shadow: var(--w98-raised);
+  margin: 0 1px;
+}
+body.legacy .site-nav a:hover {
+  background: #d4d0c8 !important;
+}
+/* active nav link carries Tailwind bg-primary → render it pressed-in */
+body.legacy .site-nav a[class*="bg-primary"] {
+  box-shadow: var(--w98-sunken) !important;
+  background: #d8d8d8 !important;
+  font-weight: bold;
+}
+
+/* ============================================================= retro chrome === */
+/* Banner styled as an ACTIVE Win98 title bar (navy gradient, white text). */
+.legacy-banner {
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #ffffff;
+  border-bottom: 1px solid #000;
+  box-shadow: var(--w98-raised);
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 2;
+  padding: 3px 0;
+}
+.legacy-marquee {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.legacy-marquee__track {
+  display: inline-flex;
+  will-change: transform;
+  animation: legacyScroll 26s linear infinite;
+}
+@keyframes legacyScroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Footer styled as a Win98 status/task bar: raised silver strip. */
+.legacy-foot {
+  margin: 16px 0 0;
+  padding: 8px 10px;
+  background: #c0c0c0;
+  box-shadow: var(--w98-raised);
+  text-align: center;
+  font-family: "Tahoma", "Geneva", sans-serif;
+  font-size: 12px;
+  color: #000;
+}
+.legacy-foot hr {
+  border: 0;
+  border-top: 1px solid #808080;
+  border-bottom: 1px solid #fff;
+  margin: 6px 0;
+}
+.legacy-foot a {
+  color: #0000c0;
+}
+/* the visitor counter: a sunken LCD readout */
+.legacy-counter {
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-size: 13px;
+  background: #000;
+  color: #00ff66;
+  padding: 1px 8px;
+  box-shadow: var(--w98-field);
+  letter-spacing: 4px;
+}
+.legacy-uc {
+  color: #800000;
+  font-weight: bold;
+}
+.legacy-blink {
+  animation: legacyBlink 1s steps(1) infinite;
+}
+@keyframes legacyBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ============================ Win98 scrollbars (webkit) ====================== */
+body.legacy ::-webkit-scrollbar {
+  width: 17px;
+  height: 17px;
+}
+body.legacy ::-webkit-scrollbar-track {
+  background: #dfdfdf;
+  box-shadow: var(--w98-field);
+}
+body.legacy ::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  box-shadow: var(--w98-raised);
+}
+body.legacy ::-webkit-scrollbar-button {
+  background: #c0c0c0;
+  box-shadow: var(--w98-raised);
+  display: block;
+  height: 17px;
+  width: 17px;
+}

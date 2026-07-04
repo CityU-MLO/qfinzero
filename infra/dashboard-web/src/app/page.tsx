@@ -1,15 +1,9 @@
-import { StatusDashboard } from "@/components/status/status-dashboard";
+import { PlaygroundLayout } from "@/components/playground/playground-layout";
 
-export default function StatusPage() {
+export default function ChatPage() {
   return (
-    <main className="space-y-4">
-      <section>
-        <h2 className="text-xl font-semibold">Health & Status</h2>
-        <p className="text-sm text-muted-foreground">
-          Unified status cards for UPQ / ESP / PMB with freshness and request/error trend signals.
-        </p>
-      </section>
-      <StatusDashboard />
-    </main>
+    <div className="flex flex-col h-[calc(100vh-7rem)]">
+      <PlaygroundLayout />
+    </div>
   );
 }

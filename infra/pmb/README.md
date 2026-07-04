@@ -59,6 +59,73 @@ Integrates with **UPQ** (Unified Price Query) service:
 
 ---
 
+## Broker Accounts (day-gated) + Terminal UI
+
+On top of the replay engine, PMB exposes a **self-contained broker account** designed
+for AI agents to drive directly — no backtest session required.
+
+- **Unique 10-digit account id** is allocated per account. The leading digit encodes
+  the market (`1`→US, `6`→CN, `3`→HK), so the number is self-describing — like a real
+  brokerage routing prefix.
+- **Multi-market**: each account is opened against a `market` (`us` / `cn` / `hk`),
+  which sets the base currency (USD / CNY / HKD) and the exchange timezone.
+- **Query by id**: any user or agent can pull full status from just the account id.
+- **Trading history by step**: every closed trading day is appended to the account's
+  history as one record (opening/closing equity, day P&L, the day's fills, positions).
+- **Day-gating / freeze**: trading is allowed while `ACTIVE`. Calling **end_day**
+  freezes the account (`FROZEN`) and records the day; trades are rejected until the
+  agent calls **next_day**, which advances the simulated calendar to the next weekday
+  and re-opens the book.
+
+### Terminal UI
+
+A dependency-free single-page UI ships with the server (served same-origin, no build):
+
+```
+open  http://127.0.0.1:19380/        # redirects to /ui/
+```
+
+It supports **two themes** (toggle, top-right; preference persists):
+
+- **Modern** — dark glassy trading terminal.
+- **Windows 98** — classic silver chrome, beveled windows, navy title bars.
+
+From the UI you can allocate an account, query status by id, place buy/sell tickets,
+end the day (freeze), advance to the next day, and browse the step-by-step history.
+
+### Broker API
+
+```bash
+# Allocate a US account → returns a 10-digit account_id
+curl -X POST http://127.0.0.1:19380/v1/accounts \
+  -H 'Content-Type: application/json' \
+  -d '{"market": "us", "initial_cash": 100000, "open_date": "2024-01-02"}'
+
+# Query status by id
+curl http://127.0.0.1:19380/v1/accounts/1840293756/status
+
+# Trade (immediate fill at supplied price; only while ACTIVE)
+curl -X POST http://127.0.0.1:19380/v1/accounts/1840293756/trade \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol": "AAPL", "side": "BUY", "qty": 100, "price": 187.4}'
+
+# End the day (freeze) → records a history step
+curl -X POST http://127.0.0.1:19380/v1/accounts/1840293756/end_day
+
+# Next day (unfreeze + advance calendar)
+curl -X POST http://127.0.0.1:19380/v1/accounts/1840293756/next_day
+
+# Step-by-step trading history
+curl http://127.0.0.1:19380/v1/accounts/1840293756/history
+```
+
+Python client / MCP equivalents: `pmb.create_account(market=...)`, `pmb.get_status`,
+`pmb.trade` / `broker_buy` / `broker_sell`, `pmb.end_day`, `pmb.next_day`,
+`pmb.get_history`; MCP tools `pmb_create_account`, `pmb_get_status`, `pmb_trade`,
+`pmb_end_day`, `pmb_next_day`, `pmb_get_history`.
+
+---
+
 ## API Overview
 
 **Base URL**: `http://127.0.0.1:19380/v1`
@@ -66,13 +133,20 @@ Integrates with **UPQ** (Unified Price Query) service:
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Health check |
-| `/accounts` | POST | Create account with initial cash + margin config |
-| `/accounts/{id}` | GET | Get account snapshot |
+| `/accounts` | POST | Allocate account (`market`, initial cash, open_date) → 10-digit id |
+| `/accounts/{id}` | GET | Account snapshot (live session snapshot if attached, else broker book) |
+| `/accounts/{id}/status` | GET | Canonical broker status (balances, P&L, day-gate state) |
+| `/accounts/{id}/trade` | POST | Immediate paper fill (ACTIVE only) |
+| `/accounts/{id}/end_day` | POST | Close trading day → freeze + record history step |
+| `/accounts/{id}/next_day` | POST | Unfreeze + advance to next trading day |
+| `/accounts/{id}/history` | GET | Step-by-step trading history (one record per day) |
+| `/accounts/{id}/close` | POST | Permanently close the account |
 | `/sessions` | POST | Create replay session (prefetches data) |
 | `/sessions/{id}/step` | POST | Advance clock, return events |
 | `/sessions/{id}/summary` | GET | Session metrics (return, drawdown, fees) |
 | `/orders` | POST | Place order (idempotent via client_order_id) |
 | `/orders/{id}/cancel` | POST | Cancel order |
+| `/ui/` | GET | Broker Terminal UI (modern + Windows 98 themes) |
 
 See full API spec in the [original design doc](../../.claude/plans/cozy-nibbling-wombat.md).
 

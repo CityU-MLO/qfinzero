@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Loader2, Wifi, WifiOff } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Check, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 
 export interface PlaygroundConfig {
@@ -13,10 +13,37 @@ export interface PlaygroundConfig {
   baseUrl: string;
   apiKey: string;
   asOfDate: string;
+  proxy?: string; // optional LLM egress proxy; empty = use server default (LLM_PROXY)
 }
 
 const STORAGE_KEY = "playground_config";
+const SETTINGS_KEY = "qfz_console_settings"; // written by the Settings page
 export const ET_ZONE = "America/New_York";
+
+// ── Provider registry (mirrors the Settings page; base_url/api_key resolved here) ──
+type Provider = { id: string; label: string; baseUrl: string; apiKey: string; models: string[] };
+type ConsoleSettings = { providers: Provider[]; activeProviderId: string; activeModel: string; proxy: string };
+
+const DEFAULT_PROVIDERS: Provider[] = [
+  { id: "openai", label: "OpenAI (GPT)", baseUrl: "https://api.openai.com/v1", apiKey: "", models: ["gpt-4o", "gpt-4o-mini", "o3-mini"] },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", apiKey: "", models: ["deepseek-chat", "deepseek-reasoner"] },
+  { id: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", models: ["gemini-2.0-flash", "gemini-1.5-pro"] },
+  { id: "claude", label: "Claude (Anthropic)", baseUrl: "https://api.anthropic.com/v1", apiKey: "", models: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"] },
+];
+
+function loadConsoleSettings(): ConsoleSettings {
+  const fallback: ConsoleSettings = { providers: DEFAULT_PROVIDERS, activeProviderId: "openai", activeModel: "gpt-4o-mini", proxy: "" };
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<ConsoleSettings>;
+    if (!parsed.providers?.length) return fallback;
+    return { ...fallback, ...parsed, providers: parsed.providers };
+  } catch {
+    return fallback;
+  }
+}
 
 export const DEFAULT_CONFIG: PlaygroundConfig = {
   model: "gpt-4o-mini",
@@ -24,13 +51,13 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   apiKey: "",
   // Default: today at 09:00 ET stored as UTC ISO string
   asOfDate: getDefaultAsOfDate(),
+  proxy: "",
 };
 
 /** Returns today at 09:00 US/Eastern as a UTC ISO string "YYYY-MM-DDTHH:MM:SSZ" */
 function getDefaultAsOfDate(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  // Build "YYYY-MM-DD 09:00" as an ET wall-clock string, then convert to UTC
   const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const etNine = fromZonedTime(`${dateStr}T09:00:00`, ET_ZONE);
   return etNine.toISOString();
@@ -66,8 +93,6 @@ export function saveConfig(config: PlaygroundConfig) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
 
-type TestStatus = "idle" | "loading" | "ok" | "error";
-
 interface ConfigPanelProps {
   config: PlaygroundConfig;
   onChange: (config: PlaygroundConfig) => void;
@@ -76,16 +101,53 @@ interface ConfigPanelProps {
 
 export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
   const [saved, setSaved] = useState(false);
-  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
-  const [testError, setTestError] = useState<string>("");
+  const [settings, setSettings] = useState<ConsoleSettings | null>(null);
 
-  function set(key: keyof PlaygroundConfig, value: string) {
-    // Reset indicators when config changes
+  useEffect(() => {
+    setSettings(loadConsoleSettings());
+    // pick up edits made on the Settings page in another tab
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SETTINGS_KEY) setSettings(loadConsoleSettings());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const providers = settings?.providers ?? DEFAULT_PROVIDERS;
+
+  // Which "<providerId>::<model>" option is currently selected.
+  const currentValue = useMemo(() => {
+    for (const p of providers)
+      for (const m of p.models)
+        if (m === config.model && p.baseUrl === config.baseUrl) return `${p.id}::${m}`;
+    for (const p of providers)
+      for (const m of p.models) if (m === config.model) return `${p.id}::${m}`;
+    return "";
+  }, [providers, config.model, config.baseUrl]);
+
+  // Once settings load, sync the current model's credentials from the provider
+  // registry (so Chat uses the keys configured in Settings, not stale ones).
+  useEffect(() => {
+    if (!settings) return;
+    const [pid] = (currentValue || "").split("::");
+    const p = providers.find((x) => x.id === pid);
+    if (p && (p.baseUrl !== config.baseUrl || p.apiKey !== config.apiKey || (settings.proxy ?? "") !== (config.proxy ?? ""))) {
+      onChange({ ...config, baseUrl: p.baseUrl, apiKey: p.apiKey, proxy: settings.proxy ?? config.proxy });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
+
+  function selectModel(value: string) {
     setSaved(false);
-    setTestStatus("idle");
-    // asOfDate is stored as UTC ISO; convert from datetime-local (ET) on input
-    const stored = key === "asOfDate" ? datetimeLocalToUtc(value) : value;
-    onChange({ ...config, [key]: stored });
+    const [pid, m] = value.split("::");
+    const p = providers.find((x) => x.id === pid);
+    if (!p) return;
+    onChange({ ...config, model: m, baseUrl: p.baseUrl, apiKey: p.apiKey, proxy: settings?.proxy ?? config.proxy });
+  }
+
+  function setAsOf(value: string) {
+    setSaved(false);
+    onChange({ ...config, asOfDate: datetimeLocalToUtc(value) });
   }
 
   function handleSave() {
@@ -94,28 +156,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  async function handleTest() {
-    setTestStatus("loading");
-    setTestError("");
-    try {
-      const res = await fetch("/api/playground/test-connection", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ base_url: config.baseUrl, api_key: config.apiKey }),
-      });
-      const data = (await res.json()) as { ok: boolean; error?: string };
-      if (data.ok) {
-        setTestStatus("ok");
-        setTimeout(() => setTestStatus("idle"), 3000);
-      } else {
-        setTestStatus("error");
-        setTestError(data.error ?? "Connection failed");
-      }
-    } catch (e) {
-      setTestStatus("error");
-      setTestError((e as Error).message);
-    }
-  }
+  const hasKey = Boolean(config.apiKey);
 
   return (
     <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-white/60 rounded-l-2xl">
@@ -126,40 +167,36 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
             <Label htmlFor="model" className="text-xs">Model</Label>
-            <Input
+            <select
               id="model"
-              value={config.model}
-              onChange={(e) => set("model", e.target.value)}
-              placeholder="gpt-4o-mini"
+              value={currentValue}
+              onChange={(e) => selectModel(e.target.value)}
               disabled={disabled}
-              className="text-sm h-8"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="baseUrl" className="text-xs">Base URL</Label>
-            <Input
-              id="baseUrl"
-              value={config.baseUrl}
-              onChange={(e) => set("baseUrl", e.target.value)}
-              placeholder="https://api.openai.com/v1"
-              disabled={disabled}
-              className="text-sm h-8"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="apiKey" className="text-xs">API Key</Label>
-            <Input
-              id="apiKey"
-              type="password"
-              value={config.apiKey}
-              onChange={(e) => set("apiKey", e.target.value)}
-              placeholder="sk-..."
-              disabled={disabled}
-              className="text-sm h-8"
-            />
+              className="h-8 rounded-md border bg-white px-2 text-sm disabled:opacity-50"
+            >
+              {currentValue === "" && (
+                <option value="">{config.model || "Select a model…"}</option>
+              )}
+              {providers.map((p) => (
+                <optgroup key={p.id} label={p.label}>
+                  {p.models.map((m) => (
+                    <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>{m}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </div>
 
-          {/* Save + Test buttons */}
+          {/* Base URL / API key / proxy are configured in Settings and resolved here */}
+          <div className="flex items-center justify-between text-[11px]">
+            <span className={hasKey ? "text-emerald-600" : "text-amber-600"}>
+              {hasKey ? "● key set" : "● no key"}
+            </span>
+            <Link href="/settings" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+              Manage in Settings <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
           <div className="flex gap-2 pt-1">
             <Button
               size="sm"
@@ -177,29 +214,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
                 "Save"
               )}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className={cn(
-                "flex-1 h-8 text-xs gap-1.5",
-                testStatus === "ok" && "border-green-500 text-green-600",
-                testStatus === "error" && "border-red-400 text-red-600"
-              )}
-              onClick={() => void handleTest()}
-              disabled={disabled || testStatus === "loading" || !config.baseUrl || !config.apiKey}
-            >
-              {testStatus === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
-              {testStatus === "ok" && <Wifi className="h-3 w-3" />}
-              {testStatus === "error" && <WifiOff className="h-3 w-3" />}
-              {testStatus === "idle" && <Wifi className="h-3 w-3" />}
-              {testStatus === "loading" ? "Testing..." : testStatus === "ok" ? "Connected" : testStatus === "error" ? "Failed" : "Test"}
-            </Button>
           </div>
-
-          {/* Test error message */}
-          {testStatus === "error" && testError && (
-            <p className="text-xs text-red-500 leading-snug break-all">{testError}</p>
-          )}
         </div>
       </div>
 
@@ -208,12 +223,14 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
           Context
         </h2>
         <div className="flex flex-col gap-1">
-          <Label htmlFor="asOfDate" className="text-xs">As of Date <span className="text-muted-foreground font-normal">(ET)</span></Label>
+          <Label htmlFor="asOfDate" className="text-xs">
+            As of Date <span className="text-muted-foreground font-normal">(ET)</span>
+          </Label>
           <Input
             id="asOfDate"
             type="datetime-local"
             value={utcToDatetimeLocal(config.asOfDate)}
-            onChange={(e) => set("asOfDate", e.target.value)}
+            onChange={(e) => setAsOf(e.target.value)}
             disabled={disabled}
             className="text-sm h-8"
           />

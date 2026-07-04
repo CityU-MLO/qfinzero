@@ -14,54 +14,61 @@ QFinZero unifies price data, event/news retrieval, and brokerage simulation behi
 
 Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (ESP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
 
-## Services
+## The unified server
 
-| Service | Full Name | Port | Description |
-|---------|-----------|------|-------------|
-| **Dashboard Web** | Next.js monitoring frontend | 19300 | Status dashboard and web UI for service browsing and playground access |
-| **PMB** | Paper Money Broker | 19380 | Stateful brokerage simulation with order lifecycle and margin management (Python/FastAPI) |
-| **ESP** | News Pushing Pipeline | 19330 | Unified event query: earnings, economic calendar, market news (Python/FastAPI) |
-| **UPQ** | Unified Price Query | 19350 | Multi-resolution stock, option, and rates data (Rust/Axum) |
-| **Playground** | Agent playground service | 19390 | LLM agent backend used by the web playground UI |
+QFinZero runs as **one server on a single public port** (`19777`). It fronts
+everything:
 
-### Port Layout
+| Path | Serves |
+|------|--------|
+| `/` | Web UI (dashboard) — **incl. its own `/api/*` backend** |
+| `/svc/upq/*` | Market data (UPQ) — raw REST |
+| `/svc/esp/*` | News & events (ESP) — raw REST |
+| `/svc/pmb/*` | Paper broker (PMB) — raw REST |
+| `/svc/playground/*` | Chat agent backend — raw REST |
+| `/svc/data-admin/*` | Data protocol control plane — raw REST |
+| `/mcp` | MCP server (streamable-HTTP) — LLM tools |
+| `/health` | Hub + all children status |
 
-| Port | Service | Primary Endpoint |
-|------|---------|------------------|
-| `19300` | Dashboard Web | `http://127.0.0.1:19300/` |
-| `19380` | PMB | `http://127.0.0.1:19380/v1/health` |
-| `19330` | ESP | `http://127.0.0.1:19330/esp/health` |
-| `19350` | UPQ | `http://127.0.0.1:19350/health` |
-| `19390` | Playground | `http://127.0.0.1:19390/health` |
+`/api/*` is reserved for the web UI's backend-for-frontend (it maps to the
+services with the UI's own path conventions); direct/raw service REST lives under
+`/svc/*` so the two never collide.
 
-## Architecture
+```bash
+./scripts/serve.sh                 # start everything on http://127.0.0.1:19777
+# open http://127.0.0.1:19777           (web UI)
+# curl http://127.0.0.1:19777/health    (hub + children)
+# curl http://127.0.0.1:19777/api/upq/health
+```
+
+You launch one command and hit one port. Under the hood the hub **supervises**
+the individual services on localhost (they're no longer exposed directly), and
+mounts the **MCP** server in-process. Override the port with `QFZ_SERVER_PORT`.
+
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              LLM Agent / User                    │
-└────────┬──────────────┬──────────────┬───────────┘
-         │              │              │
-         v              v              v
-    ┌─────────┐    ┌─────────┐    ┌─────────┐
-    │   UPQ   │    │   ESP   │    │   PMB   │
-    │ Client  │    │ Client  │    │ Client  │
-    └────┬────┘    └────┬────┘    └────┬────┘
-         │              │              │
-         v              v              v
-    ┌─────────┐    ┌─────────┐    ┌─────────┐
-    │   UPQ   │    │   ESP   │    │   PMB   │
-    │ :19350  │    │ :19330  │    │ :19380  │
-    └─────────┘    └────┬────┘    └────┬────┘
-         ▲              │              │
-         │              v              │
-         │         ┌─────────┐         │
-         │         │MongoDB  │         │
-         │         │SQLite x2│         │
-         │         └─────────┘         │
-         └─────────────────────────────┘
-                 PMB reads market
-                 data from UPQ
+        LLM Agent / User / MCP client
+                     │
+                     v
+   ┌──────────────────────────────────────────┐
+   │        qfinzero-server  :19777           │   one public port
+   │  /  → Web UI      /mcp → MCP (in-proc)     │
+   │  /api/* → reverse proxy ↓                 │
+   └───┬─────┬─────┬─────┬─────┬───────────────┘
+       │     │     │     │     │  (localhost children, supervised by the hub)
+       v     v     v     v     v
+     UPQ   ESP   PMB  playgr. data-admin      + Next.js dashboard
+    (Rust)                                     (Node)
+       ▲     │
+       │     v
+       │  MongoDB + SQLite
+       └── PMB reads market data from UPQ
 ```
+
+**Modes:** `QFZ_SUPERVISE=0` runs the hub as a pure gateway to services managed
+elsewhere; `QFZ_SERVE_UI=0` skips the Next.js UI. The internal service ports
+(193xx) still exist for standalone/debug use via `scripts/run_all.sh`.
 
 ### Core Components
 
@@ -112,6 +119,28 @@ The converter writes byte-compatible parquet (`stock_daily/`, `stock_minute/`,
 `option_day/`, `option_minute/` partitioned by `trade_date=`; plus `rates/` and
 `corporate_actions/`) that the UPQ service reads directly. Point the UPQ service
 at the same `STORAGE_ROOT`.
+
+### Data-admin — the operator control plane (CLI + Web)
+
+Beyond convert, `qfz-data` manages vendor credentials, permission scans,
+downloads, the update schedule, and data exploration — the "Integrated Data
+Protocol" surface:
+
+```bash
+qfz-data config --set tushare.token=…      # masked, stored at $QFZ_DATA_ROOT/_state/qfz.config.json
+qfz-data scan massive                       # list flat-files datasets your S3 key can read
+qfz-data scan tushare                       # validate the CN token
+qfz-data acquire us_prices                  # trigger the MASSIVE download script (dry-run by default; --run)
+qfz-data schedule apply                     # install the cron cadence from the config
+qfz-data explore --symbols stock_daily      # per-symbol coverage in a store
+qfz-data setup-state                         # first-run wizard vs. status
+```
+
+The same surface is served by the **data-admin service** (`infra/data-admin`,
+`:19340`) — config/scan, freshness sources, update/download **jobs with SSE log
+streaming**, schedule, and explorer — and driven from the dashboard-web **Data**
+tab (setup wizard, credentials + scan, pipeline manager, schedule, explorer).
+Start it with the rest: `./scripts/run_all.sh` (or `./scripts/run_all.sh data-admin`).
 
 ### Data root
 

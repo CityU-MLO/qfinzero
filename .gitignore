@@ -45,6 +45,9 @@ coverage/
 .gemini/
 .venv/
 
+# data-admin credential store (holds vendor secrets if pointed inside the repo)
+**/qfz.config.json
+
 # Local env overrides (machine-specific)
 .env.local
 .env.*.local

@@ -181,8 +181,24 @@ def call_model(
             }
         }
 
+    # Route the model call through the LLM egress proxy when configured (per-model
+    # `proxy:` in models.yaml, else LLM_PROXY / HTTPS_PROXY / HTTP_PROXY from the
+    # env). Only the model call is proxied — the shared `client` used for local
+    # QFinZero tool calls stays direct.
+    proxy = (
+        model_cfg.get("proxy")
+        or os.getenv("LLM_PROXY")
+        or os.getenv("HTTPS_PROXY")
+        or os.getenv("HTTP_PROXY")
+        or ""
+    ).strip() or None
+
     t0 = time.monotonic()
-    resp = client.post(url, json=payload, headers=headers, timeout=timeout)
+    if proxy:
+        with httpx.Client(timeout=timeout, proxy=proxy) as proxied:
+            resp = proxied.post(url, json=payload, headers=headers, timeout=timeout)
+    else:
+        resp = client.post(url, json=payload, headers=headers, timeout=timeout)
     latency = time.monotonic() - t0
 
     resp.raise_for_status()

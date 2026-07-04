@@ -14,15 +14,19 @@ dev = ["pytest", "responses"]
 # Data pipeline (raw-source management + UPQ conversion). DuckDB mirrors the
 # UPQ Rust ingester so emitted parquet is byte-compatible.
 pipeline = ["duckdb>=1.0", "pyarrow>=15", "polars>=1.0"]
+# Unified hub server (:19777 fronting Web UI + REST + MCP).
+server = ["fastapi>=0.111", "uvicorn[standard]>=0.29", "httpx>=0.27", "mcp[cli]>=1.10"]
 
 [project.scripts]
 qfz-data = "qfinzero.pipeline.cli:main"
+qfz-server = "qfinzero.server.__main__:main"
 
 [tool.setuptools]
 packages = [
     "qfinzero",
     "qfinzero.pipeline",
     "qfinzero.pipeline.sources",
+    "qfinzero.server",
     "qfinzero.clients",
     "qfinzero.clients.pmb",
     "qfinzero.clients.upq",

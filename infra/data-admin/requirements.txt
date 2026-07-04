@@ -1,0 +1,8 @@
+# QFinZero data-admin service (:19340)
+fastapi>=0.110
+uvicorn>=0.29
+# admin core needs the qfinzero package installed (pip install -e ".[pipeline]")
+# optional, enabled if present:
+#   boto3        — structured MASSIVE S3 permission scan (else falls back to the aws CLI)
+#   croniter     — next-run times in the schedule view
+#   pymongo      — ESP news document counts in the explorer

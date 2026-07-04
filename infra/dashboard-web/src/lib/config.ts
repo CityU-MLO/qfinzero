@@ -36,6 +36,7 @@ export const SERVICES: ServiceConfig[] = [
 
 export const ESP_BASE_URL = process.env.ESP_BASE_URL ?? "http://127.0.0.1:19330";
 export const ESP_API_TOKEN = process.env.ESP_API_TOKEN;
+export const DATA_ADMIN_BASE_URL = process.env.DATA_ADMIN_BASE_URL ?? "http://127.0.0.1:19340";
 export const STATUS_REFRESH_MS = Number(process.env.NEXT_PUBLIC_STATUS_REFRESH_MS ?? "15000");
 
 export function extractPort(baseUrl: string): string | null {

@@ -145,25 +145,85 @@ class PMBClient:
 
     def create_account(
         self,
-        initial_cash: float,
+        initial_cash: float = 100000.0,
         account_type: str = "MARGIN",
+        market: str = "us",
         start_date: str = None,
+        open_date: str = None,
         margin_config: dict = None,
         **kwargs,
     ) -> dict:
+        """Allocate a broker account. Returns a 10-digit account id under
+        ``account_id`` plus the initial broker status under ``account``.
+
+        ``market`` is one of "us", "cn", "hk" and determines the leading digit
+        of the account number, the base currency, and the exchange timezone.
+        """
         body = {
             "account_type": account_type,
             "initial_cash": initial_cash,
+            "market": market,
             **kwargs,
         }
+        # open_date is the canonical field; start_date kept for back-compat.
+        if open_date:
+            body["open_date"] = open_date
         if start_date:
             body["start_date"] = start_date
         if margin_config:
             body["margin_config"] = margin_config
         return self._post("/accounts", body)
 
+    # ``allocate`` reads more naturally for agents allocating a fresh account.
+    allocate = create_account
+
     def get_account(self, account_id: str) -> dict:
         return self._get(f"/accounts/{account_id}")
+
+    # ── Broker (day-gated account book) ───────────────────────────
+
+    def get_status(self, account_id: str) -> dict:
+        """Canonical broker status: balances, P&L, positions, day-gate state."""
+        return self._get(f"/accounts/{account_id}/status")
+
+    def get_history(self, account_id: str, limit: int = None) -> list:
+        """Step-by-step trading history (one record per closed trading day)."""
+        params = {"limit": limit} if limit else None
+        data = self._get(f"/accounts/{account_id}/history", params=params)
+        return data.get("days", [])
+
+    def trade(
+        self,
+        account_id: str,
+        symbol: str,
+        side: str,
+        qty: int,
+        price: float,
+        note: str = None,
+    ) -> dict:
+        """Execute an immediate paper fill against the broker book."""
+        body = {"symbol": symbol, "side": side, "qty": qty, "price": price}
+        if note:
+            body["note"] = note
+        return self._post(f"/accounts/{account_id}/trade", body)
+
+    def broker_buy(self, account_id: str, symbol: str, qty: int, price: float, note: str = None) -> dict:
+        return self.trade(account_id, symbol, "BUY", qty, price, note)
+
+    def broker_sell(self, account_id: str, symbol: str, qty: int, price: float, note: str = None) -> dict:
+        return self.trade(account_id, symbol, "SELL", qty, price, note)
+
+    def end_day(self, account_id: str) -> dict:
+        """Close the current trading day and freeze the account."""
+        return self._post(f"/accounts/{account_id}/end_day", {})
+
+    def next_day(self, account_id: str, date: str = None) -> dict:
+        """Unfreeze and advance to the next trading day."""
+        body = {"date": date} if date else {}
+        return self._post(f"/accounts/{account_id}/next_day", body)
+
+    def close_account(self, account_id: str) -> dict:
+        return self._post(f"/accounts/{account_id}/close", {})
 
     def get_positions(self, account_id: str) -> list:
         data = self._get(f"/accounts/{account_id}/positions")
