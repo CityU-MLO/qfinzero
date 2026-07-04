@@ -620,6 +620,44 @@ class SessionService:
                 pass  # contract may not have data
         return {"ok": True, "loaded": loaded, "skipped": skipped}
 
+    async def add_stocks(self, session_id: str, symbols: list[str]) -> dict:
+        """Dynamically load additional stock symbols into a running session.
+
+        Lets the watchlist grow after a session has started — the new symbols
+        are priced and tradable from the current bar onward. The clock's bar
+        grid is unchanged; new symbols simply appear at matching timestamps.
+        """
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {"ok": False, "error": "session not found"}
+
+        loaded, skipped = 0, 0
+        for raw in symbols:
+            sym = raw.strip().upper()
+            if not sym or sym in state.cache._stock_bars:
+                skipped += 1
+                continue
+            try:
+                if state.clock.frequency == Frequency.MINUTE:
+                    bars = await self._upq.get_stock_minute_bars(
+                        [sym], state.config.start_ts, state.config.end_ts
+                    )
+                else:
+                    bars = await self._upq.get_stock_daily_bars(
+                        [sym], state.config.start_ts[:10], state.config.end_ts[:10]
+                    )
+                if not bars:
+                    continue
+                state.cache.load_stock_bars(sym, [])
+                for bar in bars:
+                    state.cache._stock_bars.setdefault(sym, {})[bar.window_start_ns] = bar
+                loaded += 1
+            except Exception:  # noqa: BLE001 — a bad symbol shouldn't break the session
+                pass
+        if loaded:
+            state.cache._rebuild_timestamps()
+        return {"ok": True, "loaded": loaded, "skipped": skipped}
+
     # ── Playback state & time-travel (rewind / undo) ────────────────────
 
     def log_action(self, session_id: str, kind: str, **payload) -> None:

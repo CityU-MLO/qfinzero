@@ -246,6 +246,14 @@ export async function optionChain(
   return text ? (JSON.parse(text) as OptionRow[]) : [];
 }
 
+/** Add stock symbols to a running session's watchlist (loads their bars). */
+export function addStocks(sessionId: string, symbols: string[]) {
+  return req<{ ok: boolean; loaded: number; skipped: number }>(
+    `/sessions/${sessionId}/add_stocks`,
+    { method: "POST", body: JSON.stringify({ symbols }) },
+  );
+}
+
 /** Load an option contract's bars into a running session so it can be traded/marked. */
 export function addContracts(sessionId: string, contracts: string[]) {
   return req<{ ok: boolean; loaded: number; skipped: number }>(

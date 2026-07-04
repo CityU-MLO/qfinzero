@@ -320,6 +320,26 @@ class PMBClient:
     def get_market(self, session_id: str) -> dict:
         return self._get(f"/sessions/{session_id}/market")
 
+    def get_session_state(self, session_id: str) -> dict:
+        """Consolidated snapshot: clock, account, positions, open orders, market."""
+        return self._get(f"/sessions/{session_id}/state")
+
+    def get_timeline(self, session_id: str) -> dict:
+        """The full list of bar timestamps — the scrubbable simulation clock."""
+        return self._get(f"/sessions/{session_id}/timeline")
+
+    def rewind(self, session_id: str, target_ts: str) -> dict:
+        """Time-travel back to target_ts, undoing every order placed after it."""
+        return self._post(f"/sessions/{session_id}/rewind", {"target_ts": target_ts})
+
+    def add_stocks(self, session_id: str, symbols: list) -> dict:
+        """Add stock symbols to a running session (grow the watchlist/universe)."""
+        return self._post(f"/sessions/{session_id}/add_stocks", {"symbols": symbols})
+
+    def add_contracts(self, session_id: str, contracts: list) -> dict:
+        """Load option contracts into a running session so they can be traded."""
+        return self._post(f"/sessions/{session_id}/add_contracts", {"contracts": contracts})
+
     # ── Order helpers ─────────────────────────────────────────────
 
     def _place_order(

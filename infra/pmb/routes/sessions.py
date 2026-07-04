@@ -173,6 +173,20 @@ async def export_session(
     return data
 
 
+@router.post("/v1/sessions/{session_id}/add_stocks")
+async def add_stocks(session_id: str, request: Request):
+    body = await request.json()
+    symbols = body.get("symbols", [])
+    session_svc = request.app.state.session_service
+    result = await session_svc.add_stocks(session_id, symbols)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": result.get("error", "unknown")},
+        )
+    return result
+
+
 @router.post("/v1/sessions/{session_id}/add_contracts")
 async def add_contracts(session_id: str, request: Request):
     body = await request.json()

@@ -9,6 +9,10 @@ import {
   Wallet2,
   CandlestickChart,
   ListTree,
+  LineChart as LineChartIcon,
+  Plus,
+  Trash2,
+  Ban,
 } from "lucide-react";
 
 import {
@@ -19,6 +23,7 @@ import {
   placeOrder,
   placeOptionOrder,
   cancelOrder,
+  addStocks,
   etMinutes,
   etDate,
   money,
@@ -29,6 +34,7 @@ import {
   type OptionRow,
 } from "./api";
 import { PriceChart, type PricePoint } from "./price-chart";
+import { CandleChart, type Candle } from "./candle-chart";
 import { ClockBar } from "./clock-bar";
 import { OptionChain } from "./option-chain";
 import { AccountPanel } from "./account-panel";
@@ -54,8 +60,13 @@ export function Terminal({
 }) {
   const [state, setState] = useState<FullState | null>(null);
   const [timeline, setTimeline] = useState<string[]>([]);
+  const [wl, setWl] = useState<string[]>(watchlist);
   const [selected, setSelected] = useState(watchlist[0] ?? "AAPL");
+  const [newSym, setNewSym] = useState("");
+  const [addingSym, setAddingSym] = useState(false);
+  const [chartKind, setChartKind] = useState<"candles" | "line">("candles");
   const [priceHist, setPriceHist] = useState<Record<string, PricePoint[]>>({});
+  const [ohlcHist, setOhlcHist] = useState<Record<string, Candle[]>>({});
   const [started, setStarted] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(5);
@@ -73,6 +84,7 @@ export function Terminal({
   const [qty, setQty] = useState(100);
   const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
   const [limit, setLimit] = useState<number | "">("");
+  const busy2Ref = useRef(false);
 
   const stateRef = useRef<FullState | null>(null);
   const playingRef = useRef(false);
@@ -100,6 +112,17 @@ export function Terminal({
           if (!arr.length || arr[arr.length - 1].ts !== curTs)
             arr.push({ ts: curTs, price: q.close });
           else arr[arr.length - 1] = { ts: curTs, price: q.close };
+          next[q.symbol] = arr;
+        }
+        return next;
+      });
+      setOhlcHist((prev) => {
+        const next = { ...prev };
+        for (const q of s.market.stocks) {
+          const arr = (next[q.symbol] ?? []).filter((p) => p.ts <= curTs);
+          const bar: Candle = { ts: curTs, o: q.open, h: q.high, l: q.low, c: q.close };
+          if (!arr.length || arr[arr.length - 1].ts !== curTs) arr.push(bar);
+          else arr[arr.length - 1] = bar;
           next[q.symbol] = arr;
         }
         return next;
@@ -255,6 +278,98 @@ export function Terminal({
     [sessionId, accountId, qty, apply],
   );
 
+  const addSymbol = useCallback(async () => {
+    const sym = newSym.trim().toUpperCase();
+    if (!sym) return;
+    if (wl.includes(sym)) {
+      setSelected(sym);
+      setNewSym("");
+      return;
+    }
+    setAddingSym(true);
+    setErr(null);
+    try {
+      const r = await addStocks(sessionId, [sym]);
+      if (r.loaded === 0) {
+        setErr(`No market data for ${sym} on this trading day.`);
+      } else {
+        setWl((w) => [...w, sym]);
+        setSelected(sym);
+        const s = await getState(sessionId);
+        apply(s, true);
+        setNewSym("");
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAddingSym(false);
+    }
+  }, [newSym, wl, sessionId, apply]);
+
+  const removeSymbol = useCallback((sym: string) => {
+    setWl((w) => {
+      const nw = w.filter((x) => x !== sym);
+      setSelected((sel) => (sel === sym ? nw[0] ?? sel : sel));
+      return nw.length ? nw : w; // keep at least one
+    });
+  }, []);
+
+  const flatten = useCallback(
+    async (p: Position) => {
+      if (busy2Ref.current) return;
+      busy2Ref.current = true;
+      setErr(null);
+      try {
+        const oside = (p.qty > 0 ? "SELL" : "BUY") as "BUY" | "SELL";
+        const q = Math.abs(p.qty);
+        if (p.instrument_id.startsWith("OPTION:")) {
+          await placeOptionOrder({
+            session_id: sessionId,
+            account_id: accountId,
+            contract: p.instrument_id.slice("OPTION:".length),
+            side: oside,
+            qty: q,
+            order_type: "MARKET",
+          });
+        } else {
+          await placeOrder({
+            session_id: sessionId,
+            account_id: accountId,
+            symbol: p.instrument_id.slice("STOCK:".length),
+            side: oside,
+            qty: q,
+            order_type: "MARKET",
+          });
+        }
+        const s = await getState(sessionId);
+        apply(s, true);
+        setToast(`Flatten ${p.instrument_id.replace(/^(STOCK|OPTION):/, "")} submitted`);
+        setTimeout(() => setToast(null), 2500);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        busy2Ref.current = false;
+      }
+    },
+    [sessionId, accountId, apply],
+  );
+
+  const closeAll = useCallback(async () => {
+    for (const p of stateRef.current?.positions ?? []) await flatten(p);
+  }, [flatten]);
+
+  const cancelAll = useCallback(async () => {
+    for (const o of stateRef.current?.open_orders ?? []) {
+      try {
+        await cancelOrder(o.order_id, sessionId, accountId);
+      } catch {
+        /* ignore */
+      }
+    }
+    const s = await getState(sessionId);
+    apply(s, true);
+  }, [sessionId, accountId, apply]);
+
   const doCancel = useCallback(
     async (orderId: string) => {
       try {
@@ -281,6 +396,15 @@ export function Terminal({
 
   const acct = state?.account;
   const dayPnl = acct && initialEquity !== null ? acct.equity - initialEquity : 0;
+  const selCandles = ohlcHist[selected] ?? [];
+  const changePct = (sym: string): number | null => {
+    const h = ohlcHist[sym] ?? [];
+    if (!h.length) return null;
+    const open = h[0].o;
+    return open ? ((h[h.length - 1].c - open) / open) * 100 : null;
+  };
+  const estCost = sel ? qty * sel.close : 0;
+  const bpAfter = acct ? acct.buying_power - (side === "BUY" ? estCost : 0) : 0;
 
   return (
     <div className="broker-root relative flex h-full flex-col bg-slate-950 text-slate-200">
@@ -329,32 +453,66 @@ export function Terminal({
       {/* Body */}
       <div className="flex min-h-0 flex-1">
         {/* Watchlist */}
-        <div className="w-56 shrink-0 overflow-y-auto border-r border-slate-800">
+        <div className="broker-panel flex w-60 shrink-0 flex-col border-r border-slate-800">
           <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
             Watchlist
           </div>
-          {watchlist.map((sym) => {
-            const q = quoteFor(sym);
-            const hist = priceHist[sym] ?? [];
-            const up = hist.length < 2 || hist[hist.length - 1].price >= hist[0].price;
-            return (
-              <button
-                key={sym}
-                onClick={() => setSelected(sym)}
-                className={`flex w-full items-center justify-between px-3 py-2.5 text-left transition ${
-                  selected === sym ? "bg-slate-800" : "hover:bg-slate-900"
-                }`}
-              >
-                <span className="font-semibold text-white">{sym}</span>
-                <span className="flex items-center gap-1 font-mono text-sm">
-                  <span className={q ? (up ? "text-emerald-400" : "text-red-400") : "text-slate-600"}>
-                    {q ? num(q.close) : "—"}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {wl.map((sym) => {
+              const q = quoteFor(sym);
+              const chg = changePct(sym);
+              const up = chg == null ? true : chg >= 0;
+              return (
+                <div
+                  key={sym}
+                  className={`group flex w-full items-center justify-between px-3 py-2.5 transition ${
+                    selected === sym ? "bg-slate-800" : "hover:bg-slate-900"
+                  }`}
+                >
+                  <button onClick={() => setSelected(sym)} className="flex flex-1 flex-col items-start text-left">
+                    <span className="font-semibold text-white">{sym}</span>
+                    {chg != null && (
+                      <span className={`font-mono text-[11px] ${up ? "text-emerald-400" : "text-red-400"}`}>
+                        {chg >= 0 ? "+" : ""}
+                        {chg.toFixed(2)}%
+                      </span>
+                    )}
+                  </button>
+                  <span className="flex items-center gap-1.5 font-mono text-sm">
+                    <span className={q ? (up ? "text-emerald-400" : "text-red-400") : "text-slate-600"}>
+                      {q ? num(q.close) : "—"}
+                    </span>
+                    {q && (up ? <TrendingUp className="h-3 w-3 text-emerald-400" /> : <TrendingDown className="h-3 w-3 text-red-400" />)}
+                    <button
+                      onClick={() => removeSymbol(sym)}
+                      title="Remove from watchlist"
+                      className="broker-btn opacity-0 transition group-hover:opacity-100 text-slate-600 hover:text-red-400"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </span>
-                  {q && (up ? <TrendingUp className="h-3 w-3 text-emerald-400" /> : <TrendingDown className="h-3 w-3 text-red-400" />)}
-                </span>
-              </button>
-            );
-          })}
+                </div>
+              );
+            })}
+          </div>
+          {/* Add symbol */}
+          <div className="flex items-center gap-1 border-t border-slate-800 p-2">
+            <input
+              value={newSym}
+              onChange={(e) => setNewSym(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === "Enter" && addSymbol()}
+              placeholder="Add symbol…"
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white outline-none focus:border-emerald-500"
+            />
+            <button
+              onClick={addSymbol}
+              disabled={addingSym || !newSym.trim()}
+              className="broker-btn flex items-center justify-center rounded-md bg-emerald-500 px-2 py-1.5 text-slate-950 disabled:opacity-40"
+              title="Add to watchlist"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Center: chart + blotter */}
@@ -365,6 +523,15 @@ export function Terminal({
               <span className={`font-mono text-xl ${sel ? (selUp ? "text-emerald-400" : "text-red-400") : "text-slate-600"}`}>
                 {sel ? num(sel.close) : "—"}
               </span>
+              {(() => {
+                const c = changePct(selected);
+                return c == null ? null : (
+                  <span className={`font-mono text-sm font-semibold ${c >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {c >= 0 ? "+" : ""}
+                    {c.toFixed(2)}%
+                  </span>
+                );
+              })()}
               {sel && (
                 <span className="font-mono text-xs text-slate-500">
                   O {num(sel.open)} · H {num(sel.high)} · L {num(sel.low)} · Vol{" "}
@@ -372,25 +539,47 @@ export function Terminal({
                 </span>
               )}
             </div>
-            <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
-              {([["chart", "Chart", CandlestickChart], ["options", "Option chain", ListTree]] as const).map(
-                ([id, label, Icon]) => (
-                  <button
-                    key={id}
-                    onClick={() => setCenterView(id)}
-                    className={`broker-btn flex items-center gap-1.5 px-3 py-1.5 font-semibold ${
-                      centerView === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" /> {label}
-                  </button>
-                ),
+            <div className="flex items-center gap-2">
+              {centerView === "chart" && (
+                <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
+                  {([["candles", CandlestickChart], ["line", LineChartIcon]] as const).map(([id, Icon]) => (
+                    <button
+                      key={id}
+                      onClick={() => setChartKind(id)}
+                      className={`broker-btn flex items-center px-2.5 py-1.5 ${
+                        chartKind === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
+                      }`}
+                      title={id === "candles" ? "Candlesticks" : "Line"}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
               )}
+              <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
+                {([["chart", "Chart", CandlestickChart], ["options", "Option chain", ListTree]] as const).map(
+                  ([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      onClick={() => setCenterView(id)}
+                      className={`broker-btn flex items-center gap-1.5 px-3 py-1.5 font-semibold ${
+                        centerView === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {label}
+                    </button>
+                  ),
+                )}
+              </div>
             </div>
           </div>
           <div className="min-h-0 flex-1 px-3 pb-2 pt-1">
             {centerView === "chart" ? (
-              <PriceChart symbol={selected} data={selHist} up={selUp} />
+              chartKind === "candles" ? (
+                <CandleChart symbol={selected} data={selCandles} />
+              ) : (
+                <PriceChart symbol={selected} data={selHist} up={selUp} />
+              )
             ) : (
               <OptionChain
                 underlying={selected}
@@ -402,24 +591,44 @@ export function Terminal({
           </div>
 
           {/* Blotter */}
-          <div className="h-56 shrink-0 border-t border-slate-800">
-            <div className="flex gap-1 px-4 pt-2">
-              {(["positions", "orders", "trades"] as Blotter[]).map((t) => (
+          <div className="broker-panel h-56 shrink-0 border-t border-slate-800">
+            <div className="flex items-center justify-between px-4 pt-2">
+              <div className="flex gap-1">
+                {(["positions", "orders", "trades"] as Blotter[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setTab(t)}
+                    className={`broker-btn rounded-t-md px-3 py-1.5 text-xs font-semibold capitalize ${
+                      tab === t ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    {t}
+                    {t === "positions" && state?.positions.length ? ` (${state.positions.length})` : ""}
+                    {t === "orders" && state?.open_orders.length ? ` (${state.open_orders.length})` : ""}
+                  </button>
+                ))}
+              </div>
+              {tab === "positions" && !!state?.positions.length && (
                 <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`rounded-t-md px-3 py-1.5 text-xs font-semibold capitalize ${
-                    tab === t ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
-                  }`}
+                  onClick={closeAll}
+                  className="broker-btn flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
                 >
-                  {t}
-                  {t === "positions" && state?.positions.length ? ` (${state.positions.length})` : ""}
-                  {t === "orders" && state?.open_orders.length ? ` (${state.open_orders.length})` : ""}
+                  <X className="h-3 w-3" /> Close all
                 </button>
-              ))}
+              )}
+              {tab === "orders" && !!state?.open_orders.length && (
+                <button
+                  onClick={cancelAll}
+                  className="broker-btn flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                >
+                  <Ban className="h-3 w-3" /> Cancel all
+                </button>
+              )}
             </div>
             <div className="h-[calc(100%-2.25rem)] overflow-y-auto px-4 py-2 font-mono text-xs">
-              {tab === "positions" && <PositionsTable positions={state?.positions ?? []} />}
+              {tab === "positions" && (
+                <PositionsTable positions={state?.positions ?? []} onFlatten={flatten} />
+              )}
               {tab === "orders" && (
                 <OrdersTable orders={state?.open_orders ?? []} onCancel={doCancel} />
               )}
@@ -457,7 +666,7 @@ export function Terminal({
               onChange={(e) => setSelected(e.target.value)}
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
             >
-              {watchlist.map((s) => (
+              {wl.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -504,11 +713,17 @@ export function Terminal({
             </TicketField>
           )}
 
-          <div className="mb-3 rounded-lg bg-slate-900 px-3 py-2 text-xs text-slate-400">
-            Est. value{" "}
-            <span className="float-right font-mono text-slate-200">
-              {sel ? money(qty * sel.close) : "—"}
-            </span>
+          <div className="mb-3 space-y-1 rounded-lg bg-slate-900 px-3 py-2 text-xs text-slate-400">
+            <div>
+              Est. {side === "BUY" ? "cost" : "proceeds"}
+              <span className="float-right font-mono text-slate-200">{sel ? money(estCost) : "—"}</span>
+            </div>
+            <div>
+              Buying power after
+              <span className={`float-right font-mono ${bpAfter < 0 ? "text-red-400" : "text-slate-200"}`}>
+                {acct ? money(bpAfter) : "—"}
+              </span>
+            </div>
           </div>
 
           <button
@@ -603,7 +818,13 @@ function AcctRow({ label, value, cls }: { label: string; value: string; cls?: st
   );
 }
 
-function PositionsTable({ positions }: { positions: Position[] }) {
+function PositionsTable({
+  positions,
+  onFlatten,
+}: {
+  positions: Position[];
+  onFlatten: (p: Position) => void;
+}) {
   if (!positions.length)
     return <div className="py-6 text-center text-slate-600">No open positions.</div>;
   return (
@@ -615,18 +836,28 @@ function PositionsTable({ positions }: { positions: Position[] }) {
           <th className="pb-1 text-right">Avg</th>
           <th className="pb-1 text-right">Mark</th>
           <th className="pb-1 text-right">Unreal. P&L</th>
+          <th className="pb-1 text-right"></th>
         </tr>
       </thead>
       <tbody>
         {positions.map((p) => (
           <tr key={p.instrument_id} className="border-t border-slate-800/60">
-            <td className="py-1 text-white">{p.instrument_id.replace("STOCK:", "")}</td>
+            <td className="py-1 text-white">{p.instrument_id.replace(/^(STOCK|OPTION):/, "")}</td>
             <td className="py-1 text-right">{p.qty}</td>
             <td className="py-1 text-right">{num(p.avg_price)}</td>
             <td className="py-1 text-right">{num(p.mark_price)}</td>
             <td className={`py-1 text-right ${pnlCls(p.unrealized_pnl)}`}>
               {p.unrealized_pnl >= 0 ? "+" : ""}
               {num(p.unrealized_pnl)}
+            </td>
+            <td className="py-1 text-right">
+              <button
+                onClick={() => onFlatten(p)}
+                title="Flatten (market close)"
+                className="broker-btn rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+              >
+                Flatten
+              </button>
             </td>
           </tr>
         ))}

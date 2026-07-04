@@ -5,6 +5,8 @@
 
 A step-driven paper trading broker for backtesting AI trading agents. Supports stocks and options with full margin accounting, deterministic replay, and comprehensive event streams.
 
+> 🖥️ **Trading terminal & options/strategy guide:** [broker-terminal.md](broker-terminal.md) — the standalone `/broker` site (watchlist, candlesticks, option chain, time-travel) and the matching agent REST/MCP surface.
+
 ## Server
 
 - **Language**: Python (FastAPI)

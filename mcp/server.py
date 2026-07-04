@@ -13,7 +13,7 @@ Run:
 import json
 import sys
 import os
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 # Add project root to path so we can import qfinzero clients without modifying the package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -979,6 +979,79 @@ def pmb_get_market(session_id: str) -> str:
     """
     with PMBClient(PMB_URL) as client:
         return json.dumps(client.get_market(session_id))
+
+
+@mcp.tool()
+def pmb_session_state(session_id: str) -> str:
+    """Get the full consolidated state of a session in one call.
+
+    Returns clock (current bar, index, total bars, status), the account snapshot
+    (cash, equity, buying power, margin), open positions, working orders, recent
+    trades, and the current market quotes — everything an agent needs each step.
+
+    Args:
+        session_id: The session identifier
+
+    Returns:
+        JSON with clock, account, positions, open_orders, trades, and market.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.get_session_state(session_id))
+
+
+@mcp.tool()
+def pmb_rewind(session_id: str, target_ts: str) -> str:
+    """Time-travel a session back to target_ts, undoing every order placed after it.
+
+    The session is deterministically replayed to the target bar; any orders/fills
+    that happened after target_ts are undone. Useful to explore alternate actions
+    from an earlier point without recreating the session.
+
+    Args:
+        session_id: The session identifier
+        target_ts: ISO timestamp of the bar to return to (e.g. "2024-03-22T14:00:00+00:00").
+            The latest bar at or before this time becomes the new current bar.
+
+    Returns:
+        JSON with the rewound consolidated session state (same shape as pmb_session_state).
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.rewind(session_id, target_ts))
+
+
+@mcp.tool()
+def pmb_add_stocks(session_id: str, symbols: List[str]) -> str:
+    """Add stock symbols to a running session (grow the watchlist / tradable universe).
+
+    The new symbols are priced and tradable from the current bar onward.
+
+    Args:
+        session_id: The session identifier
+        symbols: Stock tickers to add, e.g. ["MSFT", "NVDA"]
+
+    Returns:
+        JSON with {ok, loaded, skipped}.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.add_stocks(session_id, symbols))
+
+
+@mcp.tool()
+def pmb_add_contracts(session_id: str, contracts: List[str]) -> str:
+    """Load option contracts into a running session so they can be traded and marked.
+
+    Use upq_option_chain to discover contract identifiers (e.g. O:AAPL240328C00170000),
+    then add them here before placing option orders.
+
+    Args:
+        session_id: The session identifier
+        contracts: OPRA option contract ids, e.g. ["O:AAPL240328C00170000"]
+
+    Returns:
+        JSON with {ok, loaded, skipped}.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.add_contracts(session_id, contracts))
 
 
 @mcp.tool()

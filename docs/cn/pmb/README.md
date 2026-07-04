@@ -4,6 +4,8 @@
 
 一个基于步进驱动的模拟交易经纪商，用于回测 AI 交易代理。支持股票和期权，具备完整的保证金核算、确定性回放以及全面的事件流。
 
+> 🖥️ **交易终端与期权/策略指南：** [broker-terminal.md](broker-terminal.md) — 独立的 `/broker` 站点（自选、K 线、期权链、时间旅行）以及对应的 agent REST/MCP 接口。
+
 ## Server
 
 - **语言**: Python (FastAPI)
