@@ -210,6 +210,93 @@ export function cancelOrder(orderId: string, sessionId: string, accountId: strin
   });
 }
 
+// ── Options ──────────────────────────────────────────────────────────────────
+
+export interface OptionRow {
+  ticker: string;
+  type: "C" | "P";
+  strike: number;
+  expiry: string;
+  close: number;
+  volume: number;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  rho: number | null;
+  greek_status?: string;
+}
+
+/** Fetch the option chain for an underlying on a given trade date (via the UPQ BFF). */
+export async function optionChain(
+  underlying: string,
+  date: string,
+  type?: "C" | "P",
+): Promise<OptionRow[]> {
+  const qs = new URLSearchParams({
+    underlying: underlying.toUpperCase(),
+    date,
+    include_greeks: "true",
+  });
+  if (type) qs.set("type", type);
+  const res = await fetch(`/api/upq/option/chain_query?${qs.toString()}`);
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || `chain query failed (${res.status})`);
+  return text ? (JSON.parse(text) as OptionRow[]) : [];
+}
+
+/** Load an option contract's bars into a running session so it can be traded/marked. */
+export function addContracts(sessionId: string, contracts: string[]) {
+  return req<{ ok: boolean; loaded: number; skipped: number }>(
+    `/sessions/${sessionId}/add_contracts`,
+    { method: "POST", body: JSON.stringify({ contracts }) },
+  );
+}
+
+export async function placeOptionOrder(p: {
+  session_id: string;
+  account_id: string;
+  contract: string;
+  side: "BUY" | "SELL";
+  qty: number;
+  order_type: "MARKET" | "LIMIT";
+  limit_price?: number | null;
+}) {
+  // Ensure the contract's data is in the session cache before ordering.
+  await addContracts(p.session_id, [p.contract]);
+  return req<{ ok: boolean; order_id: string; status: string }>("/orders", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: p.session_id,
+      account_id: p.account_id,
+      order: {
+        instrument: { type: "OPTION", contract: p.contract },
+        side: p.side,
+        order_type: p.order_type,
+        qty: p.qty,
+        limit_price: p.order_type === "LIMIT" ? p.limit_price : null,
+      },
+    }),
+  });
+}
+
+/** Trade date (YYYY-MM-DD, ET) for the current bar — used to query the chain. */
+export function etDate(ts: string): string {
+  if (!ts) return "";
+  const d = new Date(ts.replace(" ", "T"));
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${y}-${m}-${day}`;
+}
+
 // ── Time helpers ─────────────────────────────────────────────────────────────
 
 /** Format an ISO/UTC bar ts as ET wall-clock (what a US trader sees). */

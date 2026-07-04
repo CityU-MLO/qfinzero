@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LogOut, TrendingUp, TrendingDown, X } from "lucide-react";
+import {
+  LogOut,
+  TrendingUp,
+  TrendingDown,
+  X,
+  Wallet2,
+  CandlestickChart,
+  ListTree,
+} from "lucide-react";
 
 import {
   getState,
@@ -9,16 +17,21 @@ import {
   step,
   rewind,
   placeOrder,
+  placeOptionOrder,
   cancelOrder,
   etMinutes,
+  etDate,
   money,
   num,
   fmtET,
   type FullState,
   type Position,
+  type OptionRow,
 } from "./api";
 import { PriceChart, type PricePoint } from "./price-chart";
 import { ClockBar } from "./clock-bar";
+import { OptionChain } from "./option-chain";
+import { AccountPanel } from "./account-panel";
 
 const MARKET_OPEN_ET = 9 * 60 + 30; // 09:30 ET
 
@@ -50,6 +63,10 @@ export function Terminal({
   const [tab, setTab] = useState<Blotter>("positions");
   const [err, setErr] = useState<string | null>(null);
   const [initialEquity, setInitialEquity] = useState<number | null>(null);
+  const [equityHist, setEquityHist] = useState<PricePoint[]>([]);
+  const [centerView, setCenterView] = useState<"chart" | "options">("chart");
+  const [showAccount, setShowAccount] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Order ticket
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
@@ -69,6 +86,13 @@ export function Terminal({
     setState(s);
     if (accumulate) {
       const curTs = s.market.ts;
+      setEquityHist((prev) => {
+        const arr = prev.filter((p) => p.ts <= curTs);
+        if (!arr.length || arr[arr.length - 1].ts !== curTs)
+          arr.push({ ts: curTs, price: s.account.equity });
+        else arr[arr.length - 1] = { ts: curTs, price: s.account.equity };
+        return arr;
+      });
       setPriceHist((prev) => {
         const next = { ...prev };
         for (const q of s.market.stocks) {
@@ -208,6 +232,29 @@ export function Terminal({
     }
   }, [sessionId, accountId, selected, side, qty, orderType, limit, apply]);
 
+  const tradeOption = useCallback(
+    async (row: OptionRow, oside: "BUY" | "SELL") => {
+      setErr(null);
+      try {
+        await placeOptionOrder({
+          session_id: sessionId,
+          account_id: accountId,
+          contract: row.ticker,
+          side: oside,
+          qty: Math.max(1, Math.round(qty / 100) || 1),
+          order_type: "MARKET",
+        });
+        const s = await getState(sessionId);
+        apply(s, true);
+        setToast(`${oside} ${row.ticker} submitted`);
+        setTimeout(() => setToast(null), 2500);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [sessionId, accountId, qty, apply],
+  );
+
   const doCancel = useCallback(
     async (orderId: string) => {
       try {
@@ -236,9 +283,9 @@ export function Terminal({
   const dayPnl = acct && initialEquity !== null ? acct.equity - initialEquity : 0;
 
   return (
-    <div className="flex h-full flex-col bg-slate-950 text-slate-200">
+    <div className="broker-root relative flex h-full flex-col bg-slate-950 text-slate-200">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+      <div className="broker-titlebar flex items-center justify-between border-b border-slate-800 px-5 py-3">
         <div className="flex items-center gap-4">
           <div className="text-sm font-bold tracking-tight text-white">
             QFinZero <span className="text-emerald-400">Broker</span>
@@ -256,8 +303,14 @@ export function Terminal({
           />
           <Stat label="Buying power" value={money(acct?.buying_power)} />
           <button
+            onClick={() => setShowAccount(true)}
+            className="broker-btn flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            <Wallet2 className="h-4 w-4" /> Account
+          </button>
+          <button
             onClick={onExit}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            className="broker-btn flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
           >
             <LogOut className="h-4 w-4" /> Exit
           </button>
@@ -319,9 +372,33 @@ export function Terminal({
                 </span>
               )}
             </div>
+            <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
+              {([["chart", "Chart", CandlestickChart], ["options", "Option chain", ListTree]] as const).map(
+                ([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    onClick={() => setCenterView(id)}
+                    className={`broker-btn flex items-center gap-1.5 px-3 py-1.5 font-semibold ${
+                      centerView === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" /> {label}
+                  </button>
+                ),
+              )}
+            </div>
           </div>
           <div className="min-h-0 flex-1 px-3 pb-2 pt-1">
-            <PriceChart symbol={selected} data={selHist} up={selUp} />
+            {centerView === "chart" ? (
+              <PriceChart symbol={selected} data={selHist} up={selUp} />
+            ) : (
+              <OptionChain
+                underlying={selected}
+                date={state ? etDate(state.clock.current_ts) : ""}
+                spot={sel?.close}
+                onTrade={tradeOption}
+              />
+            )}
           </div>
 
           {/* Blotter */}
@@ -479,6 +556,22 @@ export function Terminal({
         onScrub={onScrub}
         scrubbing={scrubbing}
       />
+
+      {toast && (
+        <div className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {showAccount && state && (
+        <AccountPanel
+          accountId={accountId}
+          state={state}
+          equityHist={equityHist}
+          initialEquity={initialEquity}
+          onClose={() => setShowAccount(false)}
+        />
+      )}
     </div>
   );
 }

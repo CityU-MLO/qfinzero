@@ -294,3 +294,112 @@ body.legacy ::-webkit-scrollbar-button {
   height: 17px;
   width: 17px;
 }
+
+/* ======================================================================
+   Broker — Windows 98 skin (.broker-98). The broker is a full-screen
+   overlay with its own dark theme; under /legacy/broker we reskin it to
+   the classic gray-bevel look by overriding its utility classes.
+   ====================================================================== */
+.broker-98,
+.broker-98 * {
+  font-family: "Tahoma", "Geneva", "MS Sans Serif", "Segoe UI", sans-serif !important;
+  border-radius: 0 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+.broker-98 {
+  background: #008080 !important;
+  color: #000 !important;
+}
+
+/* Surfaces → 98 gray */
+.broker-98 [class*="bg-slate-"],
+.broker-98 [class*="bg-red-9"],
+.broker-98 .backdrop-blur {
+  background: #c0c0c0 !important;
+  backdrop-filter: none !important;
+}
+
+/* Text → black; muted → dark gray; keep functional accents (darkened) */
+.broker-98 .text-white,
+.broker-98 [class*="text-slate-"] {
+  color: #000 !important;
+}
+.broker-98 [class*="text-slate-5"],
+.broker-98 [class*="text-slate-6"] {
+  color: #404040 !important;
+}
+.broker-98 [class*="text-emerald-"] {
+  color: #007000 !important;
+}
+.broker-98 [class*="text-red-"] {
+  color: #a00000 !important;
+}
+.broker-98 [class*="text-sky-"],
+.broker-98 [class*="text-amber-"] {
+  color: #000080 !important;
+}
+
+/* Kill the modern borders; panels get a raised 98 bevel */
+.broker-98 [class*="border"] {
+  border-color: #808080 !important;
+}
+.broker-98 .broker-panel,
+.broker-98 .rounded-2xl,
+.broker-98 .rounded-xl {
+  border: none !important;
+  box-shadow: var(--w98-window) !important;
+  background: #c0c0c0 !important;
+}
+
+/* Buttons → classic raised, sink on press */
+.broker-98 button,
+.broker-98 .broker-btn,
+.broker-98 a.broker-skin-toggle {
+  background: #c0c0c0 !important;
+  color: #000 !important;
+  border: none !important;
+  box-shadow: var(--w98-raised) !important;
+  padding: 3px 10px !important;
+  min-height: 0 !important;
+}
+.broker-98 button:active,
+.broker-98 .broker-btn:active {
+  box-shadow: var(--w98-sunken) !important;
+}
+
+/* Inputs / selects → sunken white field */
+.broker-98 input,
+.broker-98 select {
+  background: #ffffff !important;
+  color: #000 !important;
+  border: none !important;
+  box-shadow: var(--w98-field) !important;
+  padding: 2px 4px !important;
+}
+
+/* Title bar → navy gradient with white text */
+.broker-98 .broker-titlebar {
+  background: linear-gradient(90deg, #000080, #1084d0) !important;
+  box-shadow: var(--w98-window) !important;
+}
+.broker-98 .broker-titlebar,
+.broker-98 .broker-titlebar .text-white,
+.broker-98 .broker-titlebar [class*="text-slate-"] {
+  color: #ffffff !important;
+}
+.broker-98 .broker-titlebar button {
+  color: #000 !important;
+}
+
+/* Status bar (clock) → sunken panel row */
+.broker-98 .broker-statusbar {
+  background: #c0c0c0 !important;
+  box-shadow: var(--w98-sunken) !important;
+}
+
+/* Account overlay reads as a raised 98 window */
+.broker-98 .broker-98-window {
+  background: #c0c0c0 !important;
+  box-shadow: var(--w98-window) !important;
+}

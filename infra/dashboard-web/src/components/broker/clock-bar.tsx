@@ -35,7 +35,7 @@ export function ClockBar({
   const speedIdx = Math.max(0, SPEEDS.indexOf(speed));
 
   return (
-    <div className="flex flex-wrap items-center gap-4 border-t border-slate-800 bg-slate-950/80 px-5 py-3">
+    <div className="broker-statusbar flex flex-wrap items-center gap-4 border-t border-slate-800 bg-slate-950/80 px-5 py-3">
       {/* Transport */}
       <div className="flex items-center gap-2">
         {!started ? (
