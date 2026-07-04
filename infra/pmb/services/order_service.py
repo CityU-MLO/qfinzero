@@ -25,6 +25,10 @@ class OrderService:
         if is_new:
             state.order_manager.accept(order.order_id, ts)
             state.history.record_order(order)
+            # Record for deterministic replay on rewind/time-travel.
+            self._session_service.log_action(
+                req.session_id, "place", req=req.model_dump(), order_id=order.order_id
+            )
 
         result = {
             "ok": True,
@@ -48,6 +52,7 @@ class OrderService:
             return {"ok": False, "error": "order not found or already terminal"}
 
         state.history.update_order(order)
+        self._session_service.log_action(session_id, "cancel", order_id=order_id)
         return {"ok": True, "order_id": order_id, "status": order.status.value}
 
     def get_order(self, order_id: str, session_id: str) -> dict | None:

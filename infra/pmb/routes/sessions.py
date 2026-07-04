@@ -73,6 +73,52 @@ async def step_session(session_id: str, req: StepRequest, request: Request):
     return result
 
 
+@router.get("/v1/sessions/{session_id}/state")
+async def get_full_state(session_id: str, request: Request):
+    """Consolidated snapshot (clock, account, positions, orders, market) for the UI."""
+    session_svc = request.app.state.session_service
+    state = session_svc.get_full_state(session_id)
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "session not found"},
+        )
+    return state
+
+
+@router.get("/v1/sessions/{session_id}/timeline")
+async def get_timeline(session_id: str, request: Request):
+    """The full list of bar timestamps — the scrubbable simulation clock."""
+    session_svc = request.app.state.session_service
+    timeline = session_svc.get_timeline(session_id)
+    if timeline is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "session not found"},
+        )
+    return {"session_id": session_id, "timeline": timeline, "count": len(timeline)}
+
+
+@router.post("/v1/sessions/{session_id}/rewind")
+async def rewind_session(session_id: str, request: Request):
+    """Time-travel back to target_ts, undoing every action placed after it."""
+    body = await request.json()
+    target_ts = body.get("target_ts")
+    if not target_ts:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_argument", "message": "target_ts is required"},
+        )
+    session_svc = request.app.state.session_service
+    result = session_svc.rewind(session_id, target_ts)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "session not found"},
+        )
+    return result
+
+
 @router.post("/v1/sessions/{session_id}/stop")
 async def stop_session(session_id: str, request: Request):
     session_svc = request.app.state.session_service

@@ -81,6 +81,30 @@ async def _mark_from_upq(request: Request, account_id: str) -> None:
 # ── Allocation & status ────────────────────────────────────────────────
 
 
+@router.get("/v1/accounts")
+async def list_accounts(request: Request):
+    """List all allocated accounts (for the broker's Enter Account picker)."""
+    svc = _svc(request)
+    session_svc = request.app.state.session_service
+    active_by_account = {
+        state.account_id: sid for sid, state in session_svc._sessions.items()
+    }
+    accounts = []
+    for acc in svc.list_accounts():
+        accounts.append(
+            {
+                "account_id": acc.account_id,
+                "market": acc.market.value,
+                "status": acc.status.value,
+                "initial_cash": acc.initial_cash,
+                "created_at": acc.created_at,
+                "current_date": acc.current_date,
+                "active_session_id": active_by_account.get(acc.account_id),
+            }
+        )
+    return {"accounts": accounts, "count": len(accounts)}
+
+
 @router.post("/v1/accounts")
 async def create_account(req: CreateAccountRequest, request: Request):
     # fill unset fields from the broker config (single settings surface)

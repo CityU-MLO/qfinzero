@@ -11,7 +11,7 @@ const ASSAY_URL = process.env.NEXT_PUBLIC_ASSAY_WEB_URL ?? "https://assay.exampl
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: MessageSquare },
   { href: "/data", label: "Data", icon: Database },
-  { href: "/pmb", label: "PMB", icon: LineChart },
+  { href: "/broker", label: "Broker", icon: LineChart },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/doc", label: "Doc", icon: BookOpen },
 ];

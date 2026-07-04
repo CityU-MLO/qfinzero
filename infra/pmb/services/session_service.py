@@ -1,7 +1,7 @@
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from models.enums import Frequency, EventType, SessionStatus
 from models.account import Account, MarginConfig
@@ -18,7 +18,7 @@ from models.event import (
     AccountSnapshotPayload,
     RiskEventPayload,
 )
-from domain.session_clock import SessionClock, ns_to_iso
+from domain.session_clock import SessionClock, ns_to_iso, iso_to_ns
 from domain.market_data_cache import MarketDataCache
 from domain.order_manager import OrderManager
 from domain.execution_engine import ExecutionEngine
@@ -48,6 +48,11 @@ class SessionState:
     event_seq: int = 0
     status: SessionStatus = SessionStatus.RUNNING
     run_id: str | None = None
+    # Kept so a session can be rebuilt from scratch during rewind.
+    account: Account | None = None
+    # Ordered log of user actions (order place/cancel) for deterministic replay.
+    # Each entry: {seq, index, ts, kind: "place"|"cancel", ...payload}.
+    action_log: list[dict] = field(default_factory=list)
 
     def next_event_id(self) -> str:
         self.event_seq += 1
@@ -130,6 +135,7 @@ class SessionService:
             margin_engine=MarginEngine(account.margin_config),
             history=HistoryStore(),
             run_id=repro.run_id if repro else None,
+            account=account,
         )
 
         self._sessions[session_id] = state
@@ -613,3 +619,201 @@ class SessionService:
             except Exception:
                 pass  # contract may not have data
         return {"ok": True, "loaded": loaded, "skipped": skipped}
+
+    # ── Playback state & time-travel (rewind / undo) ────────────────────
+
+    def log_action(self, session_id: str, kind: str, **payload) -> None:
+        """Record a user action so the session can be replayed on rewind."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        state.action_log.append(
+            {
+                "seq": len(state.action_log),
+                "index": state.clock._index,
+                "ts": state.clock.current_ts,
+                "kind": kind,
+                **payload,
+            }
+        )
+
+    def get_timeline(self, session_id: str) -> list[str] | None:
+        """Full list of bar timestamps (ISO) — the scrubbable simulation clock."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return None
+        return [ns_to_iso(ns) for ns in state.clock._timestamps]
+
+    def get_full_state(self, session_id: str) -> dict | None:
+        """One-call consolidated snapshot for the trading UI."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return None
+
+        ts_ns = state.clock.current_ns
+        stock_bars = state.cache.get_stock_bars_at(ts_ns) if ts_ns is not None else {}
+        option_bars = state.cache.get_option_bars_at(ts_ns) if ts_ns is not None else {}
+
+        stocks = [
+            {
+                "symbol": s,
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
+                "close": b.close,
+                "volume": b.volume,
+            }
+            for s, b in stock_bars.items()
+        ]
+        options = [
+            {
+                "contract": c,
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
+                "close": b.close,
+                "volume": b.volume,
+            }
+            for c, b in option_bars.items()
+        ]
+
+        im = state.margin_engine.total_initial_margin(state.ledger.positions)
+        mm = state.margin_engine.total_maintenance_margin(state.ledger.positions)
+        open_orders = [
+            {
+                "order_id": o.order_id,
+                "instrument_id": o.instrument_id,
+                "side": o.side.value,
+                "order_type": o.order_type.value,
+                "qty": o.qty,
+                "limit_price": o.limit_price,
+                "status": o.status.value,
+            }
+            for o in state.order_manager.get_open_orders()
+        ]
+        snapshot = state.ledger.get_snapshot(
+            im, mm, state.margin_engine.margin_status, open_orders
+        )
+
+        return {
+            "session_id": session_id,
+            "account_id": state.account_id,
+            "clock": {
+                "current_ts": state.clock.current_ts,
+                "current_ns": state.clock.current_ns,
+                "index": state.clock._index,
+                "total_bars": state.clock.total_bars,
+                "frequency": state.clock.frequency.value,
+                "start_ts": state.config.start_ts,
+                "end_ts": state.config.end_ts,
+                "status": state.status.value,
+                "is_done": state.clock.is_done,
+            },
+            "account": snapshot.model_dump(),
+            "positions": [p.model_dump() for p in state.ledger.positions_list()],
+            "open_orders": open_orders,
+            "trades": state.history.get_trades(session_id=session_id),
+            "market": {
+                "ts": state.clock.current_ts,
+                "stocks": stocks,
+                "options": options,
+            },
+        }
+
+    def _reset_state(self, state: SessionState) -> None:
+        """Rebuild all mutable domain objects, keeping the immutable market cache."""
+        req = state.config
+        account = state.account
+        exec_config = req.execution_config or ExecutionConfig()
+        repro = req.reproducibility
+
+        state.clock = SessionClock(state.clock._timestamps, req.frequency, req.end_ts)
+        state.ledger = Ledger(account.initial_cash)
+        state.order_manager = OrderManager()
+        state.execution_engine = ExecutionEngine(
+            seed=repro.seed if repro else None,
+            slippage_bps=exec_config.slippage_bps,
+            fee_model=exec_config.fee_model,
+            option_spread_pct=exec_config.option_spread_pct,
+        )
+        state.margin_engine = MarginEngine(account.margin_config)
+        state.history = HistoryStore()
+        state.event_seq = 0
+        state.status = SessionStatus.RUNNING
+
+    def _apply_action(self, state: SessionState, action: dict, id_map: dict) -> None:
+        """Re-apply one logged action during replay (does not re-log)."""
+        ts = state.clock.current_ts
+        if action["kind"] == "place":
+            from models.order import CreateOrderRequest
+
+            req = CreateOrderRequest(**action["req"])
+            if state.order_manager.validate_order(req.order):
+                return
+            order, is_new = state.order_manager.submit(req, ts)
+            if is_new:
+                state.order_manager.accept(order.order_id, ts)
+                state.history.record_order(order)
+            if action.get("order_id"):
+                id_map[action["order_id"]] = order.order_id
+        elif action["kind"] == "cancel":
+            oid = id_map.get(action["order_id"], action["order_id"])
+            order = state.order_manager.cancel(oid, ts)
+            if order is not None:
+                state.history.update_order(order)
+
+    def rewind(self, session_id: str, target_ts: str) -> dict | None:
+        """Time-travel back to target_ts, undoing every action placed after it.
+
+        Deterministic replay: reset the session, drop actions issued after the
+        target bar, then re-step tick-by-tick to that bar re-applying the kept
+        actions at the exact clock index they were originally issued at. Order
+        ids are remapped so the restored log always references live ids.
+        """
+        state = self._sessions.get(session_id)
+        if state is None:
+            return None
+
+        target_ns = iso_to_ns(target_ts)
+        timestamps = state.clock._timestamps
+        target_index = -1
+        for i, ns in enumerate(timestamps):
+            if ns <= target_ns:
+                target_index = i
+            else:
+                break
+
+        kept = [a for a in state.action_log if a["index"] <= target_index]
+        actions_by_index: dict[int, list[dict]] = {}
+        for a in kept:
+            actions_by_index.setdefault(a["index"], []).append(a)
+
+        self._reset_state(state)
+        state.action_log = []
+        id_map: dict[str, str] = {}
+
+        for a in actions_by_index.get(-1, []):
+            self._apply_action(state, a, id_map)
+
+        for i in range(0, target_index + 1):
+            traversed = state.clock.step(1)
+            if not traversed:
+                break
+            for ts_ns in traversed:
+                self._process_tick(state, ts_ns, ns_to_iso(ts_ns))
+            for a in actions_by_index.get(i, []):
+                self._apply_action(state, a, id_map)
+
+        state.status = (
+            SessionStatus.FINISHED if state.clock.is_done else SessionStatus.RUNNING
+        )
+
+        # Rewrite the restored log to reference the live (replayed) order ids so
+        # subsequent rewinds and UI cancels stay consistent.
+        for a in kept:
+            orig = a.get("order_id")
+            if orig in id_map:
+                a["order_id"] = id_map[orig]
+        state.action_log = kept
+
+        return self.get_full_state(session_id)
