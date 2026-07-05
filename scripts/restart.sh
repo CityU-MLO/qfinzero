@@ -129,6 +129,37 @@ done
 
 maybe_build() { [ "$BUILD" = 1 ] || return 0; build_web; }
 
+UNIT="qfinzero-hub.service"
+have_service() {
+  [ "${QFZ_SKIP_SYSTEMD:-0}" = "1" ] && return 1
+  systemctl --user cat "$UNIT" >/dev/null 2>&1
+}
+
+wait_health() {
+  for i in $(seq 1 60); do
+    sleep 2
+    if curl -s -m3 "http://127.0.0.1:$QFZ_SERVER_PORT/health" >/dev/null 2>&1; then
+      echo "Hub healthy after ~$((i * 2))s:"; status_qfz
+      echo "Open: http://127.0.0.1:$QFZ_SERVER_PORT/  ·  Broker: /broker"
+      return 0
+    fi
+  done
+  echo "Hub not healthy yet — check: journalctl --user -u $UNIT -n 40"; return 1
+}
+
+# Prefer the durable systemd user service when it's installed.
+if have_service; then
+  echo "Using systemd user service ($UNIT)."
+  case "$CMD" in
+    stop) systemctl --user stop "$UNIT"; echo "Stopped." ;;
+    status) systemctl --user --no-pager status "$UNIT" | head -12; echo; status_qfz ;;
+    start) maybe_build && { systemctl --user start "$UNIT"; wait_health; } ;;
+    restart) maybe_build && { systemctl --user restart "$UNIT"; wait_health; } ;;
+  esac
+  exit $?
+fi
+
+# Fallback: ad-hoc nohup supervisor (when systemd --user isn't in use).
 case "$CMD" in
   stop) stop_qfz ;;
   status) status_qfz ;;
