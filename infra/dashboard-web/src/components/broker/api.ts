@@ -273,6 +273,7 @@ export interface ChainResponse {
   expiries: string[];
   spot: number | null;
   rows: ChainRow[];
+  loading?: boolean;
 }
 
 /** Live two-sided option chain at the session's current bar (flashes as the clock ticks). */

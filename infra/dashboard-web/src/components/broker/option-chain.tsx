@@ -22,10 +22,14 @@ export function OptionChain({
   const [err, setErr] = useState<string | null>(null);
   const busyRef = useRef(false);
   const prevLast = useRef<Record<string, number>>({});
+  const reloadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [flash, setFlash] = useState<Record<string, "up" | "down">>({});
+  const [poll, setPoll] = useState(0);
 
   // Re-fetch on underlying/expiry change and every clock step (flash). Skips if a
-  // request is in flight, so it self-throttles to backend latency.
+  // request is in flight, so it self-throttles to backend latency. When the
+  // backend is still loading minute bars in the background, re-poll shortly to
+  // upgrade the skeleton marks to live ones.
   useEffect(() => {
     let cancelled = false;
     if (busyRef.current) return;
@@ -34,7 +38,6 @@ export function OptionChain({
     sessionOptionChain(sessionId, underlying, expiry || undefined)
       .then((c) => {
         if (cancelled) return;
-        // compute per-contract flash direction vs the previous fetch
         const f: Record<string, "up" | "down"> = {};
         for (const row of c.rows) {
           for (const leg of [row.call, row.put]) {
@@ -48,6 +51,11 @@ export function OptionChain({
         setChain(c);
         if (!expiry && c.expiry) setExpiry(c.expiry);
         setErr(null);
+        // background load still running → poll again to pick up live marks
+        if (c.loading) {
+          if (reloadRef.current) clearTimeout(reloadRef.current);
+          reloadRef.current = setTimeout(() => setPoll((p) => p + 1), 600);
+        }
       })
       .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)))
       .finally(() => {
@@ -58,7 +66,14 @@ export function OptionChain({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, underlying, expiry, clockIndex]);
+  }, [sessionId, underlying, expiry, clockIndex, poll]);
+
+  useEffect(
+    () => () => {
+      if (reloadRef.current) clearTimeout(reloadRef.current);
+    },
+    [],
+  );
 
   const rows = chain?.rows ?? [];
   const spot = chain?.spot ?? undefined;

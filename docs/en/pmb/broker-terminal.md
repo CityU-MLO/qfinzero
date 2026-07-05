@@ -55,9 +55,10 @@ chain (calls | strike | puts), like a real broker:
 - Pick an **expiry**; click **B** / **S** on either side to trade that contract
   (the broker loads it into the session and submits a market order).
 
-Performance: the day chain skeleton (strikes + greeks) is fetched once and the
-near-ATM contracts' minute bars are loaded once (`GET /v1/sessions/{id}/option_chain`);
-subsequent steps are fast cache reads, so the flash stays responsive.
+Performance: the chain **paints instantly** (~0.1s) from the cached day skeleton,
+then the near-ATM contracts' minute bars load **concurrently in the background**
+(`GET /v1/sessions/{id}/option_chain` returns `loading: true` and the UI re-polls)
+so live marks fill in within ~1s. After that every step is a fast cache read.
 
 Under the hood the chain comes from UPQ `/option/chain_query` (Black–Scholes
 European greeks). Contract ids are OPRA, e.g. `O:AAPL240328C00170000`

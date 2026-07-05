@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,9 @@ class SessionState:
     action_log: list[dict] = field(default_factory=list)
     # Cached day option-chain skeletons keyed by (underlying, date) → rows.
     chain_skeleton: dict = field(default_factory=dict)
+    # Option contracts whose minute bars have already been (attempted to be)
+    # loaded, so background chain loads don't retry no-data contracts forever.
+    chain_attempted: set = field(default_factory=set)
 
     def next_event_id(self) -> str:
         self.event_seq += 1
@@ -67,6 +71,8 @@ class SessionService:
     def __init__(self, upq_client: UPQClient):
         self._sessions: dict[str, SessionState] = {}
         self._upq = upq_client
+        # In-flight background option-chain loads, keyed by session_id.
+        self._chain_tasks: dict[str, asyncio.Task] = {}
 
     async def create_session(
         self, req: CreateSessionRequest, account: Account
@@ -579,7 +585,12 @@ class SessionService:
         return None
 
     async def add_option_contracts(self, session_id: str, contracts: list[str]) -> dict:
-        """Dynamically load option contract data into a running session cache."""
+        """Dynamically load option contract data into a running session cache.
+
+        Missing contracts are fetched from UPQ **concurrently** (bounded), so
+        opening a full option chain is sub-second instead of a serial stack of
+        per-contract requests.
+        """
         state = self._sessions.get(session_id)
         if state is None:
             return {"ok": False, "error": "session not found"}
@@ -590,40 +601,53 @@ class SessionService:
         date_to_stock_ns: dict[str, int] = {}
         for sym_bars in state.cache._stock_bars.values():
             for ns in sym_bars:
-                date_str = ns_to_iso(ns)[:10]
-                date_to_stock_ns[date_str] = ns
+                date_to_stock_ns[ns_to_iso(ns)[:10]] = ns
             break  # one symbol is enough
 
-        loaded = 0
+        minute = state.clock.frequency == Frequency.MINUTE
+        start = state.config.start_ts if minute else state.config.start_ts[:10]
+        end = state.config.end_ts if minute else state.config.end_ts[:10]
+
+        # De-dupe; skip already-cached contracts.
+        seen: set[str] = set()
+        to_fetch: list[str] = []
         skipped = 0
-        for contract in contracts:
-            if contract in state.cache._option_bars:
-                skipped += 1
+        for c in contracts:
+            if not c or c in seen:
                 continue
-            try:
-                if state.clock.frequency == Frequency.MINUTE:
-                    opt_bars = await self._upq.get_option_minute_bars(
-                        contract, state.config.start_ts, state.config.end_ts
-                    )
-                else:
-                    start_date = state.config.start_ts[:10]
-                    end_date = state.config.end_ts[:10]
-                    opt_bars = await self._upq.get_option_daily_bars(
-                        contract, start_date, end_date
-                    )
-                # For DAILY sessions, snap option (ET-midnight) bars onto the
-                # stock (UTC-midnight) date grid. MINUTE sessions already share
-                # the same minute grid, so keep the real minute timestamps —
-                # that lets the option mark update minute-by-minute.
-                if state.clock.frequency == Frequency.DAILY:
-                    for bar in opt_bars:
-                        opt_date = ns_to_iso(bar.window_start_ns)[:10]
-                        if opt_date in date_to_stock_ns:
-                            bar.window_start_ns = date_to_stock_ns[opt_date]
-                state.cache.load_option_bars(contract, opt_bars)
-                loaded += 1
-            except Exception:
-                pass  # contract may not have data
+            seen.add(c)
+            if c in state.cache._option_bars:
+                skipped += 1
+            else:
+                to_fetch.append(c)
+
+        sem = asyncio.Semaphore(48)
+
+        async def fetch(contract: str):
+            async with sem:
+                try:
+                    if minute:
+                        return contract, await self._upq.get_option_minute_bars(contract, start, end)
+                    return contract, await self._upq.get_option_daily_bars(contract, start, end)
+                except Exception:  # noqa: BLE001 — a bad/empty contract must not break the batch
+                    return contract, None
+
+        results = await asyncio.gather(*(fetch(c) for c in to_fetch)) if to_fetch else []
+
+        loaded = 0
+        for contract, opt_bars in results:
+            if not opt_bars:
+                continue
+            # For DAILY sessions, snap option (ET-midnight) bars onto the stock
+            # (UTC-midnight) date grid. MINUTE sessions share the same minute
+            # grid, so keep the real minute timestamps (lets marks flash).
+            if not minute:
+                for bar in opt_bars:
+                    opt_date = ns_to_iso(bar.window_start_ns)[:10]
+                    if opt_date in date_to_stock_ns:
+                        bar.window_start_ns = date_to_stock_ns[opt_date]
+            state.cache.load_option_bars(contract, opt_bars)
+            loaded += 1
         return {"ok": True, "loaded": loaded, "skipped": skipped}
 
     async def add_stocks(self, session_id: str, symbols: list[str]) -> dict:
@@ -721,11 +745,29 @@ class SessionService:
             if r["strike"] not in strike_set:
                 continue
             by_key[(r["strike"], r.get("type"))] = r
-            if r.get("ticker"):
+            # Only pull minute bars for contracts that actually traded that day —
+            # illiquid strikes (no volume) render with the day mark, exactly like
+            # a real chain. This keeps the first load fast (few queries).
+            if r.get("ticker") and (r.get("volume") or 0) > 0:
                 contracts.append(r["ticker"])
 
-        # 3. Ensure near-ATM contracts are loaded (once), then read minute marks.
-        await self.add_option_contracts(session_id, contracts)
+        # 3. Load near-ATM contracts in the BACKGROUND so the chain paints
+        #    instantly (skeleton marks first); live minute marks appear on the
+        #    next poll once the background fetch completes. `loading` reflects an
+        #    in-flight load so the UI knows to re-poll.
+        needs = [
+            c for c in contracts
+            if c not in state.cache._option_bars and c not in state.chain_attempted
+        ]
+        task = self._chain_tasks.get(session_id)
+        task_running = task is not None and not task.done()
+        if needs and not task_running:
+            state.chain_attempted.update(needs)  # don't retry no-data contracts
+            self._chain_tasks[session_id] = asyncio.create_task(
+                self.add_option_contracts(session_id, needs)
+            )
+            task_running = True
+
         marks = state.cache.get_option_bars_at(ts_ns) if ts_ns is not None else {}
 
         def leg(strike: float, typ: str) -> dict | None:
@@ -762,6 +804,7 @@ class SessionService:
             "expiries": expiries,
             "spot": spot,
             "rows": out_rows,
+            "loading": task_running,
         }
 
     # ── Playback state & time-travel (rewind / undo) ────────────────────
