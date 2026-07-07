@@ -85,9 +85,9 @@ class UPQClient:
         return bars
 
     async def get_option_minute_bars(
-        self, contract: str, start: str, end: str
+        self, contract: str, start: str, end: str, include_greeks: bool = True
     ) -> list[OptionBar]:
-        """GET /option/ticker_query with resolution=minute and Greeks."""
+        """GET /option/ticker_query with resolution=minute (Greeks optional)."""
         resp = await self._client.get(
             "/option/ticker_query",
             params={
@@ -95,7 +95,7 @@ class UPQClient:
                 "start": start,
                 "end": end,
                 "resolution": "minute",
-                "include_greeks": "true",
+                "include_greeks": "true" if include_greeks else "false",
             },
         )
         resp.raise_for_status()

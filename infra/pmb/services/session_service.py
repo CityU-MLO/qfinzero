@@ -584,12 +584,15 @@ class SessionService:
             return best_fallback.open
         return None
 
-    async def add_option_contracts(self, session_id: str, contracts: list[str]) -> dict:
+    async def add_option_contracts(
+        self, session_id: str, contracts: list[str], include_greeks: bool = True
+    ) -> dict:
         """Dynamically load option contract data into a running session cache.
 
         Missing contracts are fetched from UPQ **concurrently** (bounded), so
         opening a full option chain is sub-second instead of a serial stack of
-        per-contract requests.
+        per-contract requests. `include_greeks=False` skips per-minute BSM greeks
+        (the chain shows day-level greeks from the skeleton) for a faster load.
         """
         state = self._sessions.get(session_id)
         if state is None:
@@ -627,7 +630,9 @@ class SessionService:
             async with sem:
                 try:
                     if minute:
-                        return contract, await self._upq.get_option_minute_bars(contract, start, end)
+                        return contract, await self._upq.get_option_minute_bars(
+                            contract, start, end, include_greeks=include_greeks
+                        )
                     return contract, await self._upq.get_option_daily_bars(contract, start, end)
                 except Exception:  # noqa: BLE001 — a bad/empty contract must not break the batch
                     return contract, None
@@ -763,8 +768,10 @@ class SessionService:
         task_running = task is not None and not task.done()
         if needs and not task_running:
             state.chain_attempted.update(needs)  # don't retry no-data contracts
+            # Chain marks only need price/volume — greeks come from the day
+            # skeleton, so skip per-minute BSM here to load faster.
             self._chain_tasks[session_id] = asyncio.create_task(
-                self.add_option_contracts(session_id, needs)
+                self.add_option_contracts(session_id, needs, include_greeks=False)
             )
             task_running = True
 
