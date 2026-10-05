@@ -57,18 +57,19 @@ class AccountService:
         raise RuntimeError("could not allocate a unique account id")
 
     def create_account(self, req: CreateAccountRequest) -> Account:
-        market = req.market
+        market = req.market or Market.US
         profile = MARKET_PROFILE[market]
         account_id = self._new_account_id(market)
         now = datetime.now(timezone.utc).isoformat()
         open_date = req.resolved_open_date() or DEFAULT_OPEN_DATE
+        initial_cash = float(req.initial_cash if req.initial_cash is not None else 100_000.0)
 
         account = Account(
             account_id=account_id,
             base_currency=req.base_currency or profile["currency"],
             account_type=req.account_type,
             market=market,
-            initial_cash=req.initial_cash,
+            initial_cash=initial_cash,
             timezone=req.timezone or profile["timezone"],
             open_date=open_date,
             start_date=open_date,
@@ -78,14 +79,27 @@ class AccountService:
             status=AccountStatus.ACTIVE,
             trading_day=1,
             current_date=open_date,
-            cash=req.initial_cash,
-            day_opening_equity=req.initial_cash,
+            cash=initial_cash,
+            day_opening_equity=initial_cash,
         )
         self._accounts[account_id] = account
         return account
 
     def get_account(self, account_id: str) -> Account | None:
         return self._accounts.get(account_id)
+
+    def restore_account(self, snapshot: dict) -> Account:
+        """Register an independent copy of a checkpoint account."""
+        source = Account.model_validate(snapshot)
+        account = source.model_copy(
+            deep=True,
+            update={
+                "account_id": self._new_account_id(source.market),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        self._accounts[account.account_id] = account
+        return account
 
     def list_accounts(self) -> list[Account]:
         return list(self._accounts.values())

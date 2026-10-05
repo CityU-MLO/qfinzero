@@ -218,3 +218,67 @@ async def add_contracts(session_id: str, request: Request):
             detail={"code": "not_found", "message": result.get("error", "unknown")},
         )
     return result
+
+
+@router.get("/v1/sessions/{session_id}/checkpoint")
+async def checkpoint_session(session_id: str, request: Request):
+    """Export account and deterministic simulation state."""
+    session_svc = request.app.state.session_service
+    account_svc = request.app.state.account_service
+    checkpoint = session_svc.export_checkpoint(session_id)
+    state = session_svc.get_session(session_id)
+    if checkpoint is None or state is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": "session not found"},
+        )
+    account = account_svc.get_account(state.account_id)
+    if account is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "conflict", "message": "session account not found"},
+        )
+    return {
+        "ok": True,
+        "account": account.model_dump(mode="json"),
+        "checkpoint": checkpoint,
+    }
+
+
+@router.post("/v1/sessions/restore")
+async def restore_session(request: Request):
+    """Restore a checkpoint into a new account and independent session."""
+    body = await request.json()
+    checkpoint = body.get("checkpoint")
+    account_raw = body.get("account")
+    if not isinstance(checkpoint, dict) or not isinstance(account_raw, dict):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_argument",
+                "message": "account and checkpoint are required",
+            },
+        )
+
+    account_svc = request.app.state.account_service
+    session_svc = request.app.state.session_service
+    account = None
+    existing_sessions = set(session_svc._sessions)
+    try:
+        account = account_svc.restore_account(account_raw)
+        session_id, clock = await session_svc.restore_checkpoint(checkpoint, account)
+    except (TypeError, ValueError, KeyError) as exc:
+        if account is not None:
+            account_svc._accounts.pop(account.account_id, None)
+        for session_id in set(session_svc._sessions) - existing_sessions:
+            session_svc._sessions.pop(session_id, None)
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_checkpoint", "message": str(exc)},
+        ) from exc
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "account_id": account.account_id,
+        "clock": clock.model_dump(mode="json"),
+    }

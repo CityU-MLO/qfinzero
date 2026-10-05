@@ -332,6 +332,24 @@ class PMBClient:
         """Time-travel back to target_ts, undoing every order placed after it."""
         return self._post(f"/sessions/{session_id}/rewind", {"target_ts": target_ts})
 
+    def checkpoint(self, session_id: str) -> dict:
+        """Export account and deterministic state for an experiment branch."""
+        return self._get(f"/sessions/{session_id}/checkpoint")
+
+    export_checkpoint = checkpoint
+
+    def restore_checkpoint(self, checkpoint: dict, account: dict = None) -> dict:
+        """Restore a checkpoint into a new account and independent session.
+
+        ``checkpoint`` may be the full response from :meth:`checkpoint`, or the
+        nested checkpoint object when ``account`` is passed separately.
+        """
+        body = checkpoint if account is None else {
+            "account": account,
+            "checkpoint": checkpoint,
+        }
+        return self._post("/sessions/restore", body)
+
     def add_stocks(self, session_id: str, symbols: list) -> dict:
         """Add stock symbols to a running session (grow the watchlist/universe)."""
         return self._post(f"/sessions/{session_id}/add_stocks", {"symbols": symbols})

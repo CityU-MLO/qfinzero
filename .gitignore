@@ -57,3 +57,5 @@ coverage/
 earning_benchmark/
 # QFinZero hub runtime logs/pids
 .run/
+.tmp/
+.cargo-target/

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
-from models.enums import Frequency, EventType, SessionStatus
+from models.enums import Frequency, EventType, SessionStatus, MarginStatus
 from models.account import Account, MarginConfig
 from models.session import (
     CreateSessionRequest,
@@ -13,6 +13,8 @@ from models.session import (
     ClockState,
     SessionSummary,
 )
+from models.order import Order
+from models.position import Position
 from models.event import (
     EventEnvelope,
     MarketTickPayload,
@@ -73,6 +75,171 @@ class SessionService:
         self._upq = upq_client
         # In-flight background option-chain loads, keyed by session_id.
         self._chain_tasks: dict[str, asyncio.Task] = {}
+
+    @staticmethod
+    def _tuple_tree(value):
+        """Convert a JSON-decoded RNG state back to the tuple tree random expects."""
+        if isinstance(value, list):
+            return tuple(SessionService._tuple_tree(item) for item in value)
+        return value
+
+    def export_checkpoint(self, session_id: str) -> dict | None:
+        """Return a JSON-safe snapshot that can continue in a new session."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return None
+
+        config = state.config.model_copy(deep=True)
+        config.universe.stocks = sorted(
+            set(config.universe.stocks) | set(state.cache._stock_bars)
+        )
+        config.universe.options = sorted(
+            set(config.universe.options) | set(state.cache._option_bars)
+        )
+        ledger = state.ledger
+        engine = state.execution_engine
+        margin = state.margin_engine
+        return {
+            "version": 1,
+            "config": config.model_dump(mode="json"),
+            "clock_timestamps_ns": state.clock._timestamps,
+            "clock_current_ns": state.clock.current_ns,
+            "event_seq": state.event_seq,
+            "status": state.status.value,
+            "run_id": state.run_id,
+            "ledger": {
+                "cash": ledger._cash,
+                "initial_cash": ledger._initial_cash,
+                "cash_locked": ledger._cash_locked,
+                "loan": ledger._loan,
+                "realized_pnl": ledger._realized_pnl,
+                "total_fees": ledger._total_fees,
+                "positions": [
+                    position.model_dump(mode="json")
+                    for position in ledger._positions.values()
+                ],
+            },
+            "orders": [
+                order.model_dump(mode="json")
+                for order in state.order_manager.get_all_orders()
+            ],
+            "execution": {
+                "rng_state": engine._rng.getstate(),
+                "event_seq": engine._event_seq,
+            },
+            "margin": {
+                "status": margin.margin_status.value,
+                "call_count": margin.margin_call_count,
+            },
+            "action_log": state.action_log,
+            "chain_skeleton": state.chain_skeleton,
+            "chain_attempted": sorted(state.chain_attempted),
+            "history": state.history.export_json(),
+            "history_events": state.history._events,
+        }
+
+    async def restore_checkpoint(
+        self,
+        checkpoint: dict,
+        account: Account,
+    ) -> tuple[str, ClockState]:
+        """Create an independent account session from an exported checkpoint."""
+        if checkpoint.get("version") != 1:
+            raise ValueError(
+                f"unsupported PMB checkpoint version: {checkpoint.get('version')!r}"
+            )
+        req_data = dict(checkpoint.get("config") or {})
+        req_data["account_id"] = account.account_id
+        req = CreateSessionRequest.model_validate(req_data)
+        session_id, _ = await self.create_session(req, account)
+        state = self._sessions[session_id]
+
+        clock_timestamps = checkpoint.get("clock_timestamps_ns")
+        if clock_timestamps is not None:
+            state.clock = SessionClock(
+                [int(value) for value in clock_timestamps],
+                req.frequency,
+                req.end_ts,
+            )
+
+        current_ns = checkpoint.get("clock_current_ns")
+        if current_ns is not None:
+            index = state.clock._ts_index_map.get(int(current_ns))
+            if index is None:
+                self._sessions.pop(session_id, None)
+                raise ValueError("checkpoint clock is absent from restored market data")
+            state.clock._index = index
+
+        ledger_data = checkpoint.get("ledger") or {}
+        ledger = state.ledger
+        ledger._cash = float(ledger_data.get("cash", account.initial_cash))
+        ledger._initial_cash = float(
+            ledger_data.get("initial_cash", account.initial_cash)
+        )
+        ledger._cash_locked = float(ledger_data.get("cash_locked", 0.0))
+        ledger._loan = float(ledger_data.get("loan", 0.0))
+        ledger._realized_pnl = float(ledger_data.get("realized_pnl", 0.0))
+        ledger._total_fees = float(ledger_data.get("total_fees", 0.0))
+        ledger._positions = {
+            position.instrument_id: position
+            for position in (
+                Position.model_validate(raw)
+                for raw in ledger_data.get("positions", [])
+            )
+        }
+
+        restored_orders: dict[str, Order] = {}
+        client_map: dict[str, str] = {}
+        for raw in checkpoint.get("orders", []):
+            updated = dict(raw)
+            updated["session_id"] = session_id
+            updated["account_id"] = account.account_id
+            order = Order.model_validate(updated)
+            restored_orders[order.order_id] = order
+            if order.client_order_id:
+                client_map[order.client_order_id] = order.order_id
+        state.order_manager._orders = restored_orders
+        state.order_manager._client_id_map = client_map
+
+        execution = checkpoint.get("execution") or {}
+        rng_state = execution.get("rng_state")
+        if rng_state is not None:
+            state.execution_engine._rng.setstate(self._tuple_tree(rng_state))
+        state.execution_engine._event_seq = int(execution.get("event_seq", 0))
+
+        margin = checkpoint.get("margin") or {}
+        state.margin_engine._margin_status = MarginStatus(
+            margin.get("status", MarginStatus.NORMAL.value)
+        )
+        state.margin_engine._margin_call_count = int(margin.get("call_count", 0))
+        state.event_seq = int(checkpoint.get("event_seq", 0))
+        state.run_id = checkpoint.get("run_id")
+        state.action_log = list(checkpoint.get("action_log") or [])
+        state.chain_skeleton = dict(checkpoint.get("chain_skeleton") or {})
+        state.chain_attempted = set(checkpoint.get("chain_attempted") or [])
+
+        history = checkpoint.get("history") or {}
+        state.history._orders = list(history.get("orders") or [])
+        for order in state.history._orders:
+            order["session_id"] = session_id
+            order["account_id"] = account.account_id
+        state.history._order_events = list(history.get("order_events") or [])
+        state.history._trades = list(history.get("trades") or [])
+        state.history._equity_curve = list(history.get("equity_curve") or [])
+        state.history._snapshots = list(history.get("snapshots") or [])
+        state.history._events = list(checkpoint.get("history_events") or [])
+
+        state.status = (
+            SessionStatus.FINISHED
+            if state.clock.is_done
+            else SessionStatus.RUNNING
+        )
+        return session_id, ClockState(
+            frequency=req.frequency,
+            current_ts=state.clock.current_ts,
+            end_ts=req.end_ts,
+            status=state.status,
+        )
 
     async def create_session(
         self, req: CreateSessionRequest, account: Account

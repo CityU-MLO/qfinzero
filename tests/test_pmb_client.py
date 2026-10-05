@@ -174,6 +174,42 @@ class TestSession:
         result = client.get_market("sess-1")
         assert result["stocks"][0]["symbol"] == "AAPL"
 
+    @responses.activate
+    def test_checkpoint_and_restore(self, client):
+        snapshot = {
+            "account": {"account_id": "acct-1"},
+            "checkpoint": {"version": 1, "clock_current_ns": 123},
+        }
+        responses.get(
+            f"{MOCK_URL}/v1/sessions/sess-1/checkpoint",
+            json=snapshot,
+        )
+        responses.post(
+            f"{MOCK_URL}/v1/sessions/restore",
+            json={"session_id": "sess-2", "account_id": "acct-2"},
+        )
+
+        exported = client.checkpoint("sess-1")
+        restored = client.restore_checkpoint(exported)
+
+        assert restored["session_id"] == "sess-2"
+        assert json.loads(responses.calls[1].request.body) == snapshot
+
+    @responses.activate
+    def test_restore_checkpoint_accepts_separate_account(self, client):
+        responses.post(
+            f"{MOCK_URL}/v1/sessions/restore",
+            json={"session_id": "sess-2"},
+        )
+        client.restore_checkpoint(
+            {"version": 1},
+            account={"account_id": "acct-1"},
+        )
+        assert json.loads(responses.calls[0].request.body) == {
+            "account": {"account_id": "acct-1"},
+            "checkpoint": {"version": 1},
+        }
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Export

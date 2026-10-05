@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any, Dict
 
 from .enums import MarginStatus, Market, AccountStatus, Side
@@ -132,8 +132,8 @@ class Account(BaseModel):
     initial_cash: float
     timezone: str = "America/New_York"
     # open_date is the canonical field; start_date mirrors it for back-compat.
-    open_date: str
-    start_date: str
+    open_date: str = ""
+    start_date: str = ""
     created_at: str
     constraints: AccountConstraints = AccountConstraints()
     margin_config: MarginConfig = MarginConfig()
@@ -150,6 +150,14 @@ class Account(BaseModel):
     trades_today: List[BrokerFill] = []
     day_opening_equity: float = 0.0
     history: List[TradingDayRecord] = []
+
+    @model_validator(mode="after")
+    def synchronize_date_aliases(self):
+        if not self.open_date:
+            self.open_date = self.start_date
+        if not self.start_date:
+            self.start_date = self.open_date
+        return self
 
     # equity / valuation helpers ----------------------------------------
 

@@ -41,7 +41,7 @@ services with the UI's own path conventions); direct/raw service REST lives unde
 ./scripts/serve.sh                 # start everything on http://127.0.0.1:19777
 # open http://127.0.0.1:19777           (web UI)
 # curl http://127.0.0.1:19777/health    (hub + children)
-# curl http://127.0.0.1:19777/api/upq/health
+# curl http://127.0.0.1:19777/svc/upq/health
 ```
 
 You launch one command and hit one port. Under the hood the hub **supervises**
@@ -80,6 +80,11 @@ elsewhere; `QFZ_SERVE_UI=0` skips the Next.js UI. The internal service ports
 **News Pushing Pipeline (ESP)** aggregates news articles (MongoDB), earnings calendars (Benzinga), and US economic events (NASDAQ) into a canonical event schema. Supports three query modes: upcoming events, recently occurred events, and arbitrary time windows. All times normalized to UTC.
 
 **Paper Money Broker (PMB)** is a step-driven brokerage simulator supporting market/limit/stop orders, margin accounts, and explicit order lifecycle (pending, filled, canceled). Time advances only when the agent calls `step`, enabling deterministic replay.
+
+PMB checkpoints let experiments branch from an identical account, clock,
+portfolio, order book, random-generator and history state. Export with
+`GET /svc/pmb/v1/sessions/{session_id}/checkpoint`, then create an independent
+branch with `POST /svc/pmb/v1/sessions/restore` using the returned JSON body.
 
 ### Service Dependencies
 

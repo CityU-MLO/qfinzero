@@ -29,6 +29,16 @@ _ROUTES = {
 }
 
 
+def _supervision_enabled() -> bool:
+    """Read the current and legacy supervision environment switches."""
+    import os
+
+    value = os.getenv("QFZ_SUPERVISE")
+    if value is None:
+        value = os.getenv("QFZ_LITE_SUPERVISE", "1")
+    return value.lower() not in ("0", "false", "off")
+
+
 def _load_mcp_app():
     """Import mcp/server.py in isolation (avoids the local-dir vs pip-pkg clash)
     and return its streamable-HTTP ASGI app, or None if unavailable."""
@@ -51,10 +61,8 @@ def _load_mcp_app():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import os
     app.state.proxy = ReverseProxy()
-    supervise = os.getenv("QFZ_SUPERVISE", "1").lower() not in ("0", "false", "off")
-    if supervise:
+    if _supervision_enabled():
         app.state.supervisor = Supervisor()
         app.state.supervisor.start_all()
         started = [c.name for c in app.state.supervisor.children if c.enabled]

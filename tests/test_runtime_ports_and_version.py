@@ -123,6 +123,7 @@ def test_playground_health_includes_standard_version(monkeypatch):
     fake_config = ModuleType("config")
     fake_config.HOST = "127.0.0.1"
     fake_config.PORT = 19390
+    fake_config.LLM_PROXY = ""
     fake_sse_package = ModuleType("sse_starlette")
     fake_sse_module = ModuleType("sse_starlette.sse")
 

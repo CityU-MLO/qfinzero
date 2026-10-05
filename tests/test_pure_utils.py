@@ -15,6 +15,22 @@ _ESP = os.path.join(os.path.dirname(__file__), "..", "infra", "esp")
 sys.path.insert(0, os.path.join(_ESP, "services"))
 sys.path.insert(0, _ESP)
 
+# PMB and ESP both run as standalone services and expose a top-level `models`
+# package. Pytest collects PMB tests first, so discard that service-local
+# package before importing ESP helpers in the same interpreter.
+_pmb_model_modules = {
+    name: module
+    for name, module in sys.modules.items()
+    if name == "models" or name.startswith("models.")
+}
+for _name in _pmb_model_modules:
+    sys.modules.pop(_name)
+import data_sources as _esp_data_sources  # noqa: F401,E402
+for _name in list(sys.modules):
+    if _name == "models" or _name.startswith("models."):
+        sys.modules.pop(_name)
+sys.modules.update(_pmb_model_modules)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # UPQClient.make_opra

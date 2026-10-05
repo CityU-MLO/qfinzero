@@ -146,12 +146,20 @@ Python client / MCP equivalents: `pmb.create_account(market=...)`, `pmb.get_stat
 | `/accounts/{id}/close` | POST | Permanently close the account |
 | `/sessions` | POST | Create replay session (prefetches data) |
 | `/sessions/{id}/step` | POST | Advance clock, return events |
+| `/sessions/{id}/state` | GET | Consolidated clock, account, orders and market state |
+| `/sessions/{id}/timeline` | GET | Full replay timeline |
+| `/sessions/{id}/rewind` | POST | Deterministically replay to an earlier timestamp |
+| `/sessions/{id}/checkpoint` | GET | Export account and continuation state |
+| `/sessions/restore` | POST | Restore a checkpoint into an independent account/session |
+| `/sessions/{id}/add_stocks` | POST | Add stocks to a running session |
+| `/sessions/{id}/add_contracts` | POST | Add option contracts to a running session |
+| `/sessions/{id}/option_chain` | GET | Current option chain for the replay clock |
 | `/sessions/{id}/summary` | GET | Session metrics (return, drawdown, fees) |
 | `/orders` | POST | Place order (idempotent via client_order_id) |
 | `/orders/{id}/cancel` | POST | Cancel order |
 | `/ui/` | GET | Broker Terminal UI (modern + Windows 98 themes) |
 
-See full API spec in the [original design doc](../../.claude/plans/cozy-nibbling-wombat.md).
+Run PMB and open `http://127.0.0.1:19380/docs` for the complete OpenAPI schema.
 
 ---
 
