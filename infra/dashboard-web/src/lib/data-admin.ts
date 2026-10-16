@@ -26,6 +26,7 @@ export type Config = {
   dirs: Record<string, string>;
   massive: Record<string, string>;
   tushare: Record<string, string>;
+  databento?: Record<string, string>;
   news: Record<string, string>;
   schedule: Record<string, { enabled: boolean; cron: string; command?: string }>;
 };
@@ -60,6 +61,7 @@ export type ScanResult = {
   s3?: { ok: boolean; error?: string; datasets?: { name: string; required: boolean; label: string }[]; missing_required?: string[] };
   rest?: { ok: boolean; error?: string; status?: string };
   tushare?: { ok: boolean; error?: string; rows?: number };
+  databento?: { ok: boolean; error?: string; count?: number; datasets?: { name: string; label: string; converted: boolean }[] };
 };
 
 export const dataAdmin = {
@@ -70,7 +72,7 @@ export const dataAdmin = {
   sources: () => j<{ sources: Source[] }>("data/status"),
   startUpdate: (body: { source?: string; market?: string | null; dry_run?: boolean; force?: boolean }) =>
     j<Job>("data/update", { method: "POST", body: JSON.stringify(body) }),
-  startAcquire: (body: { target: string; dry_run?: boolean; prod?: boolean }) =>
+  startAcquire: (body: { target: string; dry_run?: boolean; prod?: boolean; params?: DatabentoAcquireParams }) =>
     j<Job>("data/acquire", { method: "POST", body: JSON.stringify(body) }),
   acquireTargets: () => j<{ targets: { id: string; label: string; ready: boolean; writes_to: string; supports_prod: boolean }[] }>("data/acquire/targets"),
   jobs: () => j<{ jobs: Job[] }>("data/jobs"),
@@ -84,6 +86,15 @@ export const dataAdmin = {
   symbols: (store: string, limit = 200) => j<SymbolsResult>(`data/explore/symbols?store=${store}&limit=${limit}`),
 };
 
+export type DatabentoAcquireParams = {
+  dataset: string;
+  schema: string;
+  symbols: string | string[];
+  start: string;
+  end?: string;
+  stype_in?: string;
+  max_cost?: number;
+};
 export type SchedulePlanItem = { group: string; enabled: boolean; cron: string; command: string; next_run: string | null };
 export type ExploreOverview = {
   storage_root: string;

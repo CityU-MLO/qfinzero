@@ -138,5 +138,5 @@ def test_setup_state_shape(store, monkeypatch):
     from qfinzero.admin import setup
     st = setup.state()
     assert set(st) >= {"configured", "initialized", "show_wizard", "steps"}
-    assert {s["id"] for s in st["steps"]} == {"massive", "tushare", "raw", "storage"}
+    assert {s["id"] for s in st["steps"]} == {"massive", "tushare", "databento", "raw", "storage"}
     assert isinstance(st["show_wizard"], bool)

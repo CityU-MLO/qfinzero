@@ -94,7 +94,7 @@ branch with `POST /svc/pmb/v1/sessions/restore` using the returned JSON body.
 
 ## Data Pipeline
 
-UPQ is fed by a built-in, out-of-the-box pipeline (`qfz-data`) that manages two
+UPQ is fed by a built-in, out-of-the-box pipeline (`qfz-data`) that manages three
 raw market-data sources **in place** (never copied) and converts them into UPQ's
 storage format:
 
@@ -102,6 +102,7 @@ storage format:
 |--------|---------|------------------------|
 | massive | US stocks, options (OPRA), treasury yields, corporate actions | `/data/massive_data` |
 | tushare | CN A-shares (+ dividends) | `/data/tushare_data` |
+| databento | US stocks + options (OPRA), DBN or parquet | `/data/databento` |
 
 Both sources are normalized into one storage root with a single unified
 **corporate-actions** table. Splits use fractional ratios (e.g. CN 送转 "10转15"
@@ -115,11 +116,13 @@ pip install -e ".[pipeline]"          # adds duckdb + pyarrow + polars
 export QFZ_DATA_ROOT=/data/qfinzero    # STORAGE_ROOT defaults to $QFZ_DATA_ROOT/upq
 export RAW_MASSIVE_DIR=/data/massive_data
 export RAW_TUSHARE_DIR=/data/tushare_data
+export RAW_DATABENTO_DIR=/data/databento
 
 qfz-data status                       # what raw data exists + conversion state
 qfz-data convert --market us --all    # US stocks + options + rates + corp actions
 qfz-data convert --market cn --all    # CN A-shares + corp actions
 qfz-data convert --all                # everything (incremental + idempotent)
+qfz-data convert --vendor databento   # only Databento files (--jobs N to parallelize)
 qfz-data validate                     # row-count / schema checks on storage
 ```
 
@@ -127,6 +130,49 @@ The converter writes byte-compatible parquet (`stock_daily/`, `stock_minute/`,
 `option_day/`, `option_minute/` partitioned by `trade_date=`; plus `rates/` and
 `corporate_actions/`) that the UPQ service reads directly. Point the UPQ service
 at the same `STORAGE_ROOT`.
+
+### Databento
+
+Full reference: [docs/en/data-adapters.md](docs/en/data-adapters.md).
+`pip install -e ".[databento]"` adds the DBN reader and the historical API
+client. Point `RAW_DATABENTO_DIR` at any folder of Databento files: each
+`*.dbn`, `*.dbn.zst` or Databento-exported `*.parquet` is identified from its own
+header, so batch downloads, per-symbol folders and mixed layouts all work.
+
+| Databento schema | UPQ stores |
+|------------------|------------|
+| `ohlcv-1m`, `ohlcv-1s` | minute + daily |
+| `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily |
+| `trades`, `tbbo`, `tcbbo`, `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily, built from trade records |
+| `bbo-*`, `cbbo-*`, definition, statistics | indexed, not converted (UPQ has no quote store) |
+
+`OPRA.*` datasets become `option_minute` / `option_day` with OSI symbols rewritten
+to the UPQ form (`SPY   250117C00500000` → `O:SPY250117C00500000`). US equity
+datasets (`XNAS.ITCH`, `EQUS.*`, `DBEQ.*`, …) become `stock_minute` /
+`stock_daily`; futures datasets are skipped. Minute bars use `ts_event`; trade
+dates and daily bars follow US/Eastern, with daily open/high/low/close taken
+from the 09:30–16:00 session and volume from the whole day. Only `T` records
+count as trades in MBO (`F` fills are the passive side of the same print).
+
+Databento writes `part-databento-0000.parquet` next to the massive part in each
+`trade_date=` partition and only **fills** tickers massive did not write for
+that date, so the two vendors never double count. A single-venue feed such as
+`XNAS.ITCH` reports that venue's volume only; a consolidated feed (`EQUS.*`,
+`OPRA.*`) wins when several sources cover the same ticker. Extracted bars are
+cached per raw file under `$STORAGE_ROOT/_staging/databento`, so re-runs only
+read new or changed files.
+
+```bash
+qfz-data config --set databento.api_key=db-…
+qfz-data scan databento                      # datasets the key can query
+# dry-run by default: quotes the cost and lists the files it would write
+qfz-data acquire databento --dataset OPRA.PILLAR --schema tcbbo \
+    --symbols SPY.OPT --stype-in parent --start 2026-09-01 --end 2026-09-05
+# paid data needs an explicit ceiling in USD
+qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
+    --symbols SPY,QQQ --start 2026-01-02 --end 2026-01-31 --max-cost 5 --run
+qfz-data convert --vendor databento --jobs 8
+```
 
 ### Data-admin — the operator control plane (CLI + Web)
 
@@ -138,6 +184,7 @@ Protocol" surface:
 qfz-data config --set tushare.token=…      # masked, stored at $QFZ_DATA_ROOT/_state/qfz.config.json
 qfz-data scan massive                       # list flat-files datasets your S3 key can read
 qfz-data scan tushare                       # validate the CN token
+qfz-data scan databento                     # validate the Databento key
 qfz-data acquire us_prices                  # trigger the MASSIVE download script (dry-run by default; --run)
 qfz-data schedule apply                     # install the cron cadence from the config
 qfz-data explore --symbols stock_daily      # per-symbol coverage in a store
@@ -159,7 +206,7 @@ All QFinZero-owned data lives under a single root, `QFZ_DATA_ROOT` (default
 /data/qfinzero/
 ├── upq/    UPQ price storage (STORAGE_ROOT) — built by `qfz-data convert`
 ├── esp/    ESP event databases (benzinga_earnings.sqlite3, nasdaq_econ_events.sqlite3)
-└── raw/    symlinks to shared raw vendor data (massive, tushare) — read in place
+└── raw/    symlinks to shared raw vendor data (massive, tushare, databento) — read in place
 ```
 
 ## Installation
@@ -308,7 +355,7 @@ qfinzero/
 /data/qfinzero/
 ├── upq/                        # UPQ price storage (parquet)
 ├── esp/                        # ESP databases (benzinga_earnings, nasdaq_econ_events)
-└── raw/                        # symlinks to shared raw vendor data (massive, tushare)
+└── raw/                        # symlinks to shared raw vendor data (massive, tushare, databento)
 ```
 
 ## Configuration
@@ -351,12 +398,14 @@ Data paths (all default under `QFZ_DATA_ROOT`, default `/data/qfinzero`):
 | ESP econ-events DB | `$QFZ_DATA_ROOT/esp/nasdaq_econ_events.sqlite3` | `ECON_EVENTS_DB` |
 | Raw massive (shared) | `/data/massive_data` | `RAW_MASSIVE_DIR` |
 | Raw tushare (shared) | `/data/tushare_data` | `RAW_TUSHARE_DIR` |
+| Raw Databento (shared) | `/data/databento` | `RAW_DATABENTO_DIR` |
 
 ## Documentation
 
 - [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
 - [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
 - [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
+- [Data adapters](docs/en/data-adapters.md) — the UPQ storage contract, how to add a vendor, Databento reference
 
 ## License
 

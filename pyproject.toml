@@ -23,6 +23,9 @@ dev = ["build>=1.2", "pytest>=8", "pytest-asyncio>=0.24", "responses>=0.25"]
 # Data pipeline (raw-source management + UPQ conversion). DuckDB mirrors the
 # UPQ Rust ingester so emitted parquet is byte-compatible.
 pipeline = ["duckdb>=1.0", "pyarrow>=15", "polars>=1.0"]
+# Databento DBN reader + historical API client (``--vendor databento``,
+# ``qfz-data acquire databento``). Parquet exports convert without it.
+databento = ["databento>=0.60", "duckdb>=1.0", "pyarrow>=15"]
 # Unified hub server (:19777 fronting Web UI + REST + MCP).
 server = [
     "aiosqlite>=0.19",
@@ -49,8 +52,11 @@ Issues = "https://github.com/CityU-MLO/qfinzero/issues"
 [tool.setuptools]
 packages = [
     "qfinzero",
+    "qfinzero.admin",
     "qfinzero.pipeline",
     "qfinzero.pipeline.sources",
+    "qfinzero.update",
+    "qfinzero.update.loaders",
     "qfinzero.server",
     "qfinzero.clients",
     "qfinzero.clients.pmb",

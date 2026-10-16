@@ -36,7 +36,8 @@ def _orchestrator():
     from qfinzero.pipeline.paths import resolve
     from qfinzero.update import Orchestrator
     d = config_store.dirs()
-    paths = resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"))
+    paths = resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"),
+                    d.get("raw_databento"))
     return Orchestrator(paths=paths)
 
 
@@ -66,8 +67,8 @@ def put_config(patch: dict = Body(...)) -> dict:
 @app.post("/data/scan")
 def post_scan(body: dict = Body(...)) -> dict:
     provider = str((body or {}).get("provider", "")).lower()
-    if provider not in ("massive", "tushare"):
-        raise HTTPException(422, "provider must be 'massive' or 'tushare'")
+    if provider not in scan.PROVIDERS:
+        raise HTTPException(422, f"provider must be one of {list(scan.PROVIDERS)}")
     return scan.scan(provider)
 
 
@@ -117,8 +118,11 @@ def start_acquire(body: dict = Body(default={})) -> dict:
         raise HTTPException(422, f"target must be one of {sorted(acquire.TARGETS)}")
     label = f"acquire {target}" + (" (dry-run)" if dry_run else "")
 
+    params = (body or {}).get("params")
+
     def _task(job):
-        return acquire.acquire(target, dry_run=dry_run, prod=prod, on_line=job.log)
+        return acquire.acquire(target, dry_run=dry_run, prod=prod, on_line=job.log,
+                               params=params if isinstance(params, dict) else None)
 
     return registry.submit("acquire", label, _task).snapshot()
 

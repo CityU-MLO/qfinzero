@@ -197,3 +197,12 @@ pip install -e ".[pipeline]" -r mcp/requirements.txt -r requirements.txt
 qfz-data convert --all            # -> /data/qfinzero/upq
 (cd infra/upq && STORAGE_ROOT=/data/qfinzero/upq PORT=19350 ./target/release/upq-service)
 ```
+
+## Update 2026-10: Databento as a third source
+
+A third adapter, `qfinzero/pipeline/sources/databento.py`, reads Databento DBN
+and parquet files in place from `RAW_DATABENTO_DIR` and writes
+`part-databento-0000.parquet` into the same four bar stores. The UPQ engine is
+unchanged. Databento fills only the tickers massive did not write for a date.
+The storage contract, the steps for adding a vendor and the full Databento
+mapping are documented in [docs/en/data-adapters.md](../en/data-adapters.md).

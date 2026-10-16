@@ -81,12 +81,13 @@ QFinZero 作为**单一公开端口上的单一服务器**（`19777`）运行。
 
 ## 数据管道
 
-UPQ 由一个内置、开箱即用的管道（`qfz-data`）提供数据，该管道**原地**管理两个原始市场数据源（从不复制），并将它们转换为 UPQ 的存储格式：
+UPQ 由一个内置、开箱即用的管道（`qfz-data`）提供数据，该管道**原地**管理三个原始市场数据源（从不复制），并将它们转换为 UPQ 的存储格式：
 
 | 供应商 | 市场 | 原始位置（默认） |
 |--------|---------|------------------------|
 | massive | 美股、期权（OPRA）、国债收益率、公司行动 | `/data/massive_data` |
 | tushare | 中国 A 股（+ 分红） | `/data/tushare_data` |
+| databento | 美股 + 美股期权（OPRA），DBN 或 parquet | `/data/databento` |
 
 两个数据源都被归一化到一个存储根目录下，并统一为单一的**公司行动 (corporate-actions)** 表。拆分使用分数比率（例如中国 送转 "10转15" → 1.5；支持反向拆分），每笔分红都携带预计算好的价格比率，因此 UPQ 在读取时应用拆分 / 分红复权而无需重新推导。
 
@@ -97,15 +98,44 @@ pip install -e ".[pipeline]"          # adds duckdb + pyarrow + polars
 export QFZ_DATA_ROOT=/data/qfinzero    # STORAGE_ROOT defaults to $QFZ_DATA_ROOT/upq
 export RAW_MASSIVE_DIR=/data/massive_data
 export RAW_TUSHARE_DIR=/data/tushare_data
+export RAW_DATABENTO_DIR=/data/databento
 
 qfz-data status                       # what raw data exists + conversion state
 qfz-data convert --market us --all    # US stocks + options + rates + corp actions
 qfz-data convert --market cn --all    # CN A-shares + corp actions
 qfz-data convert --all                # everything (incremental + idempotent)
+qfz-data convert --vendor databento   # only Databento files (--jobs N to parallelize)
 qfz-data validate                     # row-count / schema checks on storage
 ```
 
 转换器写出字节兼容的 parquet（`stock_daily/`、`stock_minute/`、`option_day/`、`option_minute/`，按 `trade_date=` 分区；以及 `rates/` 与 `corporate_actions/`），UPQ 服务可直接读取。将 UPQ 服务指向同一个 `STORAGE_ROOT`。
+
+### Databento
+
+完整说明见 [数据适配器](data-adapters.md)。`pip install -e ".[databento]"` 安装 DBN 读取器和历史 API 客户端。把 `RAW_DATABENTO_DIR` 指向任意存放 Databento 文件的目录即可：每个 `*.dbn`、`*.dbn.zst` 或 Databento 导出的 `*.parquet` 都按文件自身的头信息识别，所以批量下载、按代码分目录、混合布局都能用。
+
+| Databento schema | 写入的 UPQ 存储 |
+|------------------|------------|
+| `ohlcv-1m`、`ohlcv-1s` | 分钟线 + 日线 |
+| `ohlcv-1h`、`ohlcv-1d`、`ohlcv-eod` | 日线 |
+| `trades`、`tbbo`、`tcbbo`、`mbp-1`、`mbp-10`、`cmbp-1`、`mbo` | 由逐笔成交聚合出分钟线 + 日线 |
+| `bbo-*`、`cbbo-*`、definition、statistics | 只索引不转换（UPQ 没有报价存储） |
+
+`OPRA.*` 数据集写入 `option_minute` / `option_day`，OSI 合约代码改写为 UPQ 格式（`SPY   250117C00500000` → `O:SPY250117C00500000`）。美股数据集（`XNAS.ITCH`、`EQUS.*`、`DBEQ.*` 等）写入 `stock_minute` / `stock_daily`；期货数据集跳过。分钟线按 `ts_event` 切分；交易日和日线按美东时间，日线开高低收取 09:30–16:00 常规时段，成交量取全天。MBO 里只有 `T` 记录计为成交（`F` 是同一笔成交的被动方回报）。
+
+Databento 在每个 `trade_date=` 分区里写 `part-databento-0000.parquet`，与 massive 的分片并存，并且只**补齐** massive 当天没有的代码，两家数据不会重复计量。单一交易所的数据（如 `XNAS.ITCH`）只包含该交易所的成交量；同一代码有多个来源时，优先全市场合并数据（`EQUS.*`、`OPRA.*`）。每个原始文件抽取出的K线缓存在 `$STORAGE_ROOT/_staging/databento`，重跑只读取新增或改动过的文件。
+
+```bash
+qfz-data config --set databento.api_key=db-…
+qfz-data scan databento                      # 列出该 key 可查询的数据集
+# 默认 dry-run：只报价并列出将写入的文件
+qfz-data acquire databento --dataset OPRA.PILLAR --schema tcbbo \
+    --symbols SPY.OPT --stype-in parent --start 2026-09-01 --end 2026-09-05
+# 付费数据必须显式给出费用上限（美元）
+qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
+    --symbols SPY,QQQ --start 2026-01-02 --end 2026-01-31 --max-cost 5 --run
+qfz-data convert --vendor databento --jobs 8
+```
 
 ### Data-admin —— 运维控制平面（CLI + Web）
 
@@ -115,6 +145,7 @@ qfz-data validate                     # row-count / schema checks on storage
 qfz-data config --set tushare.token=…      # masked, stored at $QFZ_DATA_ROOT/_state/qfz.config.json
 qfz-data scan massive                       # list flat-files datasets your S3 key can read
 qfz-data scan tushare                       # validate the CN token
+qfz-data scan databento                     # validate the Databento key
 qfz-data acquire us_prices                  # trigger the MASSIVE download script (dry-run by default; --run)
 qfz-data schedule apply                     # install the cron cadence from the config
 qfz-data explore --symbols stock_daily      # per-symbol coverage in a store
@@ -131,7 +162,7 @@ qfz-data setup-state                         # first-run wizard vs. status
 /data/qfinzero/
 ├── upq/    UPQ price storage (STORAGE_ROOT) — built by `qfz-data convert`
 ├── esp/    ESP event databases (benzinga_earnings.sqlite3, nasdaq_econ_events.sqlite3)
-└── raw/    symlinks to shared raw vendor data (massive, tushare) — read in place
+└── raw/    symlinks to shared raw vendor data (massive, tushare, databento) — read in place
 ```
 
 ## 安装
@@ -280,7 +311,7 @@ qfinzero/
 /data/qfinzero/
 ├── upq/                        # UPQ price storage (parquet)
 ├── esp/                        # ESP databases (benzinga_earnings, nasdaq_econ_events)
-└── raw/                        # symlinks to shared raw vendor data (massive, tushare)
+└── raw/                        # symlinks to shared raw vendor data (massive, tushare, databento)
 ```
 
 ## 配置
@@ -323,12 +354,14 @@ cp .env.example .env
 | ESP 经济事件数据库 | `$QFZ_DATA_ROOT/esp/nasdaq_econ_events.sqlite3` | `ECON_EVENTS_DB` |
 | 原始 massive（共享） | `/data/massive_data` | `RAW_MASSIVE_DIR` |
 | 原始 tushare（共享） | `/data/tushare_data` | `RAW_TUSHARE_DIR` |
+| 原始 Databento（共享） | `/data/databento` | `RAW_DATABENTO_DIR` |
 
 ## 文档
 
 - [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
 - [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
 - [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
+- [数据适配器](data-adapters.md) —— UPQ 存储契约、如何新增供应商、Databento 参考
 
 ## 许可证
 

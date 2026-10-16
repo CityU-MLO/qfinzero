@@ -10,7 +10,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from qfinzero.config import RAW_MASSIVE_DIR, RAW_TUSHARE_DIR, UPQ_STORAGE_ROOT
+from qfinzero.config import (
+    RAW_DATABENTO_DIR,
+    RAW_MASSIVE_DIR,
+    RAW_TUSHARE_DIR,
+    UPQ_STORAGE_ROOT,
+)
 
 
 # ── UPQ storage sub-stores (must match what the UPQ Rust service reads) ──
@@ -28,6 +33,7 @@ class PipelinePaths:
     massive: Path
     tushare: Path
     storage: Path
+    databento: Path = Path(RAW_DATABENTO_DIR)
 
     # ── raw massive layout ──────────────────────────────────────
     @property
@@ -75,6 +81,16 @@ class PipelinePaths:
     def tushare_stock_basic(self) -> Path:
         return self.tushare / "meta" / "stock_basic.parquet"
 
+    # ── state written beside the UPQ storage ────────────────────
+    @property
+    def state_dir(self) -> Path:
+        return self.storage / "_state"
+
+    @property
+    def databento_staging(self) -> Path:
+        """Per-source-file bar cache for the Databento converter."""
+        return self.storage / "_staging" / "databento"
+
     # ── UPQ storage output sub-stores ───────────────────────────
     def store(self, name: str) -> Path:
         return self.storage / name
@@ -88,10 +104,18 @@ def resolve(
     massive: str | os.PathLike | None = None,
     tushare: str | os.PathLike | None = None,
     storage: str | os.PathLike | None = None,
+    databento: str | os.PathLike | None = None,
 ) -> PipelinePaths:
-    """Resolve all pipeline locations, with optional explicit overrides."""
+    """Resolve all pipeline locations, with optional explicit overrides.
+
+    The Databento root falls back to ``RAW_DATABENTO_DIR`` read at call time, so
+    a value applied by the config store after import is honoured.
+    """
     return PipelinePaths(
         massive=Path(massive or RAW_MASSIVE_DIR).expanduser(),
         tushare=Path(tushare or RAW_TUSHARE_DIR).expanduser(),
         storage=Path(storage or UPQ_STORAGE_ROOT).expanduser(),
+        databento=Path(
+            databento or os.environ.get("RAW_DATABENTO_DIR") or RAW_DATABENTO_DIR
+        ).expanduser(),
     )

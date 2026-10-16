@@ -9,6 +9,8 @@ each vendor, from stored :mod:`~qfinzero.admin.config_store` credentials:
   present, else the ``aws`` CLI (which the download scripts already require).
 * :func:`scan_massive_rest` — validate the REST key against the reference API.
 * :func:`scan_tushare` — validate the Tushare token with a tiny ``trade_cal`` call.
+* :func:`scan_databento` — validate the Databento API key by listing the
+  datasets it can query.
 
 Every scan is best-effort and never raises: a failure is reported as
 ``{"ok": False, "error": "..."}`` so the wizard can render a red state instead of
@@ -161,9 +163,53 @@ def scan_tushare(token: str | None = None) -> dict[str, Any]:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# ── Databento ───────────────────────────────────────────────────────────────
+# Datasets the converter turns into UPQ bars (others are informational).
+DATABENTO_CONVERTED = {
+    "OPRA.PILLAR": "US options (OPRA)",
+    "EQUS.MINI": "US equities (consolidated)",
+    "EQUS.SUMMARY": "US equities (consolidated daily)",
+    "XNAS.ITCH": "Nasdaq TotalView",
+}
+
+
+def scan_databento(
+    api_key: str | None = None,
+    lister: Callable[[str], list[str]] | None = None,
+) -> dict[str, Any]:
+    """Validate the Databento key via ``metadata.list_datasets`` (no data cost).
+
+    ``lister`` is injectable for tests. Returns ``{ok, datasets:[{name, label,
+    converted}], count, error?}``.
+    """
+    key = api_key if api_key is not None else config_store.databento_key()
+    if not key:
+        return {"ok": False, "error": "Databento API key not configured", "datasets": []}
+    try:
+        if lister is not None:
+            names = lister(key)
+        else:
+            try:
+                import databento as db
+            except ModuleNotFoundError:
+                return {"ok": False, "datasets": [],
+                        "error": "databento package not installed (pip install 'qfinzero[databento]')"}
+            names = db.Historical(key).metadata.list_datasets()
+    except Exception as e:  # noqa: BLE001 - auth/network errors -> red state
+        msg = str(e).strip().splitlines()[0] if str(e).strip() else type(e).__name__
+        return {"ok": False, "error": f"{type(e).__name__}: {msg}", "datasets": []}
+    from qfinzero.pipeline.sources.databento import asset_for_dataset
+    datasets = [{"name": n, "label": DATABENTO_CONVERTED.get(n, ""),
+                 "converted": asset_for_dataset(n) is not None} for n in sorted(names or [])]
+    return {"ok": True, "datasets": datasets, "count": len(datasets)}
+
+
 # ── dispatcher ──────────────────────────────────────────────────────────────
+PROVIDERS = ("massive", "tushare", "databento")
+
+
 def scan(provider: str) -> dict[str, Any]:
-    """Scan one provider. ``provider`` ∈ ``massive`` | ``tushare``."""
+    """Scan one provider. ``provider`` ∈ :data:`PROVIDERS`."""
     p = (provider or "").lower()
     if p == "massive":
         s3 = scan_massive_s3()
@@ -172,4 +218,7 @@ def scan(provider: str) -> dict[str, Any]:
     if p == "tushare":
         ts = scan_tushare()
         return {"provider": "tushare", "ok": bool(ts.get("ok")), "tushare": ts}
+    if p == "databento":
+        dbs = scan_databento()
+        return {"provider": "databento", "ok": bool(dbs.get("ok")), "databento": dbs}
     return {"provider": provider, "ok": False, "error": f"unknown provider {provider!r}"}

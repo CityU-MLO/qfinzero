@@ -4,7 +4,8 @@
 the shared RAW roots, not just the convert step. Acquisition itself still lives in
 the battle-tested shell scripts (``scripts/upq_flatfiles.sh`` for MASSIVE flat-files,
 ``scripts/news_data.sh`` for news/econ/earnings); this module is the thin, safe,
-streamable bridge the job runner and CLI call.
+streamable bridge the job runner and CLI call. The ``databento`` target is pure
+Python (:mod:`~qfinzero.admin.databento_dl`) and is cost-gated.
 
 Design choices that keep this honest:
 
@@ -43,6 +44,7 @@ class AcquireTarget:
     needs: tuple[str, ...] = ()   # config paths that must be set ("massive.s3_access_key_id")
     supports_prod: bool = True
     supports_dry_run: bool = True
+    python: bool = False   # True = handled in-process (no script)
 
 
 TARGETS: dict[str, AcquireTarget] = {
@@ -57,6 +59,12 @@ TARGETS: dict[str, AcquireTarget] = {
         script="news_data.sh", base_args=["update"],
         writes_to="MongoDB ticker_news + ESP SQLite (runs on the news host)",
         supports_prod=False,
+    ),
+    "databento": AcquireTarget(
+        id="databento", label="Databento historical API (US stocks / OPRA options)",
+        script="", base_args=[],
+        writes_to="$RAW_DATABENTO_DIR/<dataset>/<schema>/<symbol>/ (DBN, read in place)",
+        needs=("databento.api_key",), supports_prod=False, python=True,
     ),
 }
 
@@ -141,8 +149,13 @@ def acquire(
     extra_args: list[str] | None = None,
     on_line: OnLine | None = None,
     timeout: float | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Trigger one acquisition target's download script (dry-run by default)."""
+    """Trigger one acquisition target's download (dry-run by default).
+
+    ``params`` carries the request for in-process targets (``databento``:
+    dataset, schema, symbols, stype_in, start, end, max_cost, out_dir).
+    """
     t = TARGETS.get(target_id)
     if t is None:
         return {"ok": False, "error": f"unknown acquire target {target_id!r}",
@@ -152,6 +165,9 @@ def acquire(
     missing = [n for n in t.needs if not _dig(cfg, n)]
     if missing:
         return {"ok": False, "error": f"missing config: {', '.join(missing)}", "target": t.id}
+
+    if t.python:
+        return _acquire_databento(cfg, params or {}, dry_run=dry_run, on_line=on_line)
 
     script = REPO_ROOT / "scripts" / t.script
     if not script.exists():
@@ -172,4 +188,17 @@ def acquire(
     res["target"] = t.id
     res["dry_run"] = dry_run
     res["prod"] = prod
+    return res
+
+
+def _acquire_databento(cfg: dict, params: dict[str, Any], *, dry_run: bool,
+                       on_line: OnLine | None) -> dict[str, Any]:
+    from . import databento_dl
+    root = Path(params.get("out_dir") or (cfg.get("dirs", {}) or {}).get("raw_databento")
+                or "/data/databento").expanduser()
+    res = databento_dl.download(
+        params, api_key=_dig(cfg, "databento.api_key") or "", root=root,
+        dry_run=dry_run, on_line=on_line)
+    res["target"] = "databento"
+    res["dry_run"] = dry_run
     return res

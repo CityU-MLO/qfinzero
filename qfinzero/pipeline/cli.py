@@ -5,6 +5,7 @@
     qfz-data convert --market us --all       # us stocks+options+rates+corp-actions
     qfz-data convert --market cn --all       # cn A-shares + corp-actions
     qfz-data convert --all                   # everything
+    qfz-data convert --vendor databento      # only Databento DBN/parquet files
     qfz-data validate                        # schema / freshness checks
 """
 
@@ -20,7 +21,7 @@ from . import registry
 
 
 def _print_status(args) -> int:
-    data = registry.scan(resolve(args.massive, args.tushare, args.storage))
+    data = registry.scan(resolve(args.massive, args.tushare, args.storage, args.databento))
     if args.json:
         print(json.dumps(data, indent=2, default=str))
         return 0
@@ -40,6 +41,19 @@ def _print_status(args) -> int:
     rng = f"{cn.get('start','?')} .. {cn.get('end','?')}" if cn.get("present") else "—"
     print(f"    cn_daily       {rng} ({cn.get('symbols',0)} symbols)")
     print(f"    cn dividends   {t['cn_dividend_files']} files")
+    db = raw.get("databento") or {}
+    print(f"  databento {db.get('root', '—')}")
+    if db.get("present"):
+        print(f"    {db['files']} files, {db['convertible_files']} convertible"
+              + (f"  ({db['start']} .. {db['end']})" if db.get("start") else ""))
+        for g in db.get("groups", []):
+            rng = f"{g['start'] or '?'} .. {g['end'] or '?'}"
+            flag = "convert" if g["convertible"] else f"skip ({g['role']})"
+            print(f"    {g['dataset']:12} {g['schema']:9} {g['files']:5d} files  {rng:24} {flag}")
+        if db.get("first_error"):
+            print(f"    note: {db['first_error']}")
+    else:
+        print("    —" + (f" ({db['error']})" if db.get("error") else ""))
 
     print(f"\nUPQ STORAGE  {store['root']}")
     for k in ("stock_daily", "stock_minute", "option_day", "option_minute"):
@@ -49,12 +63,15 @@ def _print_status(args) -> int:
     for single in ("rates/rates.parquet", "corporate_actions/corporate_actions.parquet",
                    "dividends/dividends.parquet"):
         print(f"    {single:42} {'✓' if store[single] else '—'}")
+    dbs = store.get("databento") or {}
+    if dbs.get("processed"):
+        print(f"    databento parts {dbs['parts']:5d}  dates processed {dbs['start']} .. {dbs['end']}")
     print()
     return 0
 
 
 def _do_convert(args) -> int:
-    paths = resolve(args.massive, args.tushare, args.storage)
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
     print(f"[{now_iso()}] converting -> {paths.storage}")
     with Converter(paths, threads=args.threads) as cv:
         results = []
@@ -62,10 +79,12 @@ def _do_convert(args) -> int:
         do_all = args.all
         want = set(([args.asset] if args.asset else []))
 
+        vendors = set(args.vendor or ("massive", "tushare", "databento"))
+
         def want_asset(a):
             return do_all or a in want
 
-        if market in (None, "us"):
+        if market in (None, "us") and "massive" in vendors:
             if want_asset("stock"):
                 if args.resolution in (None, "daily"):
                     results.append(cv.convert_us_stock_daily(args.start, args.end, args.force))
@@ -78,7 +97,15 @@ def _do_convert(args) -> int:
                     results.append(cv.convert_us_option_minute(args.start, args.end, args.force))
             if want_asset("rates"):
                 results.append(cv.convert_rates(args.force))
-        if market in (None, "cn"):
+        if market in (None, "us") and "databento" in vendors:
+            # Databento fills tickers massive did not write, so it runs after it.
+            # ``--vendor databento`` alone means "all Databento assets".
+            assets = tuple(a for a in ("stock", "option")
+                           if want_asset(a) or (args.asset is None and args.vendor))
+            if assets:
+                results.append(cv.convert_databento(
+                    args.start, args.end, args.force, jobs=args.jobs, assets=assets))
+        if market in (None, "cn") and "tushare" in vendors:
             if want_asset("stock"):
                 results.append(cv.convert_cn_stock_daily(args.start, args.end, args.force))
 
@@ -98,7 +125,7 @@ def _do_convert(args) -> int:
 
 def _do_validate(args) -> int:
     from .engine import _lit, connect
-    paths = resolve(args.massive, args.tushare, args.storage)
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
     con = connect()
     ok = True
     print("\nVALIDATION")
@@ -111,6 +138,10 @@ def _do_validate(args) -> int:
             print(f"  {store:14} rows={n:>12,}  dates={ndates}")
         except Exception as e:  # noqa: BLE001
             print(f"  {store:14} (empty / not built)")
+    nparts = sum(1 for s in ("stock_daily", "stock_minute", "option_day", "option_minute")
+                 for _ in paths.store(s).glob("trade_date=*/part-databento-0000.parquet"))
+    if nparts:
+        print(f"  databento parts {nparts}")
     ca = paths.store("corporate_actions") / "corporate_actions.parquet"
     if ca.exists():
         n, nsym = con.execute(
@@ -129,7 +160,7 @@ _STATE_GLYPH = {
 
 def _do_update(args) -> int:
     from ..update import Orchestrator
-    paths = resolve(args.massive, args.tushare, args.storage)
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
     orch = Orchestrator(paths=paths)
 
     if args.status:
@@ -219,11 +250,23 @@ def _do_acquire(args) -> int:
     if args.list:
         return _emit({"targets": acquire.targets()}, args)
     on_line = None if args.json else (lambda ln: print(ln))
-    res = acquire.acquire(args.target, dry_run=not args.run, prod=args.prod, on_line=on_line)
+    params = None
+    if args.target == "databento":
+        params = {
+            "dataset": args.dataset, "schema": args.schema,
+            "symbols": args.symbols, "stype_in": args.stype_in,
+            "start": args.start, "end": args.end, "max_cost": args.max_cost,
+            "out_dir": args.databento,
+        }
+    res = acquire.acquire(args.target, dry_run=not args.run, prod=args.prod,
+                          on_line=on_line, params=params)
     if args.json:
         return _emit(res, args)
+    if res.get("error"):
+        print(f"[error] {res['error']}")
+    rc = f"rc={res.get('returncode')}, " if res.get("returncode") is not None else ""
     print(f"\n[{res.get('target')}] {'ok' if res.get('ok') else 'FAILED'} "
-          f"(rc={res.get('returncode')}, dry_run={res.get('dry_run')})")
+          f"({rc}dry_run={res.get('dry_run')})")
     return 0 if res.get("ok") else 1
 
 
@@ -255,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--massive", help="override RAW_MASSIVE_DIR")
     ap.add_argument("--tushare", help="override RAW_TUSHARE_DIR")
     ap.add_argument("--storage", help="override STORAGE_ROOT")
+    ap.add_argument("--databento", help="override RAW_DATABENTO_DIR")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("status", help="show raw data + conversion state")
@@ -271,6 +315,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--corp-actions", action="store_true", help="also build corporate actions")
     c.add_argument("--force", action="store_true", help="reconvert even if unchanged")
     c.add_argument("--threads", type=int, default=None)
+    c.add_argument("--vendor", action="append", choices=["massive", "tushare", "databento"],
+                   help="limit to one raw vendor (repeatable; default: all present)")
+    c.add_argument("--jobs", type=int, default=None,
+                   help="worker processes for Databento file extraction (default 1)")
     c.set_defaults(func=_do_convert)
 
     v = sub.add_parser("validate", help="schema / row-count checks on storage")
@@ -296,17 +344,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── admin: scan ──
     sc = sub.add_parser("scan", help="check vendor reachability / permissions")
-    sc.add_argument("provider", choices=["massive", "tushare"])
+    sc.add_argument("provider", choices=["massive", "tushare", "databento"])
     sc.add_argument("--json", action="store_true", default=True, help=argparse.SUPPRESS)
     sc.set_defaults(func=_do_scan)
 
     # ── admin: acquire (trigger download scripts) ──
     ac = sub.add_parser("acquire", help="trigger a raw-download script (dry-run by default)")
-    ac.add_argument("target", nargs="?", help="us_prices | news")
+    ac.add_argument("target", nargs="?", help="us_prices | news | databento")
     ac.add_argument("--list", action="store_true", help="list acquire targets + readiness")
     ac.add_argument("--run", action="store_true", help="actually run (default is --dry-run)")
     ac.add_argument("--prod", action="store_true", help="use the script's production paths")
     ac.add_argument("--json", action="store_true", help="emit JSON instead of streaming logs")
+    dbg = ac.add_argument_group("databento target")
+    dbg.add_argument("--dataset", help="e.g. XNAS.ITCH, EQUS.MINI, OPRA.PILLAR")
+    dbg.add_argument("--schema", help="e.g. ohlcv-1m, trades, tcbbo, mbo")
+    dbg.add_argument("--symbols", help="comma-separated, e.g. SPY,QQQ or SPY.OPT with --stype-in parent")
+    dbg.add_argument("--stype-in", default="raw_symbol", help="raw_symbol (default) | parent | ...")
+    dbg.add_argument("--start", help="YYYY-MM-DD inclusive")
+    dbg.add_argument("--end", help="YYYY-MM-DD inclusive")
+    dbg.add_argument("--max-cost", type=float, default=None,
+                     help="refuse to download when the quoted cost (USD) exceeds this")
     ac.set_defaults(func=_do_acquire)
 
     # ── admin: schedule ──

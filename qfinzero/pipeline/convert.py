@@ -4,20 +4,24 @@ Writes exactly the layout the UPQ service reads (one file per ``trade_date=X/``
 partition, ``trade_date`` carried in-file), so the output is byte-compatible with
 the Rust ``upq-ingest``.
 
-Order for a full build:  stocks -> options -> rates -> corporate_actions
-(corporate_actions derives dividend price ratios from the converted stock_daily).
+Order for a full build:  stocks -> options -> databento -> rates -> corporate_actions
+(corporate_actions derives dividend price ratios from the converted stock_daily;
+Databento fills only tickers the other vendors did not write for a date).
 """
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 from . import corporate_actions as ca
 from .engine import connect, copy_to_parquet
 from .manifest import Manifest
 from .paths import PipelinePaths, resolve
-from .sources import massive, tushare
+from .sources import databento, massive, tushare
 
 
 @dataclass
@@ -53,6 +57,7 @@ class Converter:
 
     def _convert_dated(self, store, root, sql_fn, start, end, force) -> ConvertResult:
         res = ConvertResult(store)
+        refiltered = 0
         for f in massive.list_dated_files(root, start, end):
             if not force and self.manifest.is_current(store, f.trade_date, f.path):
                 res.skipped += 1
@@ -60,8 +65,13 @@ class Converter:
             out = self.p.partition(store, f.trade_date) / "part-0000.parquet"
             rows = copy_to_parquet(self.con, sql_fn(f.path, f.trade_date), out)
             self.manifest.record(store, f.trade_date, f.path, rows)
+            # keep Databento fill-only: drop tickers this vendor now covers
+            if databento.refilter_part(self.con, out.parent) is not None:
+                refiltered += 1
             res.partitions += 1
             res.rows += rows
+        if refiltered:
+            res.notes.append(f"{refiltered} databento part(s) re-filtered")
         return res
 
     def convert_us_stock_daily(self, start=None, end=None, force=False) -> ConvertResult:
@@ -108,6 +118,188 @@ class Converter:
             res.rows += rows
         self.con.execute("DROP TABLE IF EXISTS _cn_daily")
         return res
+
+    # ── Databento (DBN / parquet, any layout) ───────────────────────────
+
+    def convert_databento(self, start=None, end=None, force=False, jobs=None,
+                          assets=("stock", "option")) -> ConvertResult:
+        """Databento files -> ``part-databento-0000.parquet`` in the four bar stores.
+
+        Stage 1 extracts each new/changed raw file into cached staging bars
+        (``jobs`` worker processes). Stage 2 rebuilds every (store, date) whose
+        inputs changed, with fill precedence against other vendors' parts.
+        """
+        res = ConvertResult("databento")
+        root = self.p.databento
+        if not root.is_dir():
+            res.notes.append(f"{root} missing")
+            return res
+        files = databento.index(root, self.p.state_dir, self.con)
+        usable = [f for f in files if f.convertible and f.overlaps(start, end)]
+        skipped_roles: dict[str, int] = {}
+        for f in files:
+            if f.convertible:
+                continue
+            if f.error:
+                why = "unreadable"
+            elif f.role in ("trades", "ohlcv"):
+                why = "unsupported dataset"
+            else:
+                why = f.role   # quotes / other
+            skipped_roles[why] = skipped_roles.get(why, 0) + 1
+        if skipped_roles:
+            res.notes.append("not converted: " + ", ".join(
+                f"{k}={v}" for k, v in sorted(skipped_roles.items())))
+        if not usable:
+            res.notes.append("no convertible Databento files in range")
+            return res
+
+        # ── stage 1: extract (cached per raw file) ──
+        stage = self.p.databento_staging
+        stage.mkdir(parents=True, exist_ok=True)
+        todo, staged = [], []
+        for f in usable:
+            key = f"databento-src:{f.path}"
+            out = stage / f"{databento.file_key(Path(f.path))}.parquet"
+            e = self.manifest.get(key)
+            current = (e and e.get("src_size") == f.size and e.get("src_mtime") == f.mtime
+                       and e.get("v") == databento.EXTRACT_VERSION
+                       and (e.get("rows", 0) == 0 or out.exists()))
+            if force or not current:
+                todo.append((f, out))
+            else:
+                staged.append((f, out, e))
+        n_cached = len(staged)
+        done, extract_errors = self._extract_databento(todo, jobs, res)
+        staged.extend(done)
+
+        # A file that is unreadable now, or failed to extract this run, keeps
+        # contributing its last good bars, so a corrupt re-download or a missing
+        # package never silently drops tickers from a shared partition.
+        ok_paths = {f.path for f, _, _ in staged}
+        fallback = [f for f in files if f.error and f.role != "quotes"] + \
+                   [f for f, _ in todo if f.path not in ok_paths]
+        n_fallback = 0
+        for f in fallback:
+            e = self.manifest.get(f"databento-src:{f.path}")
+            if e and e.get("rows") and e.get("staging") and Path(e["staging"]).exists():
+                staged.append((f, Path(e["staging"]), e))
+                n_fallback += 1
+        if n_fallback:
+            res.notes.append(f"{n_fallback} file(s) unreadable now; kept their last good bars")
+
+        # ── stage 2: assemble per (store, trade_date) ──
+        by_date: dict[tuple[str, str], list[Path]] = {}
+        for f, out, e in staged:
+            if not e.get("rows"):
+                continue
+            for d in e.get("dates", []):
+                if (start and d < start) or (end and d > end):
+                    continue
+                for a in e.get("assets", []):
+                    if a in assets:
+                        by_date.setdefault((a, d), []).append(out)
+        written = 0
+        assembled: set[str] = set()
+        for (asset, d), stg in sorted(by_date.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+            for store in databento.STORES_FOR_ASSET[asset]:
+                part_dir = self.p.partition(store, d)
+                sibs = databento.sibling_parts(part_dir)
+                fp = databento.fingerprint([*stg, *sibs])
+                mkey = f"databento:{store}/{d}"
+                assembled.add(mkey)
+                if not force and self.manifest.fp_current(mkey, fp):
+                    res.skipped += 1
+                    continue
+                target = part_dir / databento.PART_NAME
+                rows = copy_to_parquet(
+                    self.con, databento.assembly_sql(store, stg, d, sibs), target)
+                if rows == 0:
+                    databento.remove_part(target)    # fully covered by another vendor
+                else:
+                    written += 1
+                self.manifest.put(mkey, {"fp": fp, "rows": rows, "inputs": len(stg),
+                                         "trade_date": d, "store": store})
+                res.partitions += 1
+                res.rows += rows
+        res.notes.append(f"files: {len(staged) - n_cached} extracted, {n_cached} cached")
+        res.notes.append(f"{written} partitions with Databento rows")
+
+        # Raw files that disappeared leave parts with no inputs: remove them.
+        # Only when every file was readable and extracted, so a missing
+        # package or a transient read error never deletes good data.
+        if any(f.error for f in files) or extract_errors:
+            res.notes.append("stale-part cleanup skipped (unreadable or failed files)")
+        else:
+            removed = self._drop_stale_databento(assembled, start, end, assets, files)
+            if removed:
+                res.notes.append(f"{removed} stale Databento part(s) removed")
+        return res
+
+    def _drop_stale_databento(self, assembled: set[str], start, end, assets, files) -> int:
+        stores = {s for a in assets for s in databento.STORES_FOR_ASSET[a]}
+        removed = 0
+        for key, e in list(self.manifest.entries.items()):
+            if not key.startswith("databento:") or key in assembled:
+                continue
+            d, store = e.get("trade_date"), e.get("store")
+            if store not in stores or not d or (start and d < start) or (end and d > end):
+                continue
+            databento.remove_part(self.p.partition(store, d) / databento.PART_NAME)
+            self.manifest.drop(key)
+            removed += 1
+        present = {f.path for f in files}
+        for key, e in list(self.manifest.entries.items()):
+            if key.startswith("databento-src:") and e.get("src") not in present:
+                if e.get("staging"):
+                    Path(e["staging"]).unlink(missing_ok=True)
+                self.manifest.drop(key)
+        return removed
+
+    def _extract_databento(self, todo, jobs, res: ConvertResult) -> tuple[list, int]:
+        """Run :func:`databento.extract_file` over ``todo``; record manifest rows.
+
+        Returns ``(done, n_errors)``."""
+        done = []
+        if not todo:
+            return done, 0
+        jobs = max(1, int(jobs or os.environ.get("QFZ_DATABENTO_JOBS", 1)))
+        errors = 0
+
+        def record(f, out, r):
+            rec = {"src": f.path, "src_size": f.size, "src_mtime": f.mtime,
+                   "v": databento.EXTRACT_VERSION,
+                   "rows": r.rows, "dates": r.dates, "assets": r.assets,
+                   "staging": str(out)}
+            if r.dropped_symbols:
+                rec["unmapped_instruments"] = r.dropped_symbols
+            self.manifest.put(f"databento-src:{f.path}", rec)
+            done.append((f, out, rec))
+
+        if jobs == 1:
+            for f, out in todo:
+                try:
+                    record(f, out, databento.extract_file(f, out))
+                except Exception as e:  # noqa: BLE001 - one bad file must not stop the run
+                    errors += 1
+                    if errors <= 5:
+                        res.notes.append(f"extract failed {Path(f.path).name}: {e}")
+        else:
+            with ProcessPoolExecutor(max_workers=jobs) as ex:
+                futs = {ex.submit(databento.extract_file, f.to_dict(), str(out), 1): (f, out)
+                        for f, out in todo}
+                for fut in as_completed(futs):
+                    f, out = futs[fut]
+                    try:
+                        record(f, out, fut.result())
+                    except Exception as e:  # noqa: BLE001
+                        errors += 1
+                        if errors <= 5:
+                            res.notes.append(f"extract failed {Path(f.path).name}: {e}")
+        if errors:
+            res.notes.append(f"{errors} file(s) failed to extract")
+        self.manifest.save()   # checkpoint: extraction is the expensive part
+        return done, errors
 
     # ── rates (single file) ─────────────────────────────────────────────
 

@@ -94,6 +94,8 @@ ECON_EVENTS_DB = os.getenv("ECON_EVENTS_DB", f"{QFZ_DATA_ROOT}/esp/nasdaq_econ_e
 
 RAW_MASSIVE_DIR = os.getenv("RAW_MASSIVE_DIR", "/data/massive_data")
 RAW_TUSHARE_DIR = os.getenv("RAW_TUSHARE_DIR", "/data/tushare_data")
+# Databento DBN / parquet files (any layout; identified from file headers).
+RAW_DATABENTO_DIR = os.getenv("RAW_DATABENTO_DIR", "/data/databento")
 UPQ_STORAGE_ROOT = os.getenv("STORAGE_ROOT", f"{QFZ_DATA_ROOT}/upq")
 
 # ── MongoDB ──────────────────────────────────────────────────────

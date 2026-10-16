@@ -71,6 +71,9 @@ class FakeConverter:
     def convert_cn_stock_daily(self, start=None, force=False):
         return self._rec("cn_stock_daily", start, force)
 
+    def convert_databento(self, start=None, force=False):
+        return self._rec("us_databento", start, force)
+
     def convert_rates(self, force=False):
         return self._rec("rates", None, force)
 
@@ -98,6 +101,7 @@ def make_scan(**override) -> dict:
                 "cn_daily": {"present": True, "end": FRESH},
                 "cn_dividend_files": 3,
             },
+            "databento": {"present": True, "files": 2, "end": FRESH},
         },
         "storage": {
             "stock_daily": {"partitions": 10, "end": FRESH},
@@ -106,6 +110,7 @@ def make_scan(**override) -> dict:
             "option_minute": {"partitions": 10, "end": FRESH},
             "rates/rates.parquet": True,
             "corporate_actions/corporate_actions.parquet": True,
+            "databento": {"processed": 1, "end": FRESH},
         },
     }
     # dotted-path overrides, e.g. make_scan(**{"storage.option_day.end": "2026-06-20"})
@@ -181,7 +186,7 @@ def test_select_all_and_prices():
     prices = select("prices")
     assert {s.id for s in prices} == {
         "us_stock_daily", "us_stock_minute", "us_option_day",
-        "us_option_minute", "cn_stock_daily", "rates", "corp_actions",
+        "us_option_minute", "us_databento", "cn_stock_daily", "rates", "corp_actions",
     }
 
 
@@ -262,7 +267,7 @@ def test_force_runs_all_available(tmp_path):
     ran = {c[0] for c in cv.calls}
     assert ran == {
         "us_stock_daily", "us_stock_minute", "us_option_day",
-        "us_option_minute", "cn_stock_daily", "rates", "corp_actions",
+        "us_option_minute", "us_databento", "cn_stock_daily", "rates", "corp_actions",
     }
 
 

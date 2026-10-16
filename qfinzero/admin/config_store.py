@@ -2,7 +2,8 @@
 
 The operator edits these from the Console data manager (or ``qfz-data config``)
 instead of hand-writing shell env: the shared RAW roots, the per-store output root,
-the MASSIVE flat-files S3 credentials + REST key, the Tushare token, the ESP/Mongo
+the MASSIVE flat-files S3 credentials + REST key, the Tushare token, the Databento
+API key, the ESP/Mongo
 connection, and the auto-update schedule. Persisted as JSON at
 ``$QFZ_DATA_ROOT/_state/qfz.config.json`` (gitignored — it holds secrets, ``data/``
 is already ignored) and **applied to ``os.environ``** so the pipeline, the download
@@ -26,7 +27,7 @@ from typing import Any
 
 __all__ = [
     "config_path", "load", "save", "update", "masked", "apply_to_env",
-    "massive_s3", "massive_rest", "tushare_token", "dirs", "schedule",
+    "massive_s3", "massive_rest", "tushare_token", "databento_key", "dirs", "schedule",
     "mongo", "persisted",
 ]
 
@@ -38,6 +39,7 @@ _SECRETS = {
     ("massive", "s3_secret_access_key"),
     ("massive", "rest_api_key"),
     ("tushare", "token"),
+    ("databento", "api_key"),
     ("news", "benzinga_api_key"),
 }
 
@@ -63,6 +65,7 @@ def _defaults() -> dict[str, Any]:
             "qfz_data_root": root,
             "raw_massive": os.environ.get("RAW_MASSIVE_DIR", "/data/massive_data"),
             "raw_tushare": os.environ.get("RAW_TUSHARE_DIR", "/data/tushare_data"),
+            "raw_databento": os.environ.get("RAW_DATABENTO_DIR", "/data/databento"),
             "storage_root": os.environ.get("STORAGE_ROOT", f"{root}/upq"),
         },
         # MASSIVE / Polygon flat-files (US stocks, options, rates, corp actions).
@@ -77,6 +80,8 @@ def _defaults() -> dict[str, Any]:
             "rest_base_url": os.environ.get("MASSIVE_REST_BASE_URL", "https://api.polygon.io"),
         },
         "tushare": {"token": os.environ.get("TUSHARE_TOKEN", "")},
+        # Databento historical API (DBN downloads; US equities + OPRA options).
+        "databento": {"api_key": os.environ.get("DATABENTO_API_KEY", "")},
         # ESP news/econ/earnings sources.
         "news": {
             "mongo_uri": os.environ.get("MONGO_URI", "mongodb://localhost:27018"),
@@ -186,10 +191,12 @@ def apply_to_env(cfg: dict[str, Any] | None = None) -> None:
     m = cfg.get("massive", {}) or {}
     n = cfg.get("news", {}) or {}
     tok = (cfg.get("tushare", {}) or {}).get("token", "")
+    dbk = (cfg.get("databento", {}) or {}).get("api_key", "")
     env = {
         "QFZ_DATA_ROOT": d.get("qfz_data_root", ""),
         "RAW_MASSIVE_DIR": d.get("raw_massive", ""),
         "RAW_TUSHARE_DIR": d.get("raw_tushare", ""),
+        "RAW_DATABENTO_DIR": d.get("raw_databento", ""),
         "STORAGE_ROOT": d.get("storage_root", ""),
         # MASSIVE flat-files S3 — the names upq_flatfiles.sh reads.
         "POLYGON_S3_ACCESS_KEY_ID": m.get("s3_access_key_id", ""),
@@ -199,6 +206,7 @@ def apply_to_env(cfg: dict[str, Any] | None = None) -> None:
         "MASSIVE_REST_API_KEY": m.get("rest_api_key", ""),
         "MASSIVE_REST_BASE_URL": m.get("rest_base_url", ""),
         "TUSHARE_TOKEN": tok or "",
+        "DATABENTO_API_KEY": dbk or "",
         "MONGO_URI": n.get("mongo_uri", ""),
         "MONGO_DB": n.get("mongo_db", ""),
         "MONGO_COLLECTION": n.get("mongo_collection", ""),
@@ -230,6 +238,10 @@ def massive_rest() -> dict[str, str]:
 
 def tushare_token() -> str:
     return str((load().get("tushare", {}) or {}).get("token", "") or "")
+
+
+def databento_key() -> str:
+    return str((load().get("databento", {}) or {}).get("api_key", "") or "")
 
 
 def dirs() -> dict[str, str]:

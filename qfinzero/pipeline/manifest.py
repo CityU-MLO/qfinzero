@@ -53,6 +53,20 @@ class Manifest:
                 pass
         self.entries[self.key(store, trade_date)] = rec
 
+    # ── fingerprint entries (multi-input partitions, e.g. Databento) ──
+    def get(self, key: str) -> dict | None:
+        return self.entries.get(key)
+
+    def put(self, key: str, rec: dict) -> None:
+        self.entries[key] = rec
+
+    def drop(self, key: str) -> None:
+        self.entries.pop(key, None)
+
+    def fp_current(self, key: str, fp: str) -> bool:
+        e = self.entries.get(key)
+        return bool(e) and e.get("fp") == fp
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"entries": self.entries}, indent=2, default=str))

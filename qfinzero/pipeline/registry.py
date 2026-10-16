@@ -11,7 +11,9 @@ from pathlib import Path
 
 from .engine import _lit, connect
 from .paths import PipelinePaths, resolve
-from .sources import massive
+import json
+
+from .sources import databento, massive
 
 
 def _dated_range(root: Path) -> dict:
@@ -63,6 +65,43 @@ def scan_raw(p: PipelinePaths, con=None) -> dict:
                 con.close()
     out["tushare"]["cn_daily"] = cn
     out["tushare"]["cn_dividend_files"] = _count_files(p.tushare_cn_dividend, "*.parquet")
+    out["databento"] = scan_databento(p, con)
+    return out
+
+
+def scan_databento(p: PipelinePaths, con=None) -> dict:
+    """Databento files under the raw root, grouped by (dataset, schema).
+
+    Header reads are cached in ``<storage>/_state/databento_index.json``, so a
+    repeat scan only stats files.
+    """
+    try:
+        files = databento.index(p.databento, p.state_dir, con)
+    except Exception as e:  # noqa: BLE001 - a bad root must not break status
+        return {"root": str(p.databento), "present": False, "files": 0, "error": str(e)}
+    return databento.summarize(files, p.databento)
+
+
+def _databento_storage(p: PipelinePaths) -> dict:
+    """Trade dates the Databento converter has processed (from the manifest),
+    plus how many partitions currently hold a Databento part."""
+    out: dict = {"processed": 0, "parts": 0}
+    mf = p.storage / "_pipeline_manifest.json"
+    dates: set[str] = set()
+    if mf.exists():
+        try:
+            entries = json.loads(mf.read_text()).get("entries", {})
+            for k, v in entries.items():
+                if k.startswith("databento:") and isinstance(v, dict) and v.get("trade_date"):
+                    dates.add(v["trade_date"])
+        except (OSError, json.JSONDecodeError):
+            pass
+    if dates:
+        out.update(processed=len(dates), start=min(dates), end=max(dates))
+    for store in ("stock_daily", "stock_minute", "option_day", "option_minute"):
+        d = p.store(store)
+        if d.is_dir():
+            out["parts"] += sum(1 for _ in d.glob(f"trade_date=*/{databento.PART_NAME}"))
     return out
 
 
@@ -81,6 +120,7 @@ def scan_storage(p: PipelinePaths) -> dict:
     for single in ("rates/rates.parquet", "corporate_actions/corporate_actions.parquet",
                    "dividends/dividends.parquet"):
         out[single] = (p.storage / single).exists()
+    out["databento"] = _databento_storage(p)
     return out
 
 

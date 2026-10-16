@@ -15,7 +15,8 @@ from . import config_store
 
 def _scan() -> dict:
     d = config_store.dirs()
-    paths = resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"))
+    paths = resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"),
+                   d.get("raw_databento"))
     from qfinzero.pipeline import registry
     return registry.scan(paths)
 
@@ -25,6 +26,8 @@ def _any_raw(scan: dict) -> bool:
     m = raw.get("massive", {})
     if any((m.get(k, {}) or {}).get("present") for k in
            ("stock_daily", "stock_minute", "option_day", "option_minute")):
+        return True
+    if (raw.get("databento", {}) or {}).get("convertible_files"):
         return True
     return bool((raw.get("tushare", {}).get("cn_daily", {}) or {}).get("present"))
 
@@ -41,6 +44,7 @@ def state() -> dict[str, Any]:
     s3 = cfg.get("massive", {}) or {}
     massive_done = bool(s3.get("s3_access_key_id") and s3.get("s3_secret_access_key"))
     tushare_done = bool((cfg.get("tushare", {}) or {}).get("token"))
+    databento_done = bool((cfg.get("databento", {}) or {}).get("api_key"))
 
     try:
         scan = _scan()
@@ -56,6 +60,9 @@ def state() -> dict[str, Any]:
         {"id": "tushare", "label": "Tushare token (CN)",
          "done": tushare_done, "required": False,
          "detail": "API token for A-share download"},
+        {"id": "databento", "label": "Databento API key (US stocks/options)",
+         "done": databento_done, "required": False,
+         "detail": "historical API key for DBN downloads"},
         {"id": "raw", "label": "Raw data present",
          "done": raw_done, "required": True,
          "detail": "vendor data in the shared RAW roots"},
@@ -63,11 +70,12 @@ def state() -> dict[str, Any]:
          "done": store_done, "required": True,
          "detail": "converted parquet the UPQ service serves"},
     ]
-    configured = (massive_done or tushare_done) and (raw_done or store_done)
+    has_creds = massive_done or tushare_done or databento_done
+    configured = has_creds and (raw_done or store_done)
     return {
         "configured": configured,
         "initialized": store_done,
         "show_wizard": not store_done,
-        "has_credentials": massive_done or tushare_done,
+        "has_credentials": has_creds,
         "steps": steps,
     }

@@ -21,7 +21,8 @@ _SYMBOL_STORES = {"stock_daily", "stock_minute", "option_day", "option_minute"}
 
 def _paths():
     d = config_store.dirs()
-    return resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"))
+    return resolve(d.get("raw_massive"), d.get("raw_tushare"), d.get("storage_root"),
+                   d.get("raw_databento"))
 
 
 def overview() -> dict[str, Any]:

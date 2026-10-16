@@ -2,9 +2,10 @@
 
 A formal, out-of-the-box pipeline that
 
-  a. **manages** two raw market-data sources read *in place* (never copied):
-       - massive  (Polygon-style US: stocks, options, rates, corporate actions)
-       - tushare  (CN A-shares + HK, via the Assay downloader)
+  a. **manages** three raw market-data sources read *in place* (never copied):
+       - massive    (Polygon-style US: stocks, options, rates, corporate actions)
+       - tushare    (CN A-shares + HK, via the Assay downloader)
+       - databento  (DBN / parquet: US stocks + OPRA options, any file layout)
   b. **converts** raw quotes into the UPQ on-disk storage format, handling
      splits & dividends through a single unified corporate-actions table.
 

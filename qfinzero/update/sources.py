@@ -83,6 +83,14 @@ SOURCES: list[Source] = [
         run=lambda cv, start, force: cv.convert_us_option_minute(start=start, force=force),
     ),
     Source(
+        id="us_databento", domain="price", market="us", owner="shared",
+        store="databento",
+        raw_get=lambda s: _dig(s, "raw", "databento", "end"),
+        store_get=lambda s: _dig(s, "storage", "databento", "end"),
+        run=lambda cv, start, force: cv.convert_databento(start=start, force=force),
+        note="fills stock/option bars for tickers massive did not provide",
+    ),
+    Source(
         id="cn_stock_daily", domain="price", market="cn", owner="shared",
         store="stock_daily",
         raw_get=lambda s: _dig(s, "raw", "tushare", "cn_daily", "end"),
