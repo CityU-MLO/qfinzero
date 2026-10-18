@@ -119,7 +119,9 @@ def test_esp_health_includes_standard_version(monkeypatch):
 
 def test_playground_health_includes_standard_version(monkeypatch):
     fake_agent = ModuleType("agent")
-    fake_agent.run_agent_stream = lambda **_: None
+    fake_agent.run_agent_stream = lambda *_, **__: None
+    fake_agent.make_llm = lambda *_, **__: (None, None)
+    fake_agent.build_system_prompt = lambda as_of: f"prompt {as_of}"
     fake_config = ModuleType("config")
     fake_config.HOST = "127.0.0.1"
     fake_config.PORT = 19390
