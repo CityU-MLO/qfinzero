@@ -20,17 +20,21 @@ An order's ``trading_hours`` decides where it may execute:
 Options always execute in REGULAR only. Daily-frequency sessions have one bar per
 day, so every bar is REGULAR and is its own trading date.
 
+Exchange holidays and 13:00 early closes come from :mod:`qfinzero.market_calendar`:
+on an early-close day REGULAR ends at 13:00 and POST at 17:00.
+
 The trading date is what DAY orders and option expiry key on. It replaces the
 UTC calendar date the clock used before, which broke at 19:00/20:00 ET.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from zoneinfo import ZoneInfo
 
 from models.enums import Frequency, InstrumentType, OrderType, TradingHours
+from qfinzero.market_calendar import is_trading_day, next_trading_day, post_close, regular_close
 
 ET = ZoneInfo("America/New_York")
 
@@ -58,24 +62,18 @@ def _et(ts_ns: int) -> datetime:
     return datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).astimezone(ET)
 
 
-def _next_weekday(d: date) -> date:
-    d += timedelta(days=1)
-    while d.weekday() >= 5:
-        d += timedelta(days=1)
-    return d
-
-
 def segment_of(ts_ns: int, frequency: Frequency = Frequency.MINUTE) -> Segment:
     """Session segment of a bar starting at ``ts_ns``."""
     if frequency == Frequency.DAILY:
         return Segment.REGULAR
     t = _et(ts_ns)
     m = t.hour * 60 + t.minute
-    if REGULAR_OPEN_MIN <= m < REGULAR_CLOSE_MIN:
+    close = regular_close(t.date())
+    if REGULAR_OPEN_MIN <= m < close:
         return Segment.REGULAR
     if PRE_OPEN_MIN <= m < REGULAR_OPEN_MIN:
         return Segment.PRE
-    if REGULAR_CLOSE_MIN <= m < POST_CLOSE_MIN:
+    if close <= m < post_close(t.date()):
         return Segment.POST
     return Segment.OVERNIGHT
 
@@ -85,18 +83,18 @@ def trading_date_of(ts_ns: int, frequency: Frequency = Frequency.MINUTE) -> str:
 
     Daily bars keep the date they are stamped with. Minute bars use the ET
     date, except that the overnight segment from 20:00 ET belongs to the next
-    weekday (Friday night belongs to Monday). Bars between 00:00 and 04:00 ET
-    already carry that next date. Exchange holidays are not modelled; no
-    overnight venue trades into a holiday, so they do not occur in data.
+    trading day (Friday night belongs to Monday, the night before a holiday to
+    the day after it). Bars between 00:00 and 04:00 ET already carry that date
+    unless it is not a trading day.
     """
     if frequency == Frequency.DAILY:
         return datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc).date().isoformat()
     t = _et(ts_ns)
     d = t.date()
-    if t.hour * 60 + t.minute >= POST_CLOSE_MIN:
-        d = _next_weekday(d)
-    while d.weekday() >= 5:     # weekend bars (Sunday-night overnight) roll to Monday
-        d += timedelta(days=1)
+    if t.hour * 60 + t.minute >= post_close(d):
+        d = next_trading_day(d)
+    elif not is_trading_day(d):     # weekend / holiday overnight bars
+        d = next_trading_day(d)
     return d.isoformat()
 
 

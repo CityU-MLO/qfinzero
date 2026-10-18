@@ -2,6 +2,7 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from models.enums import Market, AccountStatus, Side, MARKET_PROFILE
+from qfinzero.market_calendar import next_trading_day
 from models.account import (
     Account,
     CreateAccountRequest,
@@ -241,7 +242,7 @@ class AccountService:
             # Auto-close the open day first so history stays contiguous.
             self.end_day(account_id)
 
-        account.current_date = date or self._next_weekday(account.current_date)
+        account.current_date = date or self._next_trading_day(account.current_date, account.market)
         account.trading_day += 1
         account.trades_today = []
         account.day_opening_equity = account.equity()
@@ -258,11 +259,15 @@ class AccountService:
         return account
 
     @staticmethod
-    def _next_weekday(date_str: str) -> str:
+    def _next_trading_day(date_str: str, market: Market | None = None) -> str:
+        """Next NYSE trading day for US accounts; next weekday elsewhere
+        (CN/HK exchange holidays are not modelled)."""
         try:
             d = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
         except ValueError:
             d = datetime.now(timezone.utc).date()
+        if market in (None, Market.US):
+            return next_trading_day(d).isoformat()
         d += timedelta(days=1)
         while d.weekday() >= 5:  # skip Saturday/Sunday
             d += timedelta(days=1)

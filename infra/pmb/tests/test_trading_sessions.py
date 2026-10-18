@@ -241,3 +241,26 @@ def test_step_until_stops_on_fill_price_and_segment():
     r = svc.step_until("s", StepUntilRequest(stop_on_segment="REGULAR"))
     assert r["reason"] in ("segment:REGULAR", "finished")
     assert r["clock"]["trading_date"] == "2025-01-03"
+
+
+def test_holidays_and_early_closes():
+    # Thursday 2025-04-17 21:00 ET: Good Friday is closed, so Monday
+    assert trading_date_of(ns("2025-04-18T01:00:00Z")) == "2025-04-21"
+    # overnight bars stamped on the holiday itself roll forward too
+    assert trading_date_of(ns("2025-04-18T05:00:00Z")) == "2025-04-21"
+    # 2025-11-28 (day after Thanksgiving) closes at 13:00 ET; after-hours to 17:00
+    assert segment_of(ns("2025-11-28T17:59:00Z")) == Segment.REGULAR     # 12:59 EST
+    assert segment_of(ns("2025-11-28T18:00:00Z")) == Segment.POST        # 13:00 EST
+    assert segment_of(ns("2025-11-28T22:00:00Z")) == Segment.OVERNIGHT   # 17:00 EST
+    assert trading_date_of(ns("2025-11-28T22:30:00Z")) == "2025-12-01"
+    # an ordinary day is unchanged
+    assert segment_of(ns("2025-11-26T20:59:00Z")) == Segment.REGULAR     # 15:59 EST
+
+
+def test_next_day_skips_exchange_holidays():
+    from models.enums import Market
+    from services.account_service import AccountService
+    nd = AccountService._next_trading_day
+    assert nd("2025-01-08") == "2025-01-10"                 # 2025-01-09 national day of mourning
+    assert nd("2025-07-03") == "2025-07-07"
+    assert nd("2025-01-08", Market.CN) == "2025-01-09"      # other markets: weekdays only
