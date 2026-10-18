@@ -456,7 +456,13 @@ export function Terminal({
 
   // ── derived ──
   const quotes = [...(state?.market.stocks ?? []), ...(state?.market.futures ?? [])];
-  const quoteFor = (sym: string) => quotes.find((q) => q.symbol === sym);
+  // the bar of this minute, else the last bar seen (thin futures and stocks skip minutes)
+  const quoteFor = (sym: string) => {
+    const q = quotes.find((x) => x.symbol === sym);
+    if (q) return q;
+    const last = (ohlcHist[sym] ?? []).at(-1);
+    return last ? { symbol: sym, open: last.o, high: last.h, low: last.l, close: last.c, volume: last.v } : undefined;
+  };
   const sel = quoteFor(selected);
   const selHist = priceHist[selected] ?? [];
   const selUp = selHist.length < 2 || selHist[selHist.length - 1].price >= selHist[0].price;
@@ -476,7 +482,7 @@ export function Terminal({
   const bpAfter = acct ? acct.buying_power - (side === "BUY" ? estCost : 0) : 0;
   // futures: opening contracts need initial margin free, nothing is paid for them
   const futMargin = spec ? qty * spec.initial_per_contract : 0;
-  const futNotional = spec && sel ? qty * sel.close * spec.multiplier : 0;
+  const futNotional = spec ? qty * (sel?.close ?? spec.ref_price) * spec.multiplier : 0;
   const freeMargin = acct ? acct.equity - acct.initial_margin_req : 0;
 
   return (

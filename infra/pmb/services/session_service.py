@@ -1356,7 +1356,10 @@ class SessionService:
             spec = state.margin_engine.future_spec(sym)
             if spec is None:
                 continue
-            ref = state.cache.get_latest_price(f"FUTURE:{sym}", now) or 0.0
+            ref = state.cache.get_latest_price(f"FUTURE:{sym}", now)
+            if ref is None:      # before the first bar: the first price of the session
+                bars = state.cache._future_bars.get(sym) or {}
+                ref = bars[min(bars)].close if bars else 0.0
             out[sym] = {**spec.model_dump(), "ref_price": ref,
                         "initial_per_contract": round(spec.initial_per_contract(ref), 2),
                         "maintenance_per_contract": round(spec.maintenance_per_contract(ref), 2)}
