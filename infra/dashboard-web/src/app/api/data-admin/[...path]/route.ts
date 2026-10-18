@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { identityHeaders } from "@/lib/identity";
 import { DATA_ADMIN_BASE_URL } from "@/lib/config";
 
 // Server-side proxy to the data-admin service (:19340) so the browser never needs
@@ -12,7 +13,10 @@ async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const target = `${DATA_ADMIN_BASE_URL}/${path.join("/")}${search}`;
   const init: RequestInit = {
     method: req.method,
-    headers: { "content-type": req.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "content-type": req.headers.get("content-type") ?? "application/json",
+      ...identityHeaders(req),
+    },
   };
   if (req.method !== "GET" && req.method !== "HEAD") {
     init.body = await req.text();

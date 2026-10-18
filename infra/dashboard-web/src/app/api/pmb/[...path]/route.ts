@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { identityHeaders } from "@/lib/identity";
 
 // Server-side proxy to the PMB service (:19380) — e.g. /api/pmb/v1/config.
 const PMB_BASE_URL = process.env.PMB_BASE_URL ?? "http://127.0.0.1:19380";
@@ -8,7 +9,10 @@ async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const target = `${PMB_BASE_URL}/${path.join("/")}${req.nextUrl.search ?? ""}`;
   const init: RequestInit = {
     method: req.method,
-    headers: { "content-type": req.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "content-type": req.headers.get("content-type") ?? "application/json",
+      ...identityHeaders(req),
+    },
   };
   if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
   try {

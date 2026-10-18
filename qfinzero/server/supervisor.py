@@ -126,7 +126,8 @@ def _default_children() -> list[Child]:
     if serve_ui not in ("0", "false", "off") and ui_built:
         children.append(Child(
             "dashboard",
-            [str(dash_dir / "node_modules/.bin/next"), "start", "-p", str(config.DASHBOARD_PORT)],
+            [str(dash_dir / "node_modules/.bin/next"), "start", "-H", "127.0.0.1",
+             "-p", str(config.DASHBOARD_PORT)],
             dash_dir, f"{DASHBOARD_IN}/",
             env={"PORT": config.DASHBOARD_PORT, "PMB_BASE_URL": PMB_IN,
                  "ESP_BASE_URL": ESP_IN, "UPQ_BASE_URL": UPQ_IN,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { identityHeaders } from "@/lib/identity";
 
 // Server-side proxy to the UPQ market-data service (:19350) — e.g.
 // /api/upq/option/chain_query?underlying=AAPL&date=2024-03-22
@@ -9,7 +10,10 @@ async function forward(req: NextRequest, path: string[]): Promise<Response> {
   const target = `${UPQ_BASE_URL}/${path.join("/")}${req.nextUrl.search ?? ""}`;
   const init: RequestInit = {
     method: req.method,
-    headers: { "content-type": req.headers.get("content-type") ?? "application/json" },
+    headers: {
+      "content-type": req.headers.get("content-type") ?? "application/json",
+      ...identityHeaders(req),
+    },
   };
   if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
   try {

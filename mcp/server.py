@@ -46,10 +46,24 @@ MCP_TRANSPORT = os.environ.get("QFINZERO_MCP_TRANSPORT", "stdio")
 MCP_HOST = os.environ.get("QFINZERO_MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("QFINZERO_MCP_PORT", "19360"))
 
+def _transport_security():
+    """Behind the hub the MCP app sees the public Host header; allow the hosts
+    listed in QFZ_PUBLIC_HOSTS (comma-separated) in addition to localhost."""
+    hosts = [h.strip() for h in os.environ.get("QFZ_PUBLIC_HOSTS", "").split(",") if h.strip()]
+    if not hosts:
+        return None
+    from mcp.server.transport_security import TransportSecuritySettings
+    local = ["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "[::1]", "[::1]:*"]
+    origins = [f"{scheme}://{h}" for h in hosts for scheme in ("http", "https")]
+    return TransportSecuritySettings(enable_dns_rebinding_protection=True,
+                                     allowed_hosts=local + hosts, allowed_origins=origins)
+
+
 mcp = FastMCP(
     "QFinZero",
     host=MCP_HOST,
     port=MCP_PORT,
+    transport_security=_transport_security(),
     instructions=(
         "QFinZero is a unified trading environment for LLM agents. "
         "It provides three services: UPQ (market data), ESP (news & events), "
@@ -87,12 +101,31 @@ def _header_session(ctx: Optional[Context]) -> Optional[str]:
         return None
 
 
+_IDENTITY = ("x-qfz-user", "x-qfz-role", "x-qfz-user-id")
+
+
+def _identity(ctx: Optional[Context]) -> dict:
+    """The caller identity the hub verified (empty for stdio / unauthenticated)."""
+    try:
+        request = ctx.request_context.request if ctx is not None else None
+        if request is None:
+            return {}
+        return {h: request.headers[h] for h in _IDENTITY if request.headers.get(h)}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _pmb(ctx: Optional[Context] = None) -> PMBClient:
+    """PMB client acting as the MCP caller, so accounts are scoped per user."""
+    return PMBClient(PMB_URL, headers=_identity(ctx))
+
+
 def _lock(ctx: Optional[Context], session_id: Optional[str]) -> Optional[str]:
     """``as_of`` for this call, or None when unlocked (raises TimeLockError)."""
     session = timelock.bound_session(_header_session(ctx), session_id)
 
     def fetch(sid: str) -> dict:
-        with PMBClient(PMB_URL) as client:
+        with _pmb(ctx) as client:
             return client.get_session_state(sid)["clock"]
 
     return timelock.resolve(session, fetch)
@@ -992,9 +1025,9 @@ def research_backtest(
 
 
 @mcp.tool()
-def pmb_health() -> str:
+def pmb_health(ctx: Context = None) -> str:
     """Check health of the PMB (Paper Money Broker) trading simulation service."""
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.health())
 
 
@@ -1004,6 +1037,7 @@ def pmb_create_account(
     initial_cash: Optional[float] = None,
     market: Optional[Literal["us", "cn", "hk"]] = None,
     account_type: Literal["MARGIN", "CASH"] = "MARGIN",
+    ctx: Context = None,
 ) -> str:
     """Allocate a new paper trading (broker) account.
 
@@ -1018,7 +1052,7 @@ def pmb_create_account(
         JSON with: account_id (a unique 10-digit number), market, created_at, account.
         Save the account_id — you'll need it for all subsequent calls.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.create_account(
                 initial_cash=initial_cash,
@@ -1030,7 +1064,9 @@ def pmb_create_account(
 
 
 @mcp.tool()
-def pmb_get_account(account_id: str) -> str:
+def pmb_get_account(account_id: str,
+    ctx: Context = None,
+) -> str:
     """Get the current state of a paper trading account.
 
     Args:
@@ -1040,12 +1076,14 @@ def pmb_get_account(account_id: str) -> str:
         JSON with: cash_available, cash_locked, loan, equity, buying_power,
                    margin_status, positions summary
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_account(account_id))
 
 
 @mcp.tool()
-def pmb_get_positions(account_id: str) -> str:
+def pmb_get_positions(account_id: str,
+    ctx: Context = None,
+) -> str:
     """List all current open positions in a paper trading account.
 
     Args:
@@ -1055,7 +1093,7 @@ def pmb_get_positions(account_id: str) -> str:
         JSON list of position objects with:
         symbol, qty, avg_cost, market_value, unrealized_pnl, side
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_positions(account_id))
 
 
@@ -1063,6 +1101,7 @@ def pmb_get_positions(account_id: str) -> str:
 def pmb_get_orders(
     account_id: str,
     session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query orders for an account, optionally filtered by session.
 
@@ -1074,7 +1113,7 @@ def pmb_get_orders(
         JSON list of order objects with: order_id, symbol, side, order_type,
         qty, filled_qty, avg_fill_price, status, created_ts
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_orders(account_id=account_id, session_id=session_id))
 
 
@@ -1082,6 +1121,7 @@ def pmb_get_orders(
 def pmb_get_trades(
     account_id: str,
     session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query executed trades for an account, optionally filtered by session.
 
@@ -1092,7 +1132,7 @@ def pmb_get_trades(
     Returns:
         JSON list of trade objects with execution details and realized P&L
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_trades(account_id=account_id, session_id=session_id))
 
 
@@ -1100,7 +1140,9 @@ def pmb_get_trades(
 
 
 @mcp.tool()
-def pmb_get_status(account_id: str) -> str:
+def pmb_get_status(account_id: str,
+    ctx: Context = None,
+) -> str:
     """Query the broker status of an account by its 10-digit id.
 
     Args:
@@ -1111,12 +1153,14 @@ def pmb_get_status(account_id: str) -> str:
         cash, equity, realized_pnl, unrealized_pnl, total_return, positions,
         trades_today. When status is FROZEN you must call pmb_next_day before trading.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_status(account_id))
 
 
 @mcp.tool()
-def pmb_get_history(account_id: str, limit: Optional[int] = None) -> str:
+def pmb_get_history(account_id: str, limit: Optional[int] = None,
+    ctx: Context = None,
+) -> str:
     """Get an account's step-by-step trading history (one record per trading day).
 
     Args:
@@ -1127,7 +1171,7 @@ def pmb_get_history(account_id: str, limit: Optional[int] = None) -> str:
         JSON list of day records: trading_day, date, opening_equity, closing_equity,
         realized_pnl, num_trades, fees, trades[], positions[].
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_history(account_id, limit=limit))
 
 
@@ -1139,6 +1183,7 @@ def pmb_trade(
     qty: int,
     price: Optional[float] = None,
     note: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Execute an immediate paper trade against the account's broker book.
 
@@ -1158,12 +1203,14 @@ def pmb_trade(
     Returns:
         JSON with the executed fill (incl. price_source) and updated account status.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.trade(account_id, symbol, side, qty, price, note=note))
 
 
 @mcp.tool()
-def pmb_quote(account_id: str, symbols: str) -> str:
+def pmb_quote(account_id: str, symbols: str,
+    ctx: Context = None,
+) -> str:
     """Get the real UPQ market price for symbols at the account's trading day.
 
     This is the exact price a no-price ``pmb_trade`` would fill at.
@@ -1175,23 +1222,25 @@ def pmb_quote(account_id: str, symbols: str) -> str:
     Returns:
         JSON with as_of date, the price rule, prices per symbol, and any missing.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.quote(account_id, symbols))
 
 
 @mcp.tool()
-def pmb_get_config() -> str:
+def pmb_get_config(ctx: Context = None) -> str:
     """Get the broker settings that govern fills, fees, leverage, and defaults.
 
     Returns fees (per share / per option contract), slippage, buying-power
     leverage, initial cash, default market/frequency, and the fill price rule.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_config())
 
 
 @mcp.tool()
-def pmb_end_day(account_id: str) -> str:
+def pmb_end_day(account_id: str,
+    ctx: Context = None,
+) -> str:
     """Close the current trading day and FREEZE the account.
 
     Records the day into the account's trading history. While frozen, trades are
@@ -1203,12 +1252,14 @@ def pmb_end_day(account_id: str) -> str:
     Returns:
         JSON with the closed day record and the updated (frozen) account status.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.end_day(account_id))
 
 
 @mcp.tool()
-def pmb_next_day(account_id: str, date: Optional[str] = None) -> str:
+def pmb_next_day(account_id: str, date: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
     """Unfreeze the account and advance to the next trading day.
 
     If the current day was not explicitly ended, it is auto-closed first so the
@@ -1221,7 +1272,7 @@ def pmb_next_day(account_id: str, date: Optional[str] = None) -> str:
     Returns:
         JSON with the updated (active) account status on the new trading day.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.next_day(account_id, date=date))
 
 
@@ -1233,6 +1284,7 @@ def pmb_create_session(
     end_ts: str,
     stock_universe: Optional[list[str]] = None,
     option_universe: Optional[list[str]] = None,
+    ctx: Context = None,
 ) -> str:
     """Create a new backtesting / simulation session.
 
@@ -1255,7 +1307,7 @@ def pmb_create_session(
     if option_universe:
         universe["options"] = option_universe
 
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.create_session(
                 account_id=account_id,
@@ -1271,6 +1323,7 @@ def pmb_create_session(
 def pmb_step_session(
     session_id: str,
     n: int = 1,
+    ctx: Context = None,
 ) -> str:
     """Advance the simulation clock by n time steps.
 
@@ -1294,7 +1347,7 @@ def pmb_step_session(
             ACCOUNT_SNAPSHOT — cash, equity, positions snapshot
             RISK_EVENT       — margin calls or risk alerts
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         result = client.step(session_id=session_id, n=n)
         return json.dumps(result._raw)
 
@@ -1307,6 +1360,7 @@ def pmb_step_until(
     stop_on_fill: bool = True,
     price_triggers: Optional[List[dict]] = None,
     stop_on_segment: Optional[Literal["REGULAR", "PRE", "POST", "OVERNIGHT"]] = None,
+    ctx: Context = None,
 ) -> str:
     """Advance the clock until something worth deciding on happens.
 
@@ -1323,14 +1377,16 @@ def pmb_step_until(
         JSON with steps, reason, clock (incl. segment and trading_date), the
         order/trade/risk events seen, last_tick (latest bars) and account.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.step_until(
             session_id, until_ts=until_ts, max_steps=max_steps, stop_on_fill=stop_on_fill,
             price_triggers=price_triggers, stop_on_segment=stop_on_segment))
 
 
 @mcp.tool()
-def pmb_get_market(session_id: str) -> str:
+def pmb_get_market(session_id: str,
+    ctx: Context = None,
+) -> str:
     """Get the current market state for a session (latest prices for all instruments).
 
     Args:
@@ -1339,12 +1395,14 @@ def pmb_get_market(session_id: str) -> str:
     Returns:
         JSON with current market data for all instruments in the session universe
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_market(session_id))
 
 
 @mcp.tool()
-def pmb_session_state(session_id: str) -> str:
+def pmb_session_state(session_id: str,
+    ctx: Context = None,
+) -> str:
     """Get the full consolidated state of a session in one call.
 
     Returns clock (current bar, index, total bars, status), the account snapshot
@@ -1357,12 +1415,14 @@ def pmb_session_state(session_id: str) -> str:
     Returns:
         JSON with clock, account, positions, open_orders, trades, and market.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_session_state(session_id))
 
 
 @mcp.tool()
-def pmb_rewind(session_id: str, target_ts: str) -> str:
+def pmb_rewind(session_id: str, target_ts: str,
+    ctx: Context = None,
+) -> str:
     """Time-travel a session back to target_ts, undoing every order placed after it.
 
     The session is deterministically replayed to the target bar; any orders/fills
@@ -1377,12 +1437,14 @@ def pmb_rewind(session_id: str, target_ts: str) -> str:
     Returns:
         JSON with the rewound consolidated session state (same shape as pmb_session_state).
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.rewind(session_id, target_ts))
 
 
 @mcp.tool()
-def pmb_add_stocks(session_id: str, symbols: List[str]) -> str:
+def pmb_add_stocks(session_id: str, symbols: List[str],
+    ctx: Context = None,
+) -> str:
     """Add stock symbols to a running session (grow the watchlist / tradable universe).
 
     The new symbols are priced and tradable from the current bar onward.
@@ -1394,12 +1456,14 @@ def pmb_add_stocks(session_id: str, symbols: List[str]) -> str:
     Returns:
         JSON with {ok, loaded, skipped}.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.add_stocks(session_id, symbols))
 
 
 @mcp.tool()
-def pmb_add_contracts(session_id: str, contracts: List[str]) -> str:
+def pmb_add_contracts(session_id: str, contracts: List[str],
+    ctx: Context = None,
+) -> str:
     """Load option contracts into a running session so they can be traded and marked.
 
     Use upq_option_chain to discover contract identifiers (e.g. O:AAPL240328C00170000),
@@ -1412,12 +1476,14 @@ def pmb_add_contracts(session_id: str, contracts: List[str]) -> str:
     Returns:
         JSON with {ok, loaded, skipped}.
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.add_contracts(session_id, contracts))
 
 
 @mcp.tool()
-def pmb_stop_session(session_id: str) -> str:
+def pmb_stop_session(session_id: str,
+    ctx: Context = None,
+) -> str:
     """Stop a running simulation session early.
 
     Args:
@@ -1426,12 +1492,14 @@ def pmb_stop_session(session_id: str) -> str:
     Returns:
         JSON confirmation of session termination
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.stop_session(session_id))
 
 
 @mcp.tool()
-def pmb_get_summary(session_id: str) -> str:
+def pmb_get_summary(session_id: str,
+    ctx: Context = None,
+) -> str:
     """Get backtesting performance summary for a session.
 
     Args:
@@ -1441,7 +1509,7 @@ def pmb_get_summary(session_id: str) -> str:
         JSON with: final_equity, total_return, max_drawdown, fees_paid,
                    num_orders, num_trades, sharpe_ratio (and other metrics)
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(client.get_summary(session_id))
 
 
@@ -1449,6 +1517,7 @@ def pmb_get_summary(session_id: str) -> str:
 def pmb_export_session(
     session_id: str,
     fmt: str = "json",
+    ctx: Context = None,
 ) -> str:
     """Export full session data for external analysis.
 
@@ -1459,7 +1528,7 @@ def pmb_export_session(
     Returns:
         Session trade history and performance data in the requested format
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         result = client.export(session_id=session_id, fmt=fmt)
         if isinstance(result, str):
             return result
@@ -1479,6 +1548,7 @@ def pmb_buy_stock(
     client_order_id: Optional[str] = None,
     trading_hours: Literal["REGULAR", "EXTENDED", "OVERNIGHT"] = "REGULAR",
     expire_ts: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Place a BUY order for a stock.
 
@@ -1501,7 +1571,7 @@ def pmb_buy_stock(
     Returns:
         JSON order object with: order_id, status, instrument, side, qty, order_type
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.buy(
                 session_id=session_id,
@@ -1532,6 +1602,7 @@ def pmb_sell_stock(
     client_order_id: Optional[str] = None,
     trading_hours: Literal["REGULAR", "EXTENDED", "OVERNIGHT"] = "REGULAR",
     expire_ts: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Place a SELL order for a stock.
 
@@ -1552,7 +1623,7 @@ def pmb_sell_stock(
     Returns:
         JSON order object with: order_id, status, instrument, side, qty, order_type
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.sell(
                 session_id=session_id,
@@ -1580,6 +1651,7 @@ def pmb_buy_option(
     limit_price: Optional[float] = None,
     time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Place a BUY order for an option contract.
 
@@ -1597,7 +1669,7 @@ def pmb_buy_option(
     Returns:
         JSON order object with order_id and initial status
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.buy_option(
                 session_id=session_id,
@@ -1622,6 +1694,7 @@ def pmb_sell_option(
     limit_price: Optional[float] = None,
     time_in_force: Literal["GTC", "DAY"] = "GTC",
     client_order_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Place a SELL order for an option contract.
 
@@ -1638,7 +1711,7 @@ def pmb_sell_option(
     Returns:
         JSON order object with order_id and initial status
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.sell_option(
                 session_id=session_id,
@@ -1658,6 +1731,7 @@ def pmb_cancel_order(
     order_id: str,
     session_id: str,
     account_id: str,
+    ctx: Context = None,
 ) -> str:
     """Cancel an open order.
 
@@ -1669,7 +1743,7 @@ def pmb_cancel_order(
     Returns:
         JSON confirmation of cancellation
     """
-    with PMBClient(PMB_URL) as client:
+    with _pmb(ctx) as client:
         return json.dumps(
             client.cancel_order(
                 order_id=order_id,

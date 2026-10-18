@@ -7,6 +7,9 @@ router = APIRouter(tags=["orders"])
 
 @router.post("/v1/orders")
 async def place_order(req: CreateOrderRequest, request: Request):
+    from routes.ownership import require_account, require_session
+    require_session(request, req.session_id)
+    require_account(request, req.account_id)
     order_svc = request.app.state.order_service
     result = order_svc.place_order(req)
     if not result.get("ok"):
@@ -21,15 +24,20 @@ async def place_order(req: CreateOrderRequest, request: Request):
 async def get_order(order_id: str, request: Request, session_id: str | None = None):
     session_svc = request.app.state.session_service
 
-    # Search all sessions for this order
+    from routes.ownership import require_session
+    if session_id:
+        require_session(request, session_id)
+    # Search all sessions for this order (only sessions the caller may see)
     if session_id:
         result = request.app.state.order_service.get_order(order_id, session_id)
         if result:
             return result
 
+    from routes.ownership import owns
     for sid, state in session_svc._sessions.items():
         order = state.order_manager.get_order(order_id)
-        if order is not None:
+        if order is not None and owns(
+                request, request.app.state.account_service.get_account(state.account_id)):
             return {"order": order.model_dump()}
 
     raise HTTPException(
@@ -40,6 +48,8 @@ async def get_order(order_id: str, request: Request, session_id: str | None = No
 
 @router.post("/v1/orders/{order_id}/cancel")
 async def cancel_order(order_id: str, req: CancelOrderRequest, request: Request):
+    from routes.ownership import require_session
+    require_session(request, req.session_id)
     order_svc = request.app.state.order_service
     result = order_svc.cancel_order(order_id, req.session_id)
     if not result.get("ok"):
@@ -58,6 +68,8 @@ async def cancel_order(order_id: str, req: CancelOrderRequest, request: Request)
 
 @router.post("/v1/orders/{order_id}/modify")
 async def modify_order(order_id: str, req: ModifyOrderRequest, request: Request):
+    from routes.ownership import require_session
+    require_session(request, req.session_id)
     order_svc = request.app.state.order_service
     result = order_svc.modify_order(order_id, req.session_id, req.updates)
     if not result.get("ok"):

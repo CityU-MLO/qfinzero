@@ -69,6 +69,11 @@ app = FastAPI(
 )
 
 
+from routes.ownership import ownership_middleware  # noqa: E402
+
+app.middleware("http")(ownership_middleware)
+
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error")

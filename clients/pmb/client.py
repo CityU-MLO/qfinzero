@@ -99,10 +99,12 @@ class PMBClient:
 
     DEFAULT_URL = PMB_URL
 
-    def __init__(self, base_url: str = None, timeout: int = 30):
+    def __init__(self, base_url: str = None, timeout: int = 30, headers: dict = None):
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+        if headers:   # e.g. the hub identity (x-qfz-user / x-qfz-role) to scope accounts
+            self._session.headers.update(headers)
 
     def __enter__(self):
         return self

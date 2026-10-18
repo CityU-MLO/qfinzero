@@ -12,6 +12,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from qfinzero import config
 from qfinzero.runtime import qfinzero_version
+from qfinzero.auth import AuthMiddleware, AuthStore
+from qfinzero.auth.routes import bootstrap_admin, build_router as build_auth_router
+from qfinzero.auth.store import load_secret
 from .proxy import ReverseProxy
 from . import supervisor as sup_mod
 from .supervisor import (
@@ -62,6 +65,10 @@ def _load_mcp_app():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.proxy = ReverseProxy()
+    try:
+        bootstrap_admin(app.state.auth_store(), log)
+    except Exception as e:  # noqa: BLE001 - a broken auth db must be visible, not fatal here
+        log.error("auth bootstrap failed: %s", e)
     if _supervision_enabled():
         app.state.supervisor = Supervisor()
         app.state.supervisor.start_all()
@@ -86,8 +93,19 @@ async def lifespan(app: FastAPI):
         app.state.supervisor.stop_all()
 
 
-def build_app() -> FastAPI:
+def build_app(auth_store: AuthStore | None = None) -> FastAPI:
     app = FastAPI(title="QFinZero", version=qfinzero_version(), lifespan=lifespan)
+
+    # ── authentication (users, roles, API keys); see qfinzero/auth ──
+    _store: list[AuthStore] = [auth_store] if auth_store else []
+
+    def store() -> AuthStore:
+        if not _store:
+            _store.append(AuthStore())
+        return _store[0]
+
+    app.state.auth_store = store
+    app.include_router(build_auth_router(store, load_secret))
 
     # MCP mounted in-process (single clean module — no child needed).
     mcp_app = _load_mcp_app()
@@ -154,6 +172,8 @@ def build_app() -> FastAPI:
             return HTMLResponse(_LANDING)
         return JSONResponse({"error": "web UI not running", "hint": "build infra/dashboard-web or set QFZ_SERVE_UI"}, status_code=503)
 
+    # Every request passes the auth middleware first (identity + access policy).
+    app.add_middleware(AuthMiddleware, store_factory=store)
     return app
 
 

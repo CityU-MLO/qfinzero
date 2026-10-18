@@ -23,7 +23,13 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(19350);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Loopback by default: clients reach UPQ through the hub (auth, /svc/upq).
+    // Set UPQ_HOST=0.0.0.0 to expose it directly.
+    let host: std::net::IpAddr = std::env::var("UPQ_HOST")
+        .ok()
+        .and_then(|h| h.parse().ok())
+        .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
+    let addr = SocketAddr::from((host, port));
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,

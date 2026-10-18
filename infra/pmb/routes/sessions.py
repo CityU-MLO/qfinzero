@@ -12,7 +12,8 @@ async def create_session(req: CreateSessionRequest, request: Request):
     session_svc = request.app.state.session_service
 
     account = account_svc.get_account(req.account_id)
-    if account is None:
+    from routes.ownership import owns
+    if account is None or not owns(request, account):
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_argument", "message": "account_id not found"},
@@ -280,6 +281,8 @@ async def restore_session(request: Request):
     existing_sessions = set(session_svc._sessions)
     try:
         account = account_svc.restore_account(account_raw)
+        from routes.ownership import owner_for_new
+        account.owner = owner_for_new(request)      # the restorer owns the branch
         session_id, clock = await session_svc.restore_checkpoint(checkpoint, account)
     except (TypeError, ValueError, KeyError) as exc:
         if account is not None:

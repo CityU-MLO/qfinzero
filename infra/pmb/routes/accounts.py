@@ -90,7 +90,10 @@ async def list_accounts(request: Request):
         state.account_id: sid for sid, state in session_svc._sessions.items()
     }
     accounts = []
+    from routes.ownership import owns
     for acc in svc.list_accounts():
+        if not owns(request, acc):
+            continue
         accounts.append(
             {
                 "account_id": acc.account_id,
@@ -100,6 +103,7 @@ async def list_accounts(request: Request):
                 "created_at": acc.created_at,
                 "current_date": acc.current_date,
                 "active_session_id": active_by_account.get(acc.account_id),
+                "owner": acc.owner,
             }
         )
     return {"accounts": accounts, "count": len(accounts)}
@@ -118,6 +122,8 @@ async def create_account(req: CreateAccountRequest, request: Request):
         except ValueError:
             req.market = Market.US
     account = _svc(request).create_account(req)
+    from routes.ownership import owner_for_new
+    account.owner = owner_for_new(request)
     status = _svc(request).status_view(account.account_id)
     return {
         "ok": True,

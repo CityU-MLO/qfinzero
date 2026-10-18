@@ -126,6 +126,7 @@ class AccountState(BaseModel):
 
 class Account(BaseModel):
     account_id: str
+    owner: Optional[str] = None      # hub username that created it (None = unscoped)
     base_currency: str = "USD"
     account_type: str = "MARGIN"
     market: Market = Market.US
