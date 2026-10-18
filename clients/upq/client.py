@@ -87,6 +87,7 @@ class UPQClient:
         end: str,
         fields: str = None,
         limit: int = None,
+        as_of: str = None,
     ) -> list[dict]:
         """Query stock minute bars.
 
@@ -110,6 +111,8 @@ class UPQClient:
             params["fields"] = fields
         if limit is not None:
             params["limit"] = limit
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/stock", params)
 
     def stock_daily(
@@ -119,6 +122,7 @@ class UPQClient:
         end: str,
         fields: str = None,
         indicators: str = None,
+        as_of: str = None,
     ) -> list[dict]:
         """Query stock daily bars with optional technical indicators.
 
@@ -142,6 +146,8 @@ class UPQClient:
             params["fields"] = fields
         if indicators:
             params["indicators"] = indicators
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/stock/daily", params)
 
     # ── Options ───────────────────────────────────────────────────
@@ -156,6 +162,7 @@ class UPQClient:
         include_greeks: bool = False,
         greek_model: str = None,
         greek_price_field: str = None,
+        as_of: str = None,
     ) -> list[dict]:
         """Query price data for a specific option contract.
 
@@ -190,6 +197,8 @@ class UPQClient:
             params["greek_model"] = greek_model
         if greek_price_field:
             params["greek_price_field"] = greek_price_field
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/option/ticker_query", params)
 
     def option_chain(
@@ -205,6 +214,7 @@ class UPQClient:
         include_greeks: bool = False,
         greek_model: str = None,
         greek_price_field: str = None,
+        as_of: str = None,
     ) -> list[dict]:
         """Query option chain for an underlying on a given date.
 
@@ -248,6 +258,8 @@ class UPQClient:
             params["greek_model"] = greek_model
         if greek_price_field:
             params["greek_price_field"] = greek_price_field
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/option/chain_query", params)
 
     # ── Dividends ──────────────────────────────────────────────────
@@ -257,6 +269,7 @@ class UPQClient:
         tickers: list[str],
         start: str,
         end: str,
+        as_of: str = None,
     ) -> list[dict]:
         """Query dividend data for stocks/ETFs.
 
@@ -273,6 +286,8 @@ class UPQClient:
             "start": start,
             "end": end,
         }
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/dividends/query", params)
 
     # ── Rates ─────────────────────────────────────────────────────
@@ -282,6 +297,7 @@ class UPQClient:
         start: str,
         end: str,
         tenors: str = None,
+        as_of: str = None,
     ) -> list[dict]:
         """Query treasury yield rates.
 
@@ -296,7 +312,60 @@ class UPQClient:
         params = {"start": start, "end": end}
         if tenors:
             params["tenors"] = tenors
+        if as_of:
+            params["as_of"] = as_of
         return self._get("/rates/query", params)
+
+    # ── Quotes + intraday chain ───────────────────────────────────
+
+    def stock_quote(self, tickers: list[str], start: str, end: str, limit: int = None,
+                    as_of: str = None) -> list[dict]:
+        """Minute NBBO for stocks: ticker, window_start, bid/ask price and size.
+
+        A row describes the book at the end of the minute ``window_start``;
+        minutes without a change are absent (carry the previous row forward).
+        """
+        params = {"tickers": ",".join(tickers), "start": start, "end": end}
+        if limit is not None:
+            params["limit"] = limit
+        if as_of:
+            params["as_of"] = as_of
+        return self._get("/stock/quote", params)
+
+    def option_quote(self, contract: str, start: str, end: str, limit: int = None,
+                     as_of: str = None) -> list[dict]:
+        """Minute NBBO for one option contract (same row semantics as stock_quote)."""
+        params = {"contract": contract, "start": start, "end": end}
+        if limit is not None:
+            params["limit"] = limit
+        if as_of:
+            params["as_of"] = as_of
+        return self._get("/option/quote", params)
+
+    def chain_snapshot(
+        self,
+        underlying: str,
+        at: str,
+        expiry_min: str = None,
+        expiry_max: str = None,
+        strike_min: float = None,
+        strike_max: float = None,
+        type: str = None,
+        include_greeks: bool = False,
+        as_of: str = None,
+    ) -> list[dict]:
+        """The option chain as it stood at ``at`` (ISO datetime): per contract the
+        last trade, volume so far today, latest bid/ask/mid, and optional Greeks
+        priced off the mid with the underlying's minute close."""
+        params = {"underlying": underlying, "at": at}
+        for k, v in (("expiry_min", expiry_min), ("expiry_max", expiry_max),
+                     ("strike_min", strike_min), ("strike_max", strike_max), ("type", type),
+                     ("as_of", as_of)):
+            if v is not None:
+                params[k] = v
+        if include_greeks:
+            params["include_greeks"] = "true"
+        return self._get("/option/chain_snapshot", params)
 
     # ── Utilities ─────────────────────────────────────────────────
 

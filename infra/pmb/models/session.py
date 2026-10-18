@@ -38,6 +38,11 @@ class ExecutionConfig(BaseModel):
     # and expire DAY / GTD orders. False restores the old "every bar is
     # tradable, orders never expire" behaviour.
     enforce_trading_hours: bool = True
+    # "quote": options fill against the NBBO when quotes exist (market orders
+    # at the ask/bid, marketable limits at the quote, resting limits at their
+    # price when a trade prints through), else against the bar.
+    # "bar": the old bar-only model (option_spread_pct applies).
+    option_fill_model: str = "quote"
 
 
 class ReproducibilityConfig(BaseModel):

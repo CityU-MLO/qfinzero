@@ -284,6 +284,13 @@ class SessionService:
                     )
                 cache.load_option_bars(contract, opt_bars)
 
+        # Minute sessions: load the options' minute NBBO so they fill and mark
+        # against the book (see ExecutionConfig.option_fill_model).
+        exec_cfg = req.execution_config or ExecutionConfig()
+        if (req.frequency == Frequency.MINUTE and req.universe.options
+                and exec_cfg.option_fill_model == "quote"):
+            await self._load_option_quotes(cache, req.universe.options, req.start_ts, req.end_ts)
+
         # For daily sessions, patch bar.open with 15:50 ET minute bar open price
         # to eliminate look-ahead bias (MARKET orders fill at bar.open).
         if req.frequency == Frequency.DAILY:
@@ -310,6 +317,7 @@ class SessionService:
                 option_spread_pct=exec_config.option_spread_pct,
                 partial_fill=exec_config.partial_fill,
                 enforce_trading_hours=exec_config.enforce_trading_hours,
+                option_fill_model=exec_config.option_fill_model,
             ),
             margin_engine=MarginEngine(account.margin_config),
             history=HistoryStore(),
@@ -566,6 +574,7 @@ class SessionService:
             margin_engine=state.margin_engine,
             segment=segment,
             trading_date=current_date,
+            option_quotes=state.cache.get_option_quotes_at(ts_ns),
         )
 
         for evt in exec_events:
@@ -924,7 +933,27 @@ class SessionService:
                         bar.window_start_ns = date_to_stock_ns[opt_date]
             state.cache.load_option_bars(contract, opt_bars)
             loaded += 1
-        return {"ok": True, "loaded": loaded, "skipped": skipped}
+        cfg = state.config.execution_config or ExecutionConfig()
+        quoted = 0
+        if minute and cfg.option_fill_model == "quote" and to_fetch:
+            quoted = await self._load_option_quotes(state.cache, to_fetch, start, end)
+        return {"ok": True, "loaded": loaded, "skipped": skipped, "quoted": quoted}
+
+    async def _load_option_quotes(self, cache, contracts: list[str], start: str, end: str) -> int:
+        """Fetch minute NBBO for ``contracts`` (bounded concurrency) into ``cache``.
+        Returns how many contracts had quotes."""
+        sem = asyncio.Semaphore(48)
+
+        async def fetch(contract: str):
+            async with sem:
+                return contract, await self._upq.get_option_quotes(contract, start, end)
+
+        n = 0
+        for contract, quotes in await asyncio.gather(*(fetch(c) for c in contracts)):
+            if quotes:
+                cache.load_option_quotes(contract, quotes)
+                n += 1
+        return n
 
     async def add_stocks(self, session_id: str, symbols: list[str]) -> dict:
         """Dynamically load additional stock symbols into a running session.

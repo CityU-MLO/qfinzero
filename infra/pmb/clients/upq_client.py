@@ -120,6 +120,27 @@ class UPQClient:
             for r in rows
         ]
 
+    async def get_option_quotes(self, contract: str, start: str, end: str):
+        """GET /option/quote — minute NBBO for one contract (empty if the UPQ
+        build has no quote store or the contract has no quotes)."""
+        from domain.session_clock import iso_to_ns, ns_to_iso
+        from models.market import Quote
+        try:
+            resp = await self._client.get(
+                "/option/quote",
+                params={"contract": contract, "start": ns_to_iso(iso_to_ns(start))[:19],
+                        "end": ns_to_iso(iso_to_ns(end))[:19], "limit": 100000},
+            )
+        except Exception:  # noqa: BLE001 - quotes are an optional enhancement
+            return []
+        if resp.status_code != 200:
+            return []
+        return [
+            Quote(window_start_ns=r["window_start"], bid=r.get("bid_price"), ask=r.get("ask_price"),
+                  bid_size=r.get("bid_size") or 0, ask_size=r.get("ask_size") or 0)
+            for r in resp.json()
+        ]
+
     async def option_chain(self, underlying: str, date: str, expiry_min: str | None = None) -> list[dict]:
         """GET /option/chain_query — the day's option chain (strikes, greeks) for an underlying."""
         params = {

@@ -18,11 +18,12 @@ from typing import List, Literal, Optional
 # Add project root to path so we can import qfinzero clients without modifying the package
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from clients.upq.client import UPQClient
 from clients.esp.client import ESPClient
 from clients.pmb.client import PMBClient
+from qfinzero import timelock
 from qfinzero.config import (
     PMB_URL as DEFAULT_PMB_URL,
     ESP_URL as DEFAULT_ESP_URL,
@@ -71,6 +72,32 @@ mcp = FastMCP(
 # ════════════════════════════════════════════════════════════════════════════
 
 
+# ── Time lock ─────────────────────────────────────────────────────────────
+# Data tools take an optional session_id. When a session is bound (by the
+# X-QFZ-Session connection header, QFZ_TIME_LOCK_SESSION, or session_id), every
+# UPQ query is capped at the close of that session's current bar and ESP
+# queries run "as of" that time, so an agent cannot read the future.
+# QFZ_REQUIRE_SESSION=1 refuses unbound data queries. See qfinzero/timelock.py.
+
+def _header_session(ctx: Optional[Context]) -> Optional[str]:
+    try:
+        request = ctx.request_context.request if ctx is not None else None
+        return request.headers.get(timelock.HEADER) if request is not None else None
+    except Exception:  # noqa: BLE001 - stdio transport / no request context
+        return None
+
+
+def _lock(ctx: Optional[Context], session_id: Optional[str]) -> Optional[str]:
+    """``as_of`` for this call, or None when unlocked (raises TimeLockError)."""
+    session = timelock.bound_session(_header_session(ctx), session_id)
+
+    def fetch(sid: str) -> dict:
+        with PMBClient(PMB_URL) as client:
+            return client.get_session_state(sid)["clock"]
+
+    return timelock.resolve(session, fetch)
+
+
 @mcp.tool()
 def upq_health() -> str:
     """Check health of the UPQ (Unified Price Query) market data service."""
@@ -96,6 +123,8 @@ def upq_stock_daily(
     end: str,
     fields: Optional[str] = None,
     indicators: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query daily OHLCV bars for one or more stocks, with optional technical indicators.
 
@@ -108,14 +137,17 @@ def upq_stock_daily(
         indicators: Comma-separated technical indicators, e.g. "ma_20,ema_12,macd"
                     Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average),
                     macd (MACD 12/26/9 — returns macd, macd_signal, macd_histogram columns).
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of daily bar objects with indicator columns appended when requested.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
         return json.dumps(client.stock_daily(
             tickers=tickers, start=start, end=end,
-            fields=fields, indicators=indicators,
+            fields=fields, indicators=indicators, as_of=as_of,
         ))
 
 
@@ -126,6 +158,8 @@ def upq_stock_minute(
     end: str,
     fields: Optional[str] = None,
     limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query minute-level OHLCV bars for one or more stocks.
 
@@ -136,15 +170,17 @@ def upq_stock_minute(
         fields: Comma-separated fields, e.g. "ticker,window_start,close,volume"
                 Available: ticker, window_start, open, high, low, close, volume, transactions
         limit: Max rows to return (default 10000, max 100000)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of minute bar objects. window_start is nanoseconds since epoch.
         Use upq_ns_to_iso to convert timestamps.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
-        return json.dumps(
-            client.stock_minute(tickers=tickers, start=start, end=end, fields=fields, limit=limit)
-        )
+        return json.dumps(client.stock_minute(
+            tickers=tickers, start=start, end=end, fields=fields, limit=limit, as_of=as_of))
 
 
 @mcp.tool()
@@ -160,6 +196,8 @@ def upq_option_chain(
     include_greeks: bool = False,
     greek_model: Optional[str] = None,
     greek_price_field: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query the full option chain for an underlying stock on a given date.
 
@@ -177,6 +215,8 @@ def upq_option_chain(
             Greeks use European-style approximation for American options.
         greek_model: Pricing model — only "bsm" supported in V1
         greek_price_field: Price field for IV inversion — only "close" in V1
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of option contract objects. When include_greeks=True,
@@ -188,9 +228,11 @@ def upq_option_chain(
         UPQ automatically falls back to nearest available expiry (±7 days first,
         then same calendar month) within the same underlying/type/strike filter context.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
             client.option_chain(
+                as_of=as_of,
                 underlying=underlying,
                 date=date,
                 expiry_min=expiry_min,
@@ -216,6 +258,8 @@ def upq_option_contract(
     include_greeks: bool = False,
     greek_model: Optional[str] = None,
     greek_price_field: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query price history for a specific option contract.
 
@@ -231,6 +275,8 @@ def upq_option_contract(
             Greeks use European-style approximation for American options.
         greek_model: Pricing model — only "bsm" supported in V1
         greek_price_field: Price field for IV inversion — only "close" in V1
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of price bars for the contract.
@@ -238,9 +284,11 @@ def upq_option_contract(
         When include_greeks=True, each row includes iv, delta, gamma, theta,
         vega, rho, greek_status, and greek_meta fields.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
         return json.dumps(
             client.option_contract(
+                as_of=as_of,
                 contract=contract,
                 start=start,
                 end=end,
@@ -258,6 +306,8 @@ def upq_dividends(
     tickers: list[str],
     start: str,
     end: str,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query dividend history for stocks/ETFs.
 
@@ -265,12 +315,15 @@ def upq_dividends(
         tickers: Stock/ETF symbols, e.g. ["JEPQ", "AAPL"]
         start: Start date "YYYY-MM-DD"
         end: End date "YYYY-MM-DD"
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of dividend objects with ticker, ex_dividend_date, amount.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
-        return json.dumps(client.dividends(tickers=tickers, start=start, end=end))
+        return json.dumps(client.dividends(tickers=tickers, start=start, end=end, as_of=as_of))
 
 
 @mcp.tool()
@@ -278,6 +331,8 @@ def upq_rates(
     start: str,
     end: str,
     tenors: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query US Treasury yield rates.
 
@@ -286,12 +341,108 @@ def upq_rates(
         end: End date "YYYY-MM-DD"
         tenors: Comma-separated tenor codes, e.g. "1M,3M,1Y,2Y,5Y,10Y,30Y"
                 Omit for all tenors.
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON list of daily rate objects with one field per tenor.
     """
+    as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
-        return json.dumps(client.rates(start=start, end=end, tenors=tenors))
+        return json.dumps(client.rates(start=start, end=end, tenors=tenors, as_of=as_of))
+
+
+@mcp.tool()
+def upq_stock_quote(
+    tickers: list[str],
+    start: str,
+    end: str,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Minute NBBO (bid/ask price and size) for stocks.
+
+    Each row is the book at the end of the minute ``window_start`` (ns since
+    epoch); minutes without a change are absent, so carry the previous row
+    forward.
+
+    Args:
+        tickers: Symbols, e.g. ["AAPL"]
+        start: ISO datetime (UTC), e.g. "2026-01-07T14:30:00"
+        end: ISO datetime (UTC)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.stock_quote(tickers, start, end, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
+def upq_option_quote(
+    contract: str,
+    start: str,
+    end: str,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Minute NBBO for one option contract (rows as in upq_stock_quote).
+
+    Args:
+        contract: OPRA contract, e.g. "O:SPY260107C00690000"
+        start: ISO datetime (UTC)
+        end: ISO datetime (UTC)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.option_quote(contract, start, end, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
+def upq_chain_snapshot(
+    underlying: str,
+    at: Optional[str] = None,
+    expiry_min: Optional[str] = None,
+    expiry_max: Optional[str] = None,
+    strike_min: Optional[float] = None,
+    strike_max: Optional[float] = None,
+    option_type: Optional[str] = None,
+    include_greeks: bool = False,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """The intraday option chain as it stood at a moment.
+
+    Per contract: last trade price and time, volume so far today, latest
+    bid/ask/size and mid, and (include_greeks) IV and Greeks priced off the
+    mid with the underlying's minute close. Use this instead of
+    upq_option_chain (end-of-day) during a trading session.
+
+    Args:
+        underlying: e.g. "SPY"
+        at: ISO datetime (UTC). Defaults to the locked session's current time.
+        expiry_min / expiry_max: YYYY-MM-DD bounds
+        strike_min / strike_max: strike bounds
+        option_type: "C" or "P"
+        include_greeks: add iv, delta, gamma, theta, vega, rho
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
+    """
+    as_of = _lock(ctx, session_id)
+    at = at or as_of
+    if not at:
+        raise ValueError("pass at (ISO datetime) or a session_id")
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.chain_snapshot(
+            underlying, timelock.utc_iso(at), expiry_min=expiry_min, expiry_max=expiry_max,
+            strike_min=strike_min, strike_max=strike_max, type=option_type,
+            include_greeks=include_greeks, as_of=as_of))
 
 
 @mcp.tool()
@@ -357,6 +508,8 @@ def esp_query_events(
     cursor: Optional[str] = None,
     view: Literal["compact", "full"] = "full",
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query unified events from all sources (news, earnings, economic calendar).
 
@@ -378,6 +531,8 @@ def esp_query_events(
         cursor: Pagination cursor from a previous response's next_cursor field
         view: "compact" (no payload, faster) or "full" (includes event payload, default "full")
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
@@ -389,6 +544,11 @@ def esp_query_events(
     if end_date and not end_utc:
         end_utc = f"{end_date}T23:59:59+00:00"
 
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
+        if mode == "window":
+            end_utc = timelock.clamp_end(end_utc, as_of)
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.query_events(
@@ -428,6 +588,8 @@ def esp_stream_events(
     tickers: Optional[list[str]] = None,
     limit: int = 50,
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Incrementally poll for new events since a cursor position.
 
@@ -440,10 +602,15 @@ def esp_stream_events(
         tickers: Filter by stock tickers
         limit: Max events per batch (default 50)
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.stream(
@@ -464,6 +631,8 @@ def esp_econ_calendar(
     limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query the US economic events calendar (GDP, CPI, FOMC, jobs data, PMI, etc.).
 
@@ -474,10 +643,15 @@ def esp_econ_calendar(
         limit: Max events per page (default 100)
         cursor: Pagination cursor
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.econ_calendar(
@@ -500,6 +674,8 @@ def esp_earnings_calendar(
     limit: int = 100,
     cursor: Optional[str] = None,
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Query the earnings release calendar.
 
@@ -511,10 +687,15 @@ def esp_earnings_calendar(
         limit: Max events per page (default 100)
         cursor: Pagination cursor
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.earnings_calendar(
@@ -536,6 +717,8 @@ def esp_next_triggers(
     horizon_minutes: int = 1440,
     limit: int = 5,
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Get the next high-importance events to use as agent wakeup triggers.
 
@@ -548,11 +731,16 @@ def esp_next_triggers(
         horizon_minutes: How far ahead to look in minutes (default 1440 = 24h)
         limit: Max triggers to return (default 5)
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, triggers[]
         Each trigger has: trigger_time_utc, event_id, event, reason_codes
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.next_triggers(
@@ -589,6 +777,8 @@ def esp_search_news(
     publisher: Optional[str] = None,
     limit: int = 20,
     cursor: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Search news articles with keyword and publisher filtering.
 
@@ -600,10 +790,15 @@ def esp_search_news(
         publisher: Case-insensitive substring search in publisher name
         limit: Max articles per page (1-500, default 50)
         cursor: Pagination cursor from previous response's next_cursor field
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        end_utc = timelock.clamp_end(end_utc, as_of)
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.search_news(
@@ -625,6 +820,8 @@ def esp_timeline(
     end_utc: Optional[str] = None,
     bucket_minutes: int = 60,
     now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """Get a compact time-bucketed summary of events for specific tickers.
 
@@ -637,11 +834,17 @@ def esp_timeline(
         end_utc: End datetime ISO format
         bucket_minutes: Bucket size in minutes (default 60 = hourly buckets)
         now_utc: Override current time for backtesting replay (ISO datetime)
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, buckets[]
         Each bucket has: bucket_start_utc, bucket_end_utc, count, events[]
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
+        end_utc = timelock.clamp_end(end_utc, as_of)
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.timeline(

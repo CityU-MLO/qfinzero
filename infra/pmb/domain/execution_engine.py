@@ -4,7 +4,7 @@ import uuid
 from models.enums import Side, OrderType, OrderStatus, InstrumentType, EventType
 from models.order import Order
 from models.trade import Trade
-from models.market import StockBar, OptionBar
+from models.market import StockBar, OptionBar, Quote
 from models.event import (
     EventEnvelope,
     OrderEventPayload,
@@ -30,10 +30,13 @@ class ExecutionEngine:
         option_spread_pct: float = 0.0,
         partial_fill: PartialFillConfig | None = None,
         enforce_trading_hours: bool = False,
+        option_fill_model: str = "bar",
     ):
         self._rng = random.Random(seed)
         self._partial = partial_fill or PartialFillConfig()
         self._enforce_hours = enforce_trading_hours
+        self._quote_model = option_fill_model == "quote"
+        self._quotes: dict[str, Quote] = {}
         self._slippage_bps = slippage_bps
         self._option_spread_pct = option_spread_pct
         self._fee_model = fee_model
@@ -54,6 +57,7 @@ class ExecutionEngine:
         margin_engine: MarginEngine,
         segment: Segment = Segment.REGULAR,
         trading_date: str | None = None,
+        option_quotes: dict[str, Quote] | None = None,
     ) -> tuple[list[EventEnvelope], list[Trade]]:
         """Process all open orders against current bars.
 
@@ -69,6 +73,7 @@ class ExecutionEngine:
         """
         events: list[EventEnvelope] = []
         trades: list[Trade] = []
+        self._quotes = (option_quotes or {}) if self._quote_model else {}
 
         open_orders = order_manager.get_open_orders()
         if self._enforce_hours:
@@ -126,9 +131,11 @@ class ExecutionEngine:
         leg_fills: list[tuple[Order, float]] = []
         for leg in legs:
             bar = self._get_bar_for_order(leg, stock_bars, option_bars)
-            if bar is None:
+            quote = self._quote_for(leg)
+            if bar is None and quote is None:
                 return events, trades  # Can't execute — wait
-            fill_price = self._calculate_fill_price(bar, leg)
+            fill_price = (self._quote_fill_price(quote, bar, leg) if quote is not None
+                          else self._calculate_fill_price(bar, leg))
             if fill_price is None:
                 return events, trades  # Can't execute — wait
             leg_fills.append((leg, fill_price))
@@ -212,10 +219,12 @@ class ExecutionEngine:
         trades: list[Trade] = []
 
         bar = self._get_bar_for_order(order, stock_bars, option_bars)
-        if bar is None:
+        quote = self._quote_for(order)
+        if bar is None and quote is None:
             return events, trades
 
-        fill_price = self._calculate_fill_price(bar, order)
+        fill_price = (self._quote_fill_price(quote, bar, order) if quote is not None
+                      else self._calculate_fill_price(bar, order))
         if fill_price is None:
             return events, trades
 
@@ -271,7 +280,12 @@ class ExecutionEngine:
         # Execute fill (optionally capped at a share of the bar's volume)
         fill_qty = order.remaining_qty
         if self._partial.enabled:
-            cap = int(getattr(bar, "volume", 0) * self._partial.max_fill_ratio_per_tick)
+            if quote is not None:
+                # displayed size on the side we take
+                shown = quote.ask_size if order.side == Side.BUY else quote.bid_size
+                cap = int(shown)
+            else:
+                cap = int(getattr(bar, "volume", 0) * self._partial.max_fill_ratio_per_tick)
             if cap <= 0:
                 return events, trades      # no liquidity this bar: wait
             fill_qty = min(fill_qty, cap)
@@ -353,6 +367,49 @@ class ExecutionEngine:
         elif iid.startswith("OPTION:"):
             contract = iid.split(":", 1)[1]
             return option_bars.get(contract)
+        return None
+
+    def _quote_for(self, order: Order) -> Quote | None:
+        if not self._quote_model or not order.instrument_id.startswith("OPTION:"):
+            return None
+        return self._quotes.get(order.instrument_id.split(":", 1)[1])
+
+    def _quote_fill_price(self, quote: Quote, bar: OptionBar | None, order: Order) -> float | None:
+        """Fill against the book in force at the bar open.
+
+        MARKET takes the ask (buy) or bid (sell). A marketable LIMIT fills at the
+        quote; a resting LIMIT fills at its own price only if a trade printed
+        through it during the bar. STOP orders trigger on the bar or the book and
+        then take the quote. No book side, no fill (the order waits).
+        """
+        is_buy = order.side == Side.BUY
+        take = quote.valid_ask if is_buy else quote.valid_bid
+
+        def through(price: float) -> bool:
+            if bar is None:
+                return False
+            return bar.low <= price if is_buy else bar.high >= price
+
+        def limit_fill(limit: float) -> float | None:
+            if take is not None and (take <= limit if is_buy else take >= limit):
+                return round(take, 4)
+            if through(limit):
+                return round(limit, 4)
+            return None
+
+        if order.order_type == OrderType.MARKET:
+            return round(take, 4) if take is not None else None
+        if order.order_type == OrderType.LIMIT:
+            return limit_fill(order.limit_price)
+        stop = order.stop_price
+        trig = (bar is not None and (bar.high >= stop if is_buy else bar.low <= stop)) or (
+            take is not None and (take >= stop if is_buy else take <= stop))
+        if not trig:
+            return None
+        if order.order_type == OrderType.STOP:
+            return round(take, 4) if take is not None else None
+        if order.order_type == OrderType.STOP_LIMIT:
+            return limit_fill(order.limit_price)
         return None
 
     def _calculate_fill_price(self, bar: StockBar | OptionBar, order: Order) -> float | None:
