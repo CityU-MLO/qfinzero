@@ -1,0 +1,180 @@
+# 平台指南：时间锁、交易时段、日内交易、研究与账号
+
+> English: [docs/en/platform-guide.md](../en/platform-guide.md)
+
+本指南介绍基础 API 之外，agent 和研究者需要了解的内容：QFinZero 如何让每次查询都符合时间点，交易时段和委托时间怎么运作，期权如何按报价成交，如何挖掘日内因子，以及如何带账号运行服务器。
+
+## 1. 时间锁
+
+在模拟中交易的 agent 只能看到它决策那根 bar 时已知的信息。QFinZero 在服务器端强制执行这一点，而不是靠提示词。
+
+**可见性规则（UPQ `as_of`）。** 每个 UPQ 数据接口都接受 `as_of`。取值可以是 ISO 时间，不带时区时按 UTC 处理；也可以是纳秒整数。只返回在 `as_of` 时已经确定的数据：
+
+| 数据 | 可见条件 |
+|------|----------|
+| 从 `t` 开始的分钟线或分钟报价 | `t + 60s <= as_of` |
+| D 日股票日线 | `as_of >= D 16:00 ET` |
+| D 日期权日线和收盘期权链 | `as_of >= D 16:15 ET` |
+| 利率、分红 | 截至 `as_of` 所在交易日 |
+
+用 `UPQ_AS_OF=<时间>` 启动 UPQ 会给所有请求设一个上限。请求只能要求更早的 `as_of`，不能更晚。这个值无法解析时，UPQ 不返回任何数据。
+
+**绑定 session。** PMB session 的时钟会自动转换成 `as_of`：分钟级 session 取当前 bar 的收盘时刻，日级 session 取当前交易日的 16:00 ET。绑定哪个 session 按以下优先级决定：
+
+1. MCP 或 HTTP 连接的 `X-QFZ-Session` header。基准测试的执行器设置它，agent 无法修改；
+2. 环境变量 `QFZ_TIME_LOCK_SESSION`，适合每个 episode 起一个 MCP 服务；
+3. 数据工具的 `session_id` 参数。
+
+绑定 session 后：
+- `upq_*` 工具会带上 `as_of`。
+- ESP 工具以 `now_utc = as_of` 运行，并把查询窗口的结束时间截到 `as_of`。
+- `research_*` 工具会截断日期范围。
+
+设置 `QFZ_REQUIRE_SESSION=1` 后，没有绑定任何 session 的数据查询一律拒绝。
+
+```json
+{ "mcpServers": { "qfinzero": {
+    "url": "https://your-host/mcp/",
+    "headers": { "Authorization": "Bearer qfz_…", "X-QFZ-Session": "sess_3f2a9c1e" } } } }
+```
+
+日内 Greeks 同样符合时间点：使用同一时刻标的的分钟收盘价，而不是当天收盘价。
+
+## 2. 交易时段与委托时间
+
+PMB 把美股交易时间分为四段（美东时间）：
+
+| 时段 | 时间 | 归属交易日 |
+|------|------|------------|
+| 夜盘 | 20:00–04:00 | 下一个工作日 |
+| 盘前 | 04:00–09:30 | 当天 |
+| 常规 | 09:30–16:00 | 当天 |
+| 盘后 | 16:00–20:00 | 当天 |
+
+每笔委托都有 `trading_hours`：
+
+- `REGULAR`（默认）：只在常规时段成交，任何单型都可以。
+- `EXTENDED`：盘前、常规和盘后，只接受限价单。
+- `OVERNIGHT`：全部四段（24/5），只接受限价单。
+
+期权只在常规时段交易。`time_in_force` 会被执行：
+- `DAY` 单在它首次可成交的那个交易日结束时过期。收盘后才下的常规时段单会等到下一个交易日。
+- `GTD` 单在 `expire_ts` 过期。
+- `GTC` 单一直有效。
+
+`execution_config.partial_fill = {"enabled": true, "max_fill_ratio_per_tick": 0.1}` 会把每次成交量限制在该 bar 成交量的一定比例内；按报价成交时，改为限制在挂单显示的数量内。`enforce_trading_hours: false` 恢复旧行为：每根 bar 都能成交，委托永不过期。
+
+step 的返回结果会带上 `clock.segment` 和 `clock.trading_date`。
+
+**夜盘数据。** Databento 适配器能读取 Blue Ocean（`OCEA.MEMOIR`）文件，所以夜盘分钟线可以和任何供应商的日盘 bar 并存。日线从不包含夜盘成交。
+
+**只在需要时唤醒 agent。** 分钟级 session 每天有 390 根常规时段 bar。`pmb_step_until`（REST 接口为 `POST /v1/sessions/{id}/step_until`）会一直推进，直到下面任一条件先发生：
+- 有成交；
+- 价格触发，例如 `{"symbol": "SPY", "op": ">=", "price": 600}`；
+- 到达指定时间（`until_ts`）；
+- 进入某个时段，例如 `stop_on_segment: "REGULAR"` 会跳到下一次开盘；
+- 达到 `max_steps`。
+
+返回委托和成交事件、最后一个行情 tick 和账户状态。
+
+## 3. 报价与期权成交
+
+两个报价存储保存每分钟结束时的最优买卖价：`stock_quote_minute` 和 `option_quote_minute`，来自 Databento 的 `cmbp-1`、`cbbo-1s/1m` 和 `bbo-1s/1m`。没有变化的分钟不存储，读取时沿用上一条报价。
+
+| 接口 | MCP 工具 | 内容 |
+|------|----------|------|
+| `/stock/quote` | `upq_stock_quote` | 股票分钟 NBBO |
+| `/option/quote` | `upq_option_quote` | 单个合约的分钟 NBBO |
+| `/option/chain_snapshot` | `upq_chain_snapshot` | 某一时刻的期权链：最近成交、当日累计成交量、买卖价和中间价、按中间价计算的 Greeks |
+
+分钟级 session 会加载每个期权的报价。`execution_config.option_fill_model = "quote"`（默认）时：
+
+- 市价单在 bar 开盘时，买入按卖价成交，卖出按买价成交；
+- 能立即成交的限价单按报价成交；挂着的限价单只有在该 bar 内有成交价穿过限价时，才按限价成交；
+- 只要有报价，没有成交的分钟也能成交；
+- 持仓按中间价估值。
+
+`option_fill_model = "bar"` 保留只看 bar 的旧模型，用 `option_spread_pct` 近似点差。
+
+## 4. 日内研究
+
+`qfinzero.research` 用 DuckDB 直接读取 UPQ 存储。一个因子就是一个表达式：
+
+```bash
+qfz-research fields                                   # 字段和函数列表
+qfz-research eval "cs_rank(-pct(close, 15))" --start 2026-08-10 --end 2026-08-21 \
+    --universe 500 --horizons 5,15,30
+qfz-research backtest "cs_rank(-pct(close, 15))" --start 2026-08-10 --end 2026-08-21 \
+    --rebalance 30 --fraction 0.1 --cost-bps 0.5
+```
+
+| 元素 | 含义 |
+|------|------|
+| 字段 | `open high low close volume transactions vwap ret minute`；有股票报价时还有 `bid ask mid spread imbalance` |
+| 时间序列 | `ts_mean ts_sum ts_std ts_min ts_max ts_zscore (x, n)`、`ts_corr ts_cov (x, y, n)`、`delay delta pct (x, n)` |
+| 截面 | `cs_rank cs_zscore cs_demean (x)` |
+| 标量 | `abs log sign sqrt`、`max min (a, b)`、`+ - * /` |
+
+时间点规则内置在语言里：
+
+- 窗口在当前 bar 结束，必须填满，每个交易日重置（除非加 `--cross-day`）；
+- `delay`、`delta`、`pct` 要求 `n >= 1`；
+- `t` 时刻的信号在 `t+1` 开盘入场；
+- 股票池按前一交易日成交额取前 N 名。
+
+**评估**输出 IC、Rank IC、ICIR、t 值、分层收益、多空价差、最高层换手率和按小时分组的 IC。各个预测周期互不重叠。
+
+**回测**规则如下：
+- 每 k 根 bar 再平衡一次。
+- 等权持有排名最高的一部分股票；做多空时同时做空最低的一部分。
+- 收盘前平仓。
+- 成本按 `cost_bps` 加上报价的半个点差计算。
+
+在参考服务器上，500 只股票、10 天分钟数据的评估约需 4 秒。
+
+agent 通过 `research_eval_factor` 和 `research_backtest` 使用同一个引擎。这两个工具受 `QFZ_RESEARCH_MAX_DAYS`（默认 40 个交易日）和 `QFZ_RESEARCH_MAX_UNIVERSE`（默认 1000）限制，并遵守时间锁。
+
+## 5. 账号、角色与 API key
+
+hub 对网站、`/svc/*` 和 `/mcp` 的每个请求做身份认证。
+
+| 角色 | 权限 |
+|------|------|
+| viewer | 查看数据、session 和控制台 |
+| researcher | 另外可以交易、做研究、使用 MCP |
+| admin | 另外可以管理数据源、用户和 key |
+
+浏览器在 `/login` 登录，得到 HttpOnly 的 session cookie。agent 和脚本使用 API key（`Authorization: Bearer qfz_…` 或 `X-API-Key`），可以在账号页或用 `qfz-auth create-key` 创建。key 以其所有者的角色行事。
+
+PMB 按创建者隔离账户和 session：其他人访问返回 404，admin 能看到全部。hub 会剥除客户端发来的身份 header，只把验证过的 `x-qfz-user` 和 `x-qfz-role` 转发给各服务。
+
+**首次启动。** 以下方式任选其一：
+
+- 启动前设置 `QFZ_ADMIN_PASSWORD`（可选 `QFZ_ADMIN_USERNAME`）；
+- 执行 `qfz-auth create-user <name> --role admin`；
+- 打开 `/setup`，输入 hub 日志里打印的一次性 token。这个 token 同时保存在 `$QFZ_DATA_ROOT/_state/setup_token`。
+
+```bash
+qfz-auth list
+qfz-auth create-user alice --role researcher
+qfz-auth create-key alice --name eval-runner      # key 只打印一次
+qfz-auth set-role alice viewer
+qfz-auth disable alice
+```
+
+| 变量 | 默认值 | 作用 |
+|------|--------|------|
+| `QFZ_AUTH_MODE` | `required` | 设为 `off` 关闭检查，用于本地开发 |
+| `QFZ_SECRET_KEY` | 自动生成到 `_state/auth_secret` | cookie 签名密钥 |
+| `QFZ_SESSION_DAYS` | `7` | 浏览器 session 有效期 |
+| `QFZ_COOKIE_SECURE` | `auto` | 经 HTTPS 访问时使用 `Secure` cookie |
+| `QFZ_AUTH_DB` | `_state/auth.sqlite3` | 用户和 key 的存储 |
+| `QFZ_PUBLIC_HOSTS` | （无） | 允许访问 `/mcp` 的公网主机名 |
+
+放在反向代理后面时，在代理上终止 TLS，并转发 `X-Forwarded-Proto` 和 `X-Forwarded-For`。UPQ 和 Next.js 子进程默认只监听 127.0.0.1（可用 `UPQ_HOST` 覆盖），hub 是唯一的公网入口。
+
+其他安全措施：
+- 密码用 scrypt 哈希。
+- API key 只保存 SHA-256 摘要。
+- 登录失败次数会被限流。
+- 修改密码后，其他所有浏览器会被登出。

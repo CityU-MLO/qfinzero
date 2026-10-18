@@ -24,7 +24,8 @@ everything:
 
 | Path | Serves |
 |------|--------|
-| `/` | Web UI (dashboard) — **incl. its own `/api/*` backend** |
+| `/` | Website: landing page, `/login`, and the signed-in console (`/chat`, `/broker`, `/data`, `/account`, …) — **incl. its own `/api/*` backend** |
+| `/auth/*` | Sign-in, API keys and user management |
 | `/svc/upq/*` | Market data (UPQ) — raw REST |
 | `/svc/esp/*` | News & events (ESP) — raw REST |
 | `/svc/pmb/*` | Paper broker (PMB) — raw REST |
@@ -92,6 +93,40 @@ branch with `POST /svc/pmb/v1/sessions/restore` using the returned JSON body.
 - **ESP -> MongoDB + SQLite**: ESP reads from three local data sources.
 - **UPQ** is fully independent.
 
+## Agents: time lock, trading sessions and research
+
+- **Time lock.** Every UPQ query takes `as_of`; bind an agent to a PMB session
+  (`X-QFZ-Session` header, `QFZ_TIME_LOCK_SESSION`, or `session_id`) and every
+  data tool answers as of the session's current bar, enforced server-side.
+- **Trading sessions.** Orders carry `REGULAR`, `EXTENDED` or `OVERNIGHT`
+  trading hours (20:00–04:00 ET overnight belongs to the next trading day);
+  DAY/GTD expiry and volume-capped partial fills are enforced;
+  `pmb_step_until` wakes the agent on a fill, a price, a time or the open.
+- **Quotes.** Minute NBBO stores for stocks and options, an intraday option
+  chain snapshot with Greeks off the mid, and options that fill against the
+  book in minute sessions.
+- **Research.** `qfz-research eval|backtest "cs_rank(-pct(close, 15))" …` (and
+  the MCP tools `research_eval_factor` / `research_backtest`) evaluate a factor
+  expression with IC, quantile spreads, turnover and cost-aware backtests.
+
+Details: [docs/en/platform-guide.md](docs/en/platform-guide.md).
+
+## Accounts and sign-in
+
+The hub requires sign-in for the console, `/svc/*` and `/mcp`. Roles are
+viewer (read), researcher (trade, research, MCP) and admin (also data and
+users). Agents use API keys (`Authorization: Bearer qfz_…`) from the account
+page or `qfz-auth create-key`. PMB accounts and sessions are private to the
+user who created them.
+
+```bash
+qfz-auth create-user you --role admin    # or set QFZ_ADMIN_PASSWORD before the first start
+qfz-server                                # then open http://127.0.0.1:19777/login
+```
+
+`QFZ_AUTH_MODE=off` disables sign-in for local development. All settings:
+[platform guide §5](docs/en/platform-guide.md#5-accounts-roles-and-api-keys).
+
 ## Data Pipeline
 
 UPQ is fed by a built-in, out-of-the-box pipeline (`qfz-data`) that manages three
@@ -144,7 +179,10 @@ header, so batch downloads, per-symbol folders and mixed layouts all work.
 | `ohlcv-1m`, `ohlcv-1s` | minute + daily |
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily |
 | `trades`, `tbbo`, `tcbbo`, `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily, built from trade records |
-| `bbo-*`, `cbbo-*`, definition, statistics | indexed, not converted (UPQ has no quote store) |
+| `cmbp-1`, `cbbo-*`, `bbo-*` | `option_quote_minute` / `stock_quote_minute` (last book per minute) |
+| definition, statistics, status | indexed, not converted |
+
+`OCEA.MEMOIR` (Blue Ocean) adds 20:00–04:00 ET overnight minute bars.
 
 `OPRA.*` datasets become `option_minute` / `option_day` with OSI symbols rewritten
 to the UPQ form (`SPY   250117C00500000` → `O:SPY250117C00500000`). US equity
@@ -402,9 +440,10 @@ Data paths (all default under `QFZ_DATA_ROOT`, default `/data/qfinzero`):
 
 ## Documentation
 
-- [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
-- [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
-- [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
+- [Platform guide](docs/en/platform-guide.md) — time lock, trading sessions, quotes, research, accounts
+- [UPQ API Reference](docs/en/upq/README.md) | [Agent Guide](docs/en/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
+- [ESP API Reference](docs/en/esp/README.md) | [OpenAPI](docs/esp/openapi.yaml)
+- [PMB API Reference](docs/en/pmb/README.md) | [Agent Guide](docs/en/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
 - [Data adapters](docs/en/data-adapters.md) — the UPQ storage contract, how to add a vendor, Databento reference
 
 ## License

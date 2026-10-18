@@ -22,7 +22,8 @@ QFinZero 作为**单一公开端口上的单一服务器**（`19777`）运行。
 
 | 路径 | 提供内容 |
 |------|--------|
-| `/` | Web UI（仪表盘）—— **含其自有的 `/api/*` 后端** |
+| `/` | 网站：首页、`/login`，以及登录后的控制台（`/chat`、`/broker`、`/data`、`/account` 等）—— **含其自有的 `/api/*` 后端** |
+| `/auth/*` | 登录、API key 和用户管理 |
 | `/svc/upq/*` | 市场数据 (UPQ) —— 原始 REST |
 | `/svc/esp/*` | 新闻与事件 (ESP) —— 原始 REST |
 | `/svc/pmb/*` | 模拟券商 (PMB) —— 原始 REST |
@@ -79,6 +80,26 @@ QFinZero 作为**单一公开端口上的单一服务器**（`19777`）运行。
 - **ESP -> MongoDB + SQLite**：ESP 从三个本地数据源读取。
 - **UPQ** 完全独立。
 
+## Agent：时间锁、交易时段与研究
+
+- **时间锁。** 每个 UPQ 查询都接受 `as_of`。把 agent 绑定到一个 PMB session（`X-QFZ-Session` header、`QFZ_TIME_LOCK_SESSION` 或 `session_id`）后，所有数据工具都按该 session 当前的 bar 作答，由服务器强制执行。
+- **交易时段。** 委托带有 `REGULAR`、`EXTENDED` 或 `OVERNIGHT` 交易时间（美东 20:00–04:00 的夜盘归属下一个交易日）；DAY/GTD 过期和按成交量限制的部分成交都会执行；`pmb_step_until` 在成交、价格触发、到点或开盘时才唤醒 agent。
+- **报价。** 股票和期权的分钟 NBBO 存储、按中间价计算 Greeks 的日内期权链快照，以及分钟级 session 中按报价成交的期权。
+- **研究。** `qfz-research eval|backtest "cs_rank(-pct(close, 15))" …`（以及 MCP 工具 `research_eval_factor` / `research_backtest`）用 IC、分层价差、换手率和计入成本的回测来评估因子表达式。
+
+详见 [平台指南](platform-guide.md)。
+
+## 账号与登录
+
+hub 要求登录后才能使用控制台、`/svc/*` 和 `/mcp`。角色分为 viewer（只读）、researcher（交易、研究、MCP）和 admin（另可管理数据和用户）。agent 使用账号页或 `qfz-auth create-key` 生成的 API key（`Authorization: Bearer qfz_…`）。PMB 的账户和 session 只对创建者可见。
+
+```bash
+qfz-auth create-user you --role admin    # 或在首次启动前设置 QFZ_ADMIN_PASSWORD
+qfz-server                                # 然后打开 http://127.0.0.1:19777/login
+```
+
+`QFZ_AUTH_MODE=off` 可在本地开发时关闭登录。全部设置见[平台指南第 5 节](platform-guide.md#5-账号角色与-api-key)。
+
 ## 数据管道
 
 UPQ 由一个内置、开箱即用的管道（`qfz-data`）提供数据，该管道**原地**管理三个原始市场数据源（从不复制），并将它们转换为 UPQ 的存储格式：
@@ -119,7 +140,10 @@ qfz-data validate                     # row-count / schema checks on storage
 | `ohlcv-1m`、`ohlcv-1s` | 分钟线 + 日线 |
 | `ohlcv-1h`、`ohlcv-1d`、`ohlcv-eod` | 日线 |
 | `trades`、`tbbo`、`tcbbo`、`mbp-1`、`mbp-10`、`cmbp-1`、`mbo` | 由逐笔成交聚合出分钟线 + 日线 |
-| `bbo-*`、`cbbo-*`、definition、statistics | 只索引不转换（UPQ 没有报价存储） |
+| `cmbp-1`、`cbbo-*`、`bbo-*` | `option_quote_minute` / `stock_quote_minute`（每分钟最后的盘口） |
+| definition、statistics、status | 只索引不转换 |
+
+`OCEA.MEMOIR`（Blue Ocean）提供美东 20:00–04:00 的夜盘分钟线。
 
 `OPRA.*` 数据集写入 `option_minute` / `option_day`，OSI 合约代码改写为 UPQ 格式（`SPY   250117C00500000` → `O:SPY250117C00500000`）。美股数据集（`XNAS.ITCH`、`EQUS.*`、`DBEQ.*` 等）写入 `stock_minute` / `stock_daily`；期货数据集跳过。分钟线按 `ts_event` 切分；交易日和日线按美东时间，日线开高低收取 09:30–16:00 常规时段，成交量取全天。MBO 里只有 `T` 记录计为成交（`F` 是同一笔成交的被动方回报）。
 
@@ -361,6 +385,7 @@ cp .env.example .env
 - [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
 - [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
 - [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
+- [平台指南](platform-guide.md) —— 时间锁、交易时段、报价、研究、账号
 - [数据适配器](data-adapters.md) —— UPQ 存储契约、如何新增供应商、Databento 参考
 
 ## 许可证

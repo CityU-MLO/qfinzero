@@ -90,7 +90,7 @@ takes about two minutes, and later scans take about one second.
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily | `ohlcv-1d` uses the UTC day Databento reports |
 | `trades`, `tbbo`, `tcbbo` | minute + daily | every record is a trade |
 | `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily | only records with `action == 'T'` |
-| `bbo-*`, `cbbo-*` | none | quotes only; listed by `status`, not converted |
+| `cmbp-1`, `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute` | last top of book in each minute (see below) |
 | definition, statistics, status, imbalance | none | reference data |
 
 In MBO, a `T` record is the execution and an `F` record is the passive side of
@@ -121,6 +121,28 @@ executions also arrive as `T`.
   session traded. Volume and transactions cover the whole day. This matches the
   massive day aggregates. Option daily bars use every trade.
 - Fixed-point prices are divided by 1e9, so `56650000000` becomes exactly `56.65`.
+
+### Quotes
+
+Quote schemas fill two extra stores with the same contract:
+`stock_quote_minute(ticker, window_start, bid_price, ask_price, bid_size,
+ask_size, trade_date)` and `option_quote_minute`, which also has the option
+columns. A row is the book at the end of the minute that starts at
+`window_start`. Sampled schemas (`cbbo-*`, `bbo-*`) stamp the end of their
+interval, so the stamp is shifted back into its minute. Minutes without an
+update are not written; readers carry the last row forward. When several
+sources quote a name, the order is consolidated feeds, then `cmbp-1` (every
+update), then 1-second samples, then 1-minute samples. `cmbp-1` files yield
+both trade bars and quotes.
+
+### Overnight
+
+`OCEA.MEMOIR` (Blue Ocean ATS) trades 20:00–04:00 ET. Its minute bars are
+added to `stock_minute` even when another vendor already wrote the daytime
+bars of that ticker. In the overnight window only an identical (ticker,
+minute) is skipped. Overnight trades never enter daily bars. Partitions stay
+on ET calendar dates; PMB assigns the overnight session to the next trading
+date.
 
 ### Choosing a source and avoiding double counts
 
@@ -186,4 +208,4 @@ schemas and one file per range for OHLCV.
 - Vendors can disagree. On one OPRA day the Databento trade count was about 5%
   higher than massive's own trade file. The `tcbbo` and `cmbp-1` adapters agree
   with each other exactly, and on another day both vendors matched exactly.
-- Quotes, book depth and futures are not converted, because UPQ has no store for them.
+- Book depth beyond the top level and futures are not converted, because UPQ has no store for them.

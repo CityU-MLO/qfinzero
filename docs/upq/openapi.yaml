@@ -105,6 +105,18 @@ paths:
             minimum: 1
             maximum: 100000
             default: 10000
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
       responses:
         '200':
           description: Successful query
@@ -159,6 +171,18 @@ paths:
           schema:
             type: string
             example: "ticker,date,close"
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
       responses:
         '200':
           description: Successful query
@@ -263,6 +287,18 @@ paths:
             type: string
             enum: [close]
             default: close
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
       responses:
         '200':
           description: Successful query
@@ -380,6 +416,18 @@ paths:
             type: string
             enum: [close]
             default: close
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
       responses:
         '200':
           description: Successful query
@@ -428,6 +476,18 @@ paths:
           schema:
             type: string
             example: "1M,10Y"
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
       responses:
         '200':
           description: Successful query
@@ -444,8 +504,134 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /stock/quote:
+    get:
+      summary: Stock minute NBBO
+      description: |
+        Top of book at the end of each minute [window_start, window_start + 60s).
+        Minutes without a change are absent; carry the previous row forward.
+      operationId: getStockQuote
+      parameters:
+        - {name: tickers, in: query, required: true, schema: {type: string, example: "SPY,QQQ"}}
+        - {name: start, in: query, required: true, schema: {type: string, format: date-time, example: "2026-01-07T14:30:00"}}
+        - {name: end, in: query, required: true, schema: {type: string, format: date-time, example: "2026-01-07T21:00:00"}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100000, default: 10000}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
+      responses:
+        '200':
+          description: Quote rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/QuoteRecord'}
+  /option/quote:
+    get:
+      summary: Option contract minute NBBO
+      operationId: getOptionQuote
+      parameters:
+        - {name: contract, in: query, required: true, schema: {type: string, example: "O:SPY260107C00690000"}}
+        - {name: start, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: end, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100000, default: 10000}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
+      responses:
+        '200':
+          description: Quote rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/QuoteRecord'}
+  /option/chain_snapshot:
+    get:
+      summary: Intraday option chain at a moment
+      description: |
+        Per contract: the last trade and its time, volume so far today, the latest
+        bid/ask/size and mid, all from data final at `at` (capped by `as_of`).
+        With include_greeks, IV and Greeks are priced off the mid (else the last
+        trade) with the underlying's minute close at the same time.
+      operationId: getOptionChainSnapshot
+      parameters:
+        - {name: underlying, in: query, required: true, schema: {type: string, example: "ANET"}}
+        - {name: at, in: query, required: true, schema: {type: string, format: date-time, example: "2026-02-19T14:36:00"}}
+        - {name: expiry_min, in: query, required: false, schema: {type: string, format: date}}
+        - {name: expiry_max, in: query, required: false, schema: {type: string, format: date}}
+        - {name: strike_min, in: query, required: false, schema: {type: number}}
+        - {name: strike_max, in: query, required: false, schema: {type: number}}
+        - {name: type, in: query, required: false, schema: {type: string, enum: [C, P]}}
+        - {name: include_greeks, in: query, required: false, schema: {type: boolean, default: false}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime, UTC unless an offset is given, or
+            nanoseconds). Only rows already final at this time are returned:
+            minute rows once window_start + 60s <= as_of, stock daily bars after
+            16:00 ET, option daily bars and the end-of-day chain after 16:15 ET.
+            The service-wide ceiling UPQ_AS_OF applies as well.
+          schema:
+            type: string
+            example: "2026-02-19T14:36:00Z"
+      responses:
+        '200':
+          description: One row per contract
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ChainSnapshotRecord'}
 components:
   schemas:
+    QuoteRecord:
+      type: object
+      properties:
+        ticker: {type: string}
+        window_start: {type: integer, format: int64, description: minute start, ns since epoch (UTC)}
+        bid_price: {type: number, nullable: true}
+        ask_price: {type: number, nullable: true}
+        bid_size: {type: integer}
+        ask_size: {type: integer}
+    ChainSnapshotRecord:
+      type: object
+      properties:
+        ticker: {type: string}
+        underlying: {type: string}
+        expiry: {type: string, format: date}
+        strike: {type: number}
+        type: {type: string, enum: [C, P]}
+        last: {type: number, nullable: true}
+        last_trade_ws: {type: integer, format: int64, nullable: true}
+        volume: {type: integer}
+        bid: {type: number, nullable: true}
+        ask: {type: number, nullable: true}
+        bid_size: {type: integer, nullable: true}
+        ask_size: {type: integer, nullable: true}
+        quote_ws: {type: integer, format: int64, nullable: true}
+        mid: {type: number, nullable: true}
+        iv_price: {type: number, description: price used for IV (with include_greeks)}
     StockMinuteRecord:
       type: object
       properties:

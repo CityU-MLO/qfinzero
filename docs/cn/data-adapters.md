@@ -70,7 +70,7 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 | `ohlcv-1h`、`ohlcv-1d`、`ohlcv-eod` | 日线 | `ohlcv-1d` 用 Databento 给出的 UTC 日 |
 | `trades`、`tbbo`、`tcbbo` | 分钟线 + 日线 | 每条记录都是成交 |
 | `mbp-1`、`mbp-10`、`cmbp-1`、`mbo` | 分钟线 + 日线 | 只取 `action == 'T'` 的记录 |
-| `bbo-*`、`cbbo-*` | 无 | 只有报价；`status` 会列出，不转换 |
+| `cmbp-1`、`cbbo-1s`、`cbbo-1m`、`bbo-1s`、`bbo-1m` | `option_quote_minute`、`stock_quote_minute` | 每分钟最后的最优买卖价（见下文） |
 | definition、statistics、status、imbalance | 无 | 参考数据 |
 
 MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者都算会让成交量翻倍。隐藏单的成交也以 `T` 出现。
@@ -91,6 +91,22 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
 - 交易日按美东时间。
 - 股票日线的开高低收取 09:30–16:00（该时段有成交时），成交量和成交笔数取全天，与 massive 日线一致。期权日线用全部成交。
 - 定点价格除以 1e9，所以 `56650000000` 精确等于 `56.65`。
+
+### 报价
+
+报价类 schema 写入两个额外的存储：
+- `stock_quote_minute(ticker, window_start, bid_price, ask_price, bid_size, ask_size, trade_date)`。
+- `option_quote_minute`，它还带有期权相关的列。
+
+每一行是从 `window_start` 开始的那一分钟结束时的盘口。
+- 抽样类 schema（`cbbo-*`、`bbo-*`）的时间戳打在区间结束时，所以要往回移到所属的那一分钟。
+- 没有更新的分钟不写入，读取时沿用上一行。
+- 同一代码有多个来源时，优先顺序为：全市场合并数据、`cmbp-1`（每次更新）、1 秒抽样、1 分钟抽样。
+- `cmbp-1` 文件同时产出成交 K 线和报价。
+
+### 夜盘
+
+`OCEA.MEMOIR`（Blue Ocean ATS）在美东 20:00–04:00 交易。即使其他供应商已经写了该代码的日盘 bar，它的分钟线也会加入 `stock_minute`；夜盘时段只跳过完全相同的（代码，分钟）。夜盘成交从不计入日线。分区仍按美东日历日；PMB 把夜盘归到下一个交易日。
 
 ### 选源与避免重复计量
 
@@ -137,4 +153,4 @@ qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
 - 单一交易所的数据只含该交易所的成交量。`XNAS.ITCH` 的 SPY 成交量约为全市场的 17%，全市场成交量请用 `EQUS.*`。
 - 供应商之间可能不一致。某个 OPRA 交易日，Databento 的成交笔数比 massive 自己的逐笔文件多约 5%。
   `tcbbo` 与 `cmbp-1` 两个适配器结果完全一致，另一个交易日两家供应商也完全一致。
-- 报价、盘口深度和期货不转换，因为 UPQ 没有对应的存储。
+- 一档以外的盘口深度和期货不转换，因为 UPQ 没有对应的存储。

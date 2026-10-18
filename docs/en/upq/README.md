@@ -30,6 +30,15 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 | `/option/ticker_query` | GET | Query option by OPRA contract |
 | `/option/chain_query` | GET | Query option chain by underlying with filters |
 | `/rates/query` | GET | Treasury yield curve data |
+| `/dividends/query` | GET | Dividend calendar |
+| `/stock/quote` | GET | Stock minute NBBO (bid/ask price and size) |
+| `/option/quote` | GET | Option contract minute NBBO |
+| `/option/chain_snapshot` | GET | Intraday option chain at a moment: last trade, volume so far, bid/ask/mid, Greeks |
+| `/health/freshness` | GET | Latest partition and row counts per store |
+
+Every data endpoint also takes `as_of` (ISO datetime or nanoseconds) and
+returns only rows already final at that time. The server-wide ceiling is set
+with `UPQ_AS_OF`. See the [platform guide](../platform-guide.md#1-the-time-lock).
 
 ## Key Concepts
 
@@ -37,6 +46,7 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 
 - **Minute endpoints** (`/stock`): ISO datetime `YYYY-MM-DDTHH:MM:SS`
 - **Daily endpoints** (`/stock/daily`, `/rates/query`): Date `YYYY-MM-DD`
+- Times without an offset are UTC; trade-date partitions are US/Eastern dates
 - **Option endpoints**: Accept both formats depending on resolution
 
 ### Data Types
@@ -109,7 +119,12 @@ with UPQClient() as upq:
 | `option_chain(underlying, date, ...)` | Option chain with strike/expiry/type filters |
 | `option_contract(contract, start, end, resolution)` | Specific contract price data |
 | `rates(start, end, tenors)` | Treasury yield curve |
+| `stock_quote(tickers, start, end)` | Minute NBBO for stocks |
+| `option_quote(contract, start, end)` | Minute NBBO for one option |
+| `chain_snapshot(underlying, at, ...)` | Intraday chain with quotes and optional Greeks |
 | `health()` | Health check |
+
+Every data method accepts `as_of=` to cap results at a point in time.
 
 ### Utilities
 

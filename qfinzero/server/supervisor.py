@@ -91,10 +91,10 @@ class Child:
 
 
 def _default_children() -> list[Child]:
-    # UPQ_BIN overrides; else the release/debug build (CARGO_TARGET_DIR honoured)
-    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO_ROOT / "infra/upq/target"))
-    candidates = [os.environ.get("UPQ_BIN", ""), target / "release/upq-service",
-                  target / "debug/upq-service"]
+    # UPQ_BIN overrides; else a release/debug build inside the repo
+    candidates = [os.environ.get("UPQ_BIN", "")] + [
+        REPO_ROOT / t / profile / "upq-service"
+        for t in ("infra/upq/target", ".cargo-target") for profile in ("release", "debug")]
     upq_bin = next((Path(c) for c in candidates if c and Path(c).exists()),
                    REPO_ROOT / "infra/upq/target/release/upq-service")
 
