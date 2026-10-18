@@ -31,6 +31,7 @@ use upq_core::validation::{
     validate_resolution,
 };
 
+use crate::as_of;
 use crate::dividends::DividendCalendar;
 use crate::greeks::{compute_greeks, IvStatus};
 use crate::corporate_actions::{AdjustMode, CorporateActions};
@@ -45,6 +46,8 @@ pub struct AppState {
     rates_cache: Arc<RwLock<RatesCache>>,
     dividend_calendar: Arc<DividendCalendar>,
     corporate_actions: Arc<CorporateActions>,
+    /// Service-wide point-in-time ceiling (`UPQ_AS_OF`), see `as_of.rs`.
+    as_of_ceiling: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -179,6 +182,7 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         rates_cache: Arc::new(RwLock::new(RatesCache::default())),
         dividend_calendar,
         corporate_actions,
+        as_of_ceiling: as_of::ceiling_from_env(),
     };
 
     Router::new()
@@ -191,6 +195,9 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         .route("/option/chain_query", get(option_chain_query))
         .route("/rates/query", get(rates_query))
         .route("/dividends/query", get(dividends_query))
+        .route("/stock/quote", get(stock_quote))
+        .route("/option/quote", get(option_quote))
+        .route("/option/chain_snapshot", get(option_chain_snapshot))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
@@ -209,6 +216,8 @@ struct StockQuery {
     indicators: Option<String>,
     /// Price adjustment: none (default, raw/as-traded) | split | total.
     adjust: Option<String>,
+    /// Point-in-time cap (ISO datetime or ns); see `as_of.rs`.
+    as_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,6 +230,7 @@ struct OptionTickerQuery {
     include_greeks: Option<bool>,
     greek_model: Option<String>,
     greek_price_field: Option<String>,
+    as_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +246,7 @@ struct OptionChainQuery {
     include_greeks: Option<bool>,
     greek_model: Option<String>,
     greek_price_field: Option<String>,
+    as_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,6 +254,7 @@ struct RatesQuery {
     start: String,
     end: String,
     tenors: Option<String>,
+    as_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -250,6 +262,7 @@ struct DividendsQuery {
     tickers: String,
     start: String,
     end: String,
+    as_of: Option<String>,
 }
 
 async fn stock(
@@ -288,13 +301,18 @@ async fn stock(
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
     };
-    let start_date = match extract_date_from_datetime(&params.start) {
-        Ok(value) => value,
-        Err(message) => return invalid_argument(message),
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
     };
-    let end_date = match extract_date_from_datetime(&params.end) {
-        Ok(value) => value,
-        Err(message) => return invalid_argument(message),
+    let end_ns = cap.map_or(end_ns, |c| end_ns.min(as_of::minute_cap(c)));
+    if end_ns < start_ns {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    // Partitions are ET trade dates: prune on the ET dates of the window.
+    let (start_date, end_date) = match as_of::et_date_bounds(start_ns, end_ns) {
+        Some(bounds) => bounds,
+        None => return invalid_argument("start/end out of range"),
     };
 
     let dataset_dir = state.storage_root.join("stock_minute");
@@ -352,6 +370,19 @@ async fn stock_daily(
         return invalid_argument("tickers must not be empty");
     }
 
+    // A daily bar is final at 16:00 ET; cap the end date at the last final bar.
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    let end = clamp_date(
+        &params.end,
+        cap.and_then(|c| as_of::daily_cap_date(c, as_of::STOCK_CLOSE)),
+    );
+    if end.as_str() < params.start.as_str() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+
     // Parse indicators (if any)
     let indicator_list = match params.indicators.as_deref() {
         Some(csv) => match parse_indicators(csv) {
@@ -407,7 +438,7 @@ async fn stock_daily(
         path = sql_escape_literal(&path_pattern),
         tickers = ticker_sql,
         start = sql_escape_literal(&query_start),
-        end = sql_escape_literal(&params.end),
+        end = sql_escape_literal(&end),
     );
 
     match run_sql_json_async(sql).await {
@@ -496,7 +527,7 @@ fn apply_adjustment(ca: &CorporateActions, rows: &mut [Value], mode: AdjustMode)
 /// Extend a YYYY-MM-DD date string backwards by N calendar days.
 fn extend_date_backwards(date_str: &str, days: i64) -> String {
     let date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-        .unwrap_or_else(|_| NaiveDate::from_ymd_opt(2020, 1, 1).unwrap());
+        .unwrap_or_default();
     let extended = date - Duration::days(days);
     extended.format("%Y-%m-%d").to_string()
 }
@@ -583,13 +614,27 @@ async fn option_ticker_query(
         Ok(value) => value,
         Err(message) => return invalid_argument(message),
     };
-    let start_date = match extract_date_from_date_or_datetime(&params.start) {
-        Ok(value) => value,
-        Err(message) => return invalid_argument(message),
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
     };
-    let end_date = match extract_date_from_date_or_datetime(&params.end) {
-        Ok(value) => value,
-        Err(message) => return invalid_argument(message),
+    let end_ns = match cap {
+        None => end_ns,
+        Some(c) if resolution == "minute" => end_ns.min(as_of::minute_cap(c)),
+        // day bars carry window_start = 00:00 ET of their date
+        Some(c) => match as_of::daily_cap_date(c, as_of::OPTION_CLOSE)
+            .and_then(as_of::et_midnight_ns)
+        {
+            Some(last) => end_ns.min(last),
+            None => i64::MIN,
+        },
+    };
+    if end_ns < start_ns {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let (start_date, end_date) = match as_of::et_date_bounds(start_ns, end_ns) {
+        Some(bounds) => bounds,
+        None => return invalid_argument("start/end out of range"),
     };
 
     let dataset_dir = if resolution == "minute" {
@@ -654,7 +699,9 @@ async fn option() -> axum::response::Response {
         StatusCode::OK,
         Json(json!({
             "ticker_query_path": "/option/ticker_query",
-            "chain_query_path": "/option/chain_query"
+            "chain_query_path": "/option/chain_query",
+            "chain_snapshot_path": "/option/chain_snapshot",
+            "quote_path": "/option/quote"
         })),
     )
         .into_response()
@@ -868,6 +915,23 @@ async fn option_chain_query(
             if price_field != "close" {
                 return invalid_argument("greek_price_field must be close");
             }
+        }
+    }
+
+    // The end-of-day chain for D is final at 16:15 ET on D.
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    if let Some(c) = cap {
+        let last = as_of::daily_cap_date(c, as_of::OPTION_CLOSE)
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        if params.date.as_str() > last.as_str() {
+            return invalid_argument(
+                "the end-of-day chain for this date is not final at as_of \
+                 (16:15 ET); use /option/chain_snapshot for an intraday chain",
+            );
         }
     }
 
@@ -1142,6 +1206,17 @@ async fn rates_query(
     if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
         return invalid_argument("start/end must be date: YYYY-MM-DD");
     }
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    let end = clamp_date(
+        &params.end,
+        cap.and_then(|c| as_of::daily_cap_date(c, as_of::STOCK_CLOSE)),
+    );
+    if end.as_str() < params.start.as_str() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
 
     let projection = if let Some(tenors_csv) = params.tenors.as_deref() {
         let tenors = parse_csv_list(tenors_csv);
@@ -1158,7 +1233,7 @@ async fn rates_query(
 
     let cache_key = RatesCacheKey {
         start: params.start.clone(),
-        end: params.end.clone(),
+        end: end.clone(),
         projection: projection.clone(),
     };
     if let Some(cached_rows) = state.rates_cache.write().await.get(&cache_key) {
@@ -1171,7 +1246,7 @@ async fn rates_query(
     }
 
     let file_path_literal = sql_escape_literal(&file_path.to_string_lossy());
-    let chunks = match split_by_month(&params.start, &params.end) {
+    let chunks = match split_by_month(&params.start, &end) {
         Ok(value) => value,
         Err(_) => return invalid_argument("start/end must be date: YYYY-MM-DD"),
     };
@@ -1235,6 +1310,14 @@ async fn dividends_query(
     if tickers.is_empty() {
         return invalid_argument("tickers must not be empty");
     }
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    let end = clamp_date(&params.end, cap.and_then(as_of::et_date));
+    if end.as_str() < params.start.as_str() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
 
     let dividends_path = state
         .storage_root
@@ -1259,12 +1342,363 @@ async fn dividends_query(
         path = sql_escape_literal(&dividends_path.to_string_lossy()),
         tickers = ticker_sql,
         start = sql_escape_literal(&params.start),
-        end = sql_escape_literal(&params.end),
+        end = sql_escape_literal(&end),
     );
 
     match run_sql_json_async(sql).await {
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
+    }
+}
+
+// ── Quotes and the intraday chain ─────────────────────────────────────────
+//
+// Quote stores hold the top of book at the end of each minute
+// `[window_start, window_start + 60s)`; minutes without an update are absent and
+// readers carry the last quote forward. They follow the same visibility rule
+// as minute bars: a row is visible once `window_start + 60s <= as_of`.
+
+#[derive(Debug, Deserialize)]
+struct StockQuoteQuery {
+    tickers: String,
+    start: String,
+    end: String,
+    limit: Option<usize>,
+    as_of: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OptionQuoteQuery {
+    contract: String,
+    start: String,
+    end: String,
+    limit: Option<usize>,
+    as_of: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChainSnapshotQuery {
+    underlying: String,
+    /// Observation time (ISO datetime). Capped by `as_of` / `UPQ_AS_OF`.
+    at: String,
+    expiry_min: Option<String>,
+    expiry_max: Option<String>,
+    strike_min: Option<f64>,
+    strike_max: Option<f64>,
+    r#type: Option<String>,
+    include_greeks: Option<bool>,
+    as_of: Option<String>,
+}
+
+/// Shared window handling for the quote series endpoints:
+/// returns `(start_ns, end_ns, start_date, end_date)` or an early response.
+#[allow(clippy::result_large_err)]
+fn quote_window(
+    state: &AppState,
+    start: &str,
+    end: &str,
+    requested_as_of: Option<&str>,
+) -> Result<Option<(i64, i64, String, String)>, axum::response::Response> {
+    if validate_datetime(start).is_err() || validate_datetime(end).is_err() {
+        return Err(invalid_argument("start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS"));
+    }
+    let start_ns = parse_datetime_ns(start, false).map_err(invalid_argument)?;
+    let end_ns = parse_datetime_ns(end, true).map_err(invalid_argument)?;
+    let cap = request_cap(state, requested_as_of)?;
+    let end_ns = cap.map_or(end_ns, |c| end_ns.min(as_of::minute_cap(c)));
+    if end_ns < start_ns {
+        return Ok(None);
+    }
+    let (a, b) = as_of::et_date_bounds(start_ns, end_ns)
+        .ok_or_else(|| invalid_argument("start/end out of range"))?;
+    Ok(Some((start_ns, end_ns, a, b)))
+}
+
+async fn stock_quote(
+    State(state): State<AppState>,
+    Query(params): Query<StockQuoteQuery>,
+) -> axum::response::Response {
+    let limit = params.limit.unwrap_or(10_000);
+    if limit == 0 || limit > MAX_LIMIT {
+        return invalid_argument("limit must be between 1 and 100000");
+    }
+    let tickers = parse_csv_list(&params.tickers);
+    if tickers.is_empty() {
+        return invalid_argument("tickers must not be empty");
+    }
+    let (start_ns, end_ns, start_date, end_date) =
+        match quote_window(&state, &params.start, &params.end, params.as_of.as_deref()) {
+            Ok(Some(w)) => w,
+            Ok(None) => return (StatusCode::OK, Json(json!([]))).into_response(),
+            Err(response) => return response,
+        };
+    let dataset_dir = state.storage_root.join("stock_quote_minute");
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let ticker_sql = tickers.iter().map(|t| sql_quote(t)).collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size \
+         FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND ticker IN ({ticker_sql}) AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         ORDER BY ticker, window_start LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+async fn option_quote(
+    State(state): State<AppState>,
+    Query(params): Query<OptionQuoteQuery>,
+) -> axum::response::Response {
+    let limit = params.limit.unwrap_or(10_000);
+    if limit == 0 || limit > MAX_LIMIT {
+        return invalid_argument("limit must be between 1 and 100000");
+    }
+    if params.contract.trim().is_empty() {
+        return invalid_argument("contract is required");
+    }
+    let (start_ns, end_ns, start_date, end_date) =
+        match quote_window(&state, &params.start, &params.end, params.as_of.as_deref()) {
+            Ok(Some(w)) => w,
+            Ok(None) => return (StatusCode::OK, Json(json!([]))).into_response(),
+            Err(response) => return response,
+        };
+    let dataset_dir = state.storage_root.join("option_quote_minute");
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let sql = format!(
+        "SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size \
+         FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND ticker = {contract} AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         ORDER BY window_start LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+        contract = sql_quote(&params.contract),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// The option chain as it stood at `at`: per contract the latest trade, the
+/// day's volume so far and the latest quote (bid/ask/mid), each from data
+/// already final at `at` (and `as_of`). Greeks use the underlying's minute
+/// close at the same time and the quote mid (else the last trade).
+async fn option_chain_snapshot(
+    State(state): State<AppState>,
+    Query(params): Query<ChainSnapshotQuery>,
+) -> axum::response::Response {
+    if params.underlying.trim().is_empty() {
+        return invalid_argument("underlying is required");
+    }
+    if validate_datetime(&params.at).is_err() {
+        return invalid_argument("at must be ISO datetime: YYYY-MM-DDTHH:MM:SS");
+    }
+    let at_ns = match parse_datetime_ns(&params.at, false) {
+        Ok(v) => v,
+        Err(m) => return invalid_argument(m),
+    };
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let t_ns = cap.map_or(at_ns, |c| at_ns.min(c));
+    let visible = as_of::minute_cap(t_ns);
+    let trade_date = match as_of::et_date(t_ns) {
+        Some(d) => d.format("%Y-%m-%d").to_string(),
+        None => return invalid_argument("at out of range"),
+    };
+    for bound in [params.expiry_min.as_deref(), params.expiry_max.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        if validate_date(bound).is_err() {
+            return invalid_argument("expiry_min/expiry_max must be YYYY-MM-DD");
+        }
+    }
+    let right = match params.r#type.as_deref().map(|t| t.trim().to_ascii_uppercase()) {
+        Some(t) if t == "C" || t == "P" => Some(t),
+        Some(_) => return invalid_argument("type must be C or P"),
+        None => None,
+    };
+    for k in [params.strike_min, params.strike_max].into_iter().flatten() {
+        if !k.is_finite() {
+            return invalid_argument("strike_min/strike_max must be finite");
+        }
+    }
+
+    let mut filters = vec![
+        format!("underlying = {}", sql_quote(&params.underlying)),
+        format!("window_start <= {visible}"),
+    ];
+    if let Some(v) = params.expiry_min.as_deref() {
+        filters.push(format!("expiry >= DATE {}", sql_quote(v)));
+    }
+    if let Some(v) = params.expiry_max.as_deref() {
+        filters.push(format!("expiry <= DATE {}", sql_quote(v)));
+    }
+    if let Some(v) = params.strike_min {
+        filters.push(format!("strike >= {v}"));
+    }
+    if let Some(v) = params.strike_max {
+        filters.push(format!("strike <= {v}"));
+    }
+    if let Some(r) = right.as_deref() {
+        filters.push(format!("\"right\" = {}", sql_quote(r)));
+    }
+    let where_sql = filters.join(" AND ");
+
+    let part = |store: &str| state.storage_root.join(store).join(format!("trade_date={trade_date}"));
+    let bars_dir = part("option_minute");
+    let quotes_dir = part("option_quote_minute");
+    let has_bars = has_any_parquet_file(&bars_dir);
+    let has_quotes = has_any_parquet_file(&quotes_dir);
+    if !has_bars && !has_quotes {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let glob = |dir: &Path| sql_escape_literal(&dir.join("*.parquet").to_string_lossy());
+    let bars_cte = if has_bars {
+        format!(
+            "bars AS (SELECT ticker, underlying, expiry, strike, \"right\", close AS last, \
+                 window_start AS last_trade_ws, \
+                 CAST(sum(volume) OVER (PARTITION BY ticker) AS BIGINT) AS volume \
+             FROM read_parquet('{}') WHERE {where_sql} \
+             QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY window_start DESC) = 1)",
+            glob(&bars_dir)
+        )
+    } else {
+        "bars AS (SELECT NULL::VARCHAR AS ticker, NULL::VARCHAR AS underlying, NULL::DATE AS expiry, \
+             NULL::DOUBLE AS strike, NULL::VARCHAR AS \"right\", NULL::DOUBLE AS last, \
+             NULL::BIGINT AS last_trade_ws, NULL::BIGINT AS volume WHERE FALSE)"
+            .to_string()
+    };
+    let quotes_cte = if has_quotes {
+        format!(
+            "quotes AS (SELECT ticker, underlying, expiry, strike, \"right\", bid_price AS bid, \
+                 ask_price AS ask, bid_size, ask_size, window_start AS quote_ws \
+             FROM read_parquet('{}') WHERE {where_sql} \
+             QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY window_start DESC) = 1)",
+            glob(&quotes_dir)
+        )
+    } else {
+        "quotes AS (SELECT NULL::VARCHAR AS ticker, NULL::VARCHAR AS underlying, NULL::DATE AS expiry, \
+             NULL::DOUBLE AS strike, NULL::VARCHAR AS \"right\", NULL::DOUBLE AS bid, NULL::DOUBLE AS ask, \
+             NULL::BIGINT AS bid_size, NULL::BIGINT AS ask_size, NULL::BIGINT AS quote_ws WHERE FALSE)"
+            .to_string()
+    };
+    let sql = format!(
+        "WITH {bars_cte}, {quotes_cte} \
+         SELECT coalesce(b.ticker, q.ticker) AS ticker, coalesce(b.underlying, q.underlying) AS underlying, \
+                strftime(coalesce(b.expiry, q.expiry), '%Y-%m-%d') AS expiry, \
+                coalesce(b.strike, q.strike) AS strike, coalesce(b.\"right\", q.\"right\") AS type, \
+                b.last, b.last_trade_ws, CAST(coalesce(b.volume, 0) AS BIGINT) AS volume, \
+                q.bid, q.ask, q.bid_size, q.ask_size, q.quote_ws, \
+                CASE WHEN q.bid > 0 AND q.ask >= q.bid THEN (q.bid + q.ask) / 2 END AS mid \
+         FROM bars b FULL OUTER JOIN quotes q ON b.ticker = q.ticker \
+         ORDER BY expiry, strike, type"
+    );
+    let rows = match run_sql_json_async(sql).await {
+        Ok(rows) => rows,
+        Err(error) => return internal_error(error),
+    };
+    if !params.include_greeks.unwrap_or(false) {
+        return (StatusCode::OK, Json(Value::Array(rows))).into_response();
+    }
+    let storage_root = state.storage_root.clone();
+    let dividend_calendar = Arc::clone(&state.dividend_calendar);
+    let underlying = params.underlying.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let mut rows = rows;
+        enrich_snapshot_rows(&storage_root, &underlying, &trade_date, t_ns, &dividend_calendar, &mut rows);
+        rows
+    })
+    .await;
+    match result {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(e) => internal_error(ServiceError::Join(e.to_string())),
+    }
+}
+
+fn enrich_snapshot_rows(
+    storage_root: &Path,
+    underlying: &str,
+    trade_date: &str,
+    t_ns: i64,
+    dividend_calendar: &DividendCalendar,
+    rows: &mut [Value],
+) {
+    const T_CONV: &str = "minute_precise";
+    const ANCHOR: &str = "expiry_date_16_00_ET";
+    let series = fetch_spot_minute_series(storage_root, underlying, trade_date);
+    let spot = spot_at(&series, as_of::minute_cap(t_ns));
+    let curve = fetch_rates_row(storage_root, trade_date).and_then(|r| RatesCurve::from_json_row(&r).ok());
+    let obs_days = NaiveDate::parse_from_str(trade_date, "%Y-%m-%d")
+        .map(|d| date_to_epoch_days(&d))
+        .ok();
+    for row_val in rows.iter_mut() {
+        let Some(row) = row_val.as_object_mut() else {
+            continue;
+        };
+        let expiry = row
+            .get("expiry")
+            .and_then(Value::as_str)
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let is_call = row.get("type").and_then(Value::as_str) == Some("C");
+        let price = row
+            .get("mid")
+            .and_then(Value::as_f64)
+            .or_else(|| row.get("last").and_then(Value::as_f64));
+        let expiry_ns = expiry
+            .and_then(|d| d.and_hms_opt(16, 0, 0))
+            .and_then(|ndt| New_York.from_local_datetime(&ndt).single())
+            .and_then(|dt| dt.with_timezone(&chrono::Utc).timestamp_nanos_opt());
+        let (Some(spot), Some(curve), Some(obs), Some(exp), Some(exp_ns), Some(price)) =
+            (spot, curve.as_ref(), obs_days, expiry, expiry_ns, price)
+        else {
+            let status = if spot.is_none() {
+                GreekStatus::MissingSpot
+            } else if curve.is_none() {
+                GreekStatus::MissingRate
+            } else {
+                GreekStatus::NonFiniteInput
+            };
+            let result = null_greek_result(status, "q0", "stock_minute", T_CONV, ANCHOR);
+            merge_greek_result(row, &result);
+            continue;
+        };
+        let diff = exp_ns - t_ns;
+        let t_years = if diff <= 0 {
+            1.0 / (365.0 * 24.0 * 60.0)
+        } else {
+            diff as f64 / (365.0 * 24.0 * 3600.0 * 1_000_000_000.0)
+        };
+        // enrich_row_with_greeks prices off "close": use the mid (else last trade)
+        row.insert("close".to_string(), json!(price));
+        enrich_row_with_greeks(
+            row,
+            spot,
+            curve,
+            t_years,
+            is_call,
+            dividend_calendar,
+            underlying,
+            obs,
+            date_to_epoch_days(&exp),
+            "stock_minute",
+            T_CONV,
+            ANCHOR,
+        );
+        row.remove("close");
+        row.insert("iv_price".to_string(), json!(price));
     }
 }
 
@@ -1717,6 +2151,7 @@ fn enrich_ticker_rows_minute(
 ) {
     // Per-request caches
     let mut spot_cache: HashMap<String, Option<f64>> = HashMap::new();
+    let mut minute_spot_cache: HashMap<String, Vec<(i64, f64)>> = HashMap::new();
     let mut rates_cache: HashMap<String, Option<RatesCurve>> = HashMap::new();
 
     let expiry_days = date_to_epoch_days(expiry_date);
@@ -1809,10 +2244,25 @@ fn enrich_ticker_rows_minute(
             }
         };
 
-        // For minute resolution, spot fallback: stock daily close
-        let spot_val = *spot_cache
+        // Spot at the same minute: the last underlying minute close whose bar
+        // started no later than this option bar. Only when the underlying has
+        // no minute data at all do we fall back to the daily close (which is
+        // known only after 16:00 ET, so it is flagged as spot_source=stock_daily).
+        let series = minute_spot_cache
             .entry(trade_date_str.clone())
-            .or_insert_with(|| fetch_spot_daily(storage_root, underlying, &trade_date_str));
+            .or_insert_with(|| fetch_spot_minute_series(storage_root, underlying, &trade_date_str));
+        let minute_spot = spot_at(series, window_start_ns);
+        let spot_source: &'static str = if minute_spot.is_some() {
+            "stock_minute"
+        } else {
+            "stock_daily"
+        };
+        let spot_val = match minute_spot {
+            Some(s) => Some(s),
+            None => *spot_cache
+                .entry(trade_date_str.clone())
+                .or_insert_with(|| fetch_spot_daily(storage_root, underlying, &trade_date_str)),
+        };
 
         let spot = match spot_val {
             Some(s) => s,
@@ -1842,7 +2292,7 @@ fn enrich_ticker_rows_minute(
                 let result = null_greek_result(
                     GreekStatus::MissingRate,
                     "q0",
-                    "stock_daily",
+                    spot_source,
                     "minute_precise",
                     "expiry_date_16_00_ET",
                 );
@@ -1864,7 +2314,7 @@ fn enrich_ticker_rows_minute(
             underlying,
             obs_date_days,
             expiry_days,
-            "stock_daily",
+            spot_source,
             "minute_precise",
             "expiry_date_16_00_ET",
         );
@@ -1895,6 +2345,42 @@ fn ns_to_date_string(ns: i64) -> Option<String> {
     let utc_dt = chrono::DateTime::from_timestamp(secs, 0)?;
     let et_dt = utc_dt.with_timezone(&New_York);
     Some(et_dt.format("%Y-%m-%d").to_string())
+}
+
+/// Minute closes `(window_start, close)` for a ticker on an ET trade date,
+/// sorted by time (empty when the underlying has no minute data that day).
+fn fetch_spot_minute_series(storage_root: &Path, ticker: &str, date: &str) -> Vec<(i64, f64)> {
+    let partition_dir = storage_root
+        .join("stock_minute")
+        .join(format!("trade_date={date}"));
+    if !has_any_parquet_file(&partition_dir) {
+        return Vec::new();
+    }
+    let path_pattern = partition_dir.join("*.parquet").to_string_lossy().to_string();
+    let sql = format!(
+        "SELECT CAST(window_start AS BIGINT) AS window_start, CAST(close AS DOUBLE) AS close \
+         FROM read_parquet('{path}') WHERE ticker = {ticker} ORDER BY window_start",
+        path = sql_escape_literal(&path_pattern),
+        ticker = sql_quote(ticker),
+    );
+    match run_sql_json(&sql) {
+        Ok(rows) => rows
+            .iter()
+            .filter_map(|r| {
+                Some((
+                    r.get("window_start").and_then(Value::as_i64)?,
+                    r.get("close").and_then(Value::as_f64)?,
+                ))
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Last close in `series` whose bar started at or before `ts_ns`.
+fn spot_at(series: &[(i64, f64)], ts_ns: i64) -> Option<f64> {
+    let idx = series.partition_point(|(ws, _)| *ws <= ts_ns);
+    idx.checked_sub(1).and_then(|i| series.get(i)).map(|(_, c)| *c)
 }
 
 /// Fetch the spot (close) price for a given ticker on a given date from stock_daily.
@@ -2525,14 +3011,35 @@ fn parse_projection(
 
 /// Strip UTC suffixes (Z, +00:00) that LLMs commonly append.
 /// Must match the logic in `upq_core::validation::validate_datetime`.
-fn strip_utc_suffix(input: &str) -> &str {
-    if input.ends_with('Z') {
-        &input[..input.len() - 1]
-    } else if input.ends_with("+00:00") {
-        &input[..input.len() - 6]
-    } else {
-        input
+/// Effective `as_of` for a request, or a 400 response for a malformed value.
+#[allow(clippy::result_large_err)]
+fn request_cap(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<Option<i64>, axum::response::Response> {
+    as_of::resolve(state.as_of_ceiling, requested).map_err(invalid_argument)
+}
+
+/// The earlier of a `YYYY-MM-DD` bound and an optional cap date.
+fn clamp_date(end: &str, cap: Option<NaiveDate>) -> String {
+    match cap {
+        Some(c) => {
+            let c = c.format("%Y-%m-%d").to_string();
+            if c.as_str() < end {
+                c
+            } else {
+                end.to_string()
+            }
+        }
+        None => end.to_string(),
     }
+}
+
+fn strip_utc_suffix(input: &str) -> &str {
+    input
+        .strip_suffix('Z')
+        .or_else(|| input.strip_suffix("+00:00"))
+        .unwrap_or(input)
 }
 
 fn parse_datetime_ns(input: &str, end_of_second: bool) -> Result<i64, &'static str> {
@@ -2578,20 +3085,6 @@ fn parse_date_or_datetime_ns(input: &str, end_of_day: bool) -> Result<i64, &'sta
     dt.and_utc()
         .timestamp_nanos_opt()
         .ok_or("datetime overflow")
-}
-
-fn extract_date_from_datetime(input: &str) -> Result<String, &'static str> {
-    let bare = strip_utc_suffix(input);
-    let dt = NaiveDateTime::parse_from_str(bare, "%Y-%m-%dT%H:%M:%S")
-        .map_err(|_| "failed to parse datetime")?;
-    Ok(dt.date().format("%Y-%m-%d").to_string())
-}
-
-fn extract_date_from_date_or_datetime(input: &str) -> Result<String, &'static str> {
-    if let Ok(date) = NaiveDate::parse_from_str(input, "%Y-%m-%d") {
-        return Ok(date.format("%Y-%m-%d").to_string());
-    }
-    extract_date_from_datetime(input)
 }
 
 fn has_any_parquet_file(path: &Path) -> bool {

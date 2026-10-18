@@ -340,6 +340,7 @@ pub fn compute_greeks(
 // Unit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::excessive_precision)]
 mod tests {
     use super::*;
 

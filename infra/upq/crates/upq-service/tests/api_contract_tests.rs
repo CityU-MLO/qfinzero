@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)] // tests may panic on fixture errors
+
 use std::convert::Infallible;
 use std::fs;
 

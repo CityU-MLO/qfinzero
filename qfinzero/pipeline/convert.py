@@ -164,7 +164,9 @@ class Converter:
             e = self.manifest.get(key)
             current = (e and e.get("src_size") == f.size and e.get("src_mtime") == f.mtime
                        and e.get("v") == databento.EXTRACT_VERSION
-                       and (e.get("rows", 0) == 0 or out.exists()))
+                       and (e.get("rows", 0) == 0 or out.exists())
+                       and (e.get("q_rows", 0) == 0
+                            or databento.quote_staging_path(out).exists()))
             if force or not current:
                 todo.append((f, out))
             else:
@@ -182,27 +184,36 @@ class Converter:
         n_fallback = 0
         for f in fallback:
             e = self.manifest.get(f"databento-src:{f.path}")
-            if e and e.get("rows") and e.get("staging") and Path(e["staging"]).exists():
+            if e and e.get("staging") and (
+                    (e.get("rows") and Path(e["staging"]).exists())
+                    or (e.get("q_rows") and databento.quote_staging_path(Path(e["staging"])).exists())):
                 staged.append((f, Path(e["staging"]), e))
                 n_fallback += 1
         if n_fallback:
             res.notes.append(f"{n_fallback} file(s) unreadable now; kept their last good bars")
 
         # ── stage 2: assemble per (store, trade_date) ──
-        by_date: dict[tuple[str, str], list[Path]] = {}
+        # (stores, asset, date) -> staging files; bar and quote stores apart
+        by_date: dict[tuple[str, str, str], list[Path]] = {}
         for f, out, e in staged:
-            if not e.get("rows"):
-                continue
-            for d in e.get("dates", []):
-                if (start and d < start) or (end and d > end):
+            for kind, rows_k, dates_k, assets_k, path in (
+                    ("bars", "rows", "dates", "assets", out),
+                    ("quotes", "q_rows", "q_dates", "q_assets", databento.quote_staging_path(out))):
+                if not e.get(rows_k):
                     continue
-                for a in e.get("assets", []):
-                    if a in assets:
-                        by_date.setdefault((a, d), []).append(out)
+                for d in e.get(dates_k, []):
+                    if (start and d < start) or (end and d > end):
+                        continue
+                    for a in e.get(assets_k, []):
+                        if a in assets:
+                            by_date.setdefault((kind, a, d), []).append(path)
         written = 0
         assembled: set[str] = set()
-        for (asset, d), stg in sorted(by_date.items(), key=lambda kv: (kv[0][1], kv[0][0])):
-            for store in databento.STORES_FOR_ASSET[asset]:
+        for (kind, asset, d), stg in sorted(by_date.items(), key=lambda kv: (kv[0][2], kv[0][0], kv[0][1])):
+            stores = (databento.STORES_FOR_ASSET if kind == "bars"
+                      else databento.QUOTE_STORES_FOR_ASSET)[asset]
+            sql_fn = databento.assembly_sql if kind == "bars" else databento.quote_sql
+            for store in stores:
                 part_dir = self.p.partition(store, d)
                 sibs = databento.sibling_parts(part_dir)
                 fp = databento.fingerprint([*stg, *sibs])
@@ -212,8 +223,7 @@ class Converter:
                     res.skipped += 1
                     continue
                 target = part_dir / databento.PART_NAME
-                rows = copy_to_parquet(
-                    self.con, databento.assembly_sql(store, stg, d, sibs), target)
+                rows = copy_to_parquet(self.con, sql_fn(store, stg, d, sibs), target)
                 if rows == 0:
                     databento.remove_part(target)    # fully covered by another vendor
                 else:
@@ -237,7 +247,8 @@ class Converter:
         return res
 
     def _drop_stale_databento(self, assembled: set[str], start, end, assets, files) -> int:
-        stores = {s for a in assets for s in databento.STORES_FOR_ASSET[a]}
+        stores = {s for a in assets for s in (*databento.STORES_FOR_ASSET[a],
+                                              *databento.QUOTE_STORES_FOR_ASSET[a])}
         removed = 0
         for key, e in list(self.manifest.entries.items()):
             if not key.startswith("databento:") or key in assembled:
@@ -253,6 +264,7 @@ class Converter:
             if key.startswith("databento-src:") and e.get("src") not in present:
                 if e.get("staging"):
                     Path(e["staging"]).unlink(missing_ok=True)
+                    databento.quote_staging_path(Path(e["staging"])).unlink(missing_ok=True)
                 self.manifest.drop(key)
         return removed
 
@@ -270,6 +282,7 @@ class Converter:
             rec = {"src": f.path, "src_size": f.size, "src_mtime": f.mtime,
                    "v": databento.EXTRACT_VERSION,
                    "rows": r.rows, "dates": r.dates, "assets": r.assets,
+                   "q_rows": r.q_rows, "q_dates": r.q_dates, "q_assets": r.q_assets,
                    "staging": str(out)}
             if r.dropped_symbols:
                 rec["unmapped_instruments"] = r.dropped_symbols

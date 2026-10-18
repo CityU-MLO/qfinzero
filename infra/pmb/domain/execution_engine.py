@@ -12,7 +12,8 @@ from models.event import (
     OptionExpiryEventPayload,
     AssignmentPayload,
 )
-from models.session import FeeModel
+from models.session import FeeModel, PartialFillConfig
+from domain.trading_sessions import Segment, order_may_execute
 from domain.order_manager import OrderManager
 from domain.ledger import Ledger, OPTION_MULTIPLIER
 from domain.margin_engine import MarginEngine
@@ -27,8 +28,12 @@ class ExecutionEngine:
         slippage_bps: float,
         fee_model: FeeModel,
         option_spread_pct: float = 0.0,
+        partial_fill: PartialFillConfig | None = None,
+        enforce_trading_hours: bool = False,
     ):
         self._rng = random.Random(seed)
+        self._partial = partial_fill or PartialFillConfig()
+        self._enforce_hours = enforce_trading_hours
         self._slippage_bps = slippage_bps
         self._option_spread_pct = option_spread_pct
         self._fee_model = fee_model
@@ -47,11 +52,18 @@ class ExecutionEngine:
         order_manager: OrderManager,
         ledger: Ledger,
         margin_engine: MarginEngine,
+        segment: Segment = Segment.REGULAR,
+        trading_date: str | None = None,
     ) -> tuple[list[EventEnvelope], list[Trade]]:
         """Process all open orders against current bars.
 
         Spread orders (linked by spread_id) are executed atomically:
         both legs fill or both are rejected. Non-spread orders execute individually.
+
+        With trading hours enforced, an order only matches in the segments its
+        ``trading_hours`` allow (options: REGULAR only); a DAY order is stamped
+        with the trading date of its first eligible bar so it can expire at the
+        end of that date.
 
         Returns (events, trades) generated this step.
         """
@@ -59,6 +71,15 @@ class ExecutionEngine:
         trades: list[Trade] = []
 
         open_orders = order_manager.get_open_orders()
+        if self._enforce_hours:
+            eligible = []
+            for o in open_orders:
+                if not order_may_execute(o.trading_hours, o.instrument_id, segment):
+                    continue
+                if o.session_date is None:
+                    o.session_date = trading_date
+                eligible.append(o)
+            open_orders = eligible
 
         # Separate spread orders from individual orders
         spread_groups: dict[str, list[Order]] = {}
@@ -247,8 +268,13 @@ class ExecutionEngine:
                 )
                 return events, trades
 
-        # Execute fill
+        # Execute fill (optionally capped at a share of the bar's volume)
         fill_qty = order.remaining_qty
+        if self._partial.enabled:
+            cap = int(getattr(bar, "volume", 0) * self._partial.max_fill_ratio_per_tick)
+            if cap <= 0:
+                return events, trades      # no liquidity this bar: wait
+            fill_qty = min(fill_qty, cap)
         fees = self._calculate_fees(order, fill_qty)
 
         instrument_type = self._instrument_type(order)

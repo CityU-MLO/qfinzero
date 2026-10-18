@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from models.session import CreateSessionRequest, StepRequest
+from models.session import CreateSessionRequest, StepRequest, StepUntilRequest
 
 router = APIRouter(tags=["sessions"])
 
@@ -70,6 +70,20 @@ async def step_session(session_id: str, req: StepRequest, request: Request):
         )
 
     result = session_svc.step(session_id, req.step)
+    return result
+
+
+@router.post("/v1/sessions/{session_id}/step_until")
+async def step_session_until(session_id: str, req: StepUntilRequest, request: Request):
+    """Advance until a fill, a price trigger, a time or a session segment."""
+    session_svc = request.app.state.session_service
+    if session_svc.get_session(session_id) is None:
+        raise HTTPException(status_code=404,
+                            detail={"code": "not_found", "message": "session not found"})
+    result = session_svc.step_until(session_id, req)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409,
+                            detail={"code": "conflict", "message": result.get("error")})
     return result
 
 

@@ -56,7 +56,8 @@ def _print_status(args) -> int:
         print("    —" + (f" ({db['error']})" if db.get("error") else ""))
 
     print(f"\nUPQ STORAGE  {store['root']}")
-    for k in ("stock_daily", "stock_minute", "option_day", "option_minute"):
+    for k in ("stock_daily", "stock_minute", "option_day", "option_minute",
+                  "stock_quote_minute", "option_quote_minute"):
         s = store[k]
         rng = f"{s.get('start','?')} .. {s.get('end','?')}" if s["partitions"] else "—"
         print(f"    {k:14} {s['partitions']:5d} partitions  {rng}")
@@ -129,7 +130,8 @@ def _do_validate(args) -> int:
     con = connect()
     ok = True
     print("\nVALIDATION")
-    for store in ("stock_daily", "stock_minute", "option_day", "option_minute"):
+    for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
+                  "stock_quote_minute", "option_quote_minute"):
         glob = _lit(paths.store(store) / "trade_date=*" / "*.parquet")
         try:
             n, ndates = con.execute(
@@ -138,7 +140,8 @@ def _do_validate(args) -> int:
             print(f"  {store:14} rows={n:>12,}  dates={ndates}")
         except Exception as e:  # noqa: BLE001
             print(f"  {store:14} (empty / not built)")
-    nparts = sum(1 for s in ("stock_daily", "stock_minute", "option_day", "option_minute")
+    nparts = sum(1 for s in ("stock_daily", "stock_minute", "option_day", "option_minute",
+                             "stock_quote_minute", "option_quote_minute")
                  for _ in paths.store(s).glob("trade_date=*/part-databento-0000.parquet"))
     if nparts:
         print(f"  databento parts {nparts}")

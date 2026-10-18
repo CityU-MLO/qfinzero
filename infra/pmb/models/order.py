@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 
-from .enums import Side, OrderType, TimeInForce, OrderStatus
+from .enums import Side, OrderType, TimeInForce, OrderStatus, TradingHours
 from .instrument import Instrument
 
 
@@ -13,7 +13,8 @@ class OrderSpec(BaseModel):
     limit_price: Optional[float] = None
     stop_price: Optional[float] = None
     time_in_force: TimeInForce = TimeInForce.DAY
-    expire_ts: Optional[str] = None
+    expire_ts: Optional[str] = None      # required for GTD
+    trading_hours: TradingHours = TradingHours.REGULAR
 
 
 class SpreadOrderSpec(BaseModel):
@@ -82,6 +83,11 @@ class Order(BaseModel):
     stop_price: Optional[float] = None
     avg_fill_price: Optional[float] = None
     time_in_force: TimeInForce = TimeInForce.DAY
+    expire_ts: Optional[str] = None
+    trading_hours: TradingHours = TradingHours.REGULAR
+    # trading date on which a DAY order first became eligible; it expires at
+    # the end of that date (set by the execution engine)
+    session_date: Optional[str] = None
     status: OrderStatus = OrderStatus.NEW
     created_ts: str = ""
     last_update_ts: str = ""

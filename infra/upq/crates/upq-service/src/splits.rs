@@ -107,6 +107,7 @@ impl SplitCalendar {
 
     /// Adjust OHLCV values for a given trade_date.
     /// Returns (open, high, low, close, volume) adjusted.
+    #[allow(clippy::too_many_arguments)]
     pub fn adjust_ohlcv(
         &self,
         ticker: &str,

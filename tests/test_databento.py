@@ -269,14 +269,14 @@ def test_parquet_export_mbo(tmp_path):
         == [("SPY", 590.5, 589.5, 15, 2)]
 
 
-def test_quote_only_and_foreign_files_are_skipped(tmp_path):
+def test_reference_and_foreign_files_are_skipped(tmp_path):
     paths = _paths(tmp_path)
     con = duckdb.connect()
-    q = paths.databento / "cbbo.parquet"
-    q.parent.mkdir(parents=True)
-    con.execute(f"""COPY (SELECT 1735828200000000000::BIGINT AS ts_event, 193 AS rtype,
-                    1.0 AS price, 1 AS size, 'FOO   250117C00100000' AS symbol)
-                    TO '{q}' (FORMAT PARQUET)""")
+    ref = paths.databento / "definition.parquet"
+    ref.parent.mkdir(parents=True)
+    con.execute(f"""COPY (SELECT 1735828200000000000::BIGINT AS ts_event, 19 AS rtype,
+                    'FOO   250117C00100000' AS symbol)
+                    TO '{ref}' (FORMAT PARQUET)""")
     con.execute(f"COPY (SELECT 1 AS x) TO '{paths.databento / 'other.parquet'}' (FORMAT PARQUET)")
     (paths.databento / "_tmp").mkdir()
     con.execute(f"COPY (SELECT 1 AS x) TO '{paths.databento / '_tmp' / 'ignored.parquet'}' (FORMAT PARQUET)")
@@ -284,7 +284,25 @@ def test_quote_only_and_foreign_files_are_skipped(tmp_path):
     raw = registry.scan(paths)["raw"]["databento"]
     assert raw["files"] == 2 and raw["convertible_files"] == 0
     res = _convert(paths)
-    assert res.rows == 0 and any("quotes=1" in n for n in res.notes)
+    assert res.rows == 0 and any("other=1" in n for n in res.notes)
+
+
+def test_parquet_cbbo_export_becomes_quotes(tmp_path):
+    paths = _paths(tmp_path)
+    con = duckdb.connect()
+    con.execute("SET TimeZone='UTC'")
+    q = paths.databento / "cbbo" / "2025-01-02.parquet"
+    q.parent.mkdir(parents=True)
+    # Databento exports: float (pretty) prices, ts_recv stamped at interval end
+    con.execute(f"""COPY (SELECT * FROM (VALUES
+          (to_timestamp(1735828260), to_timestamp(1735828260), 193, 1.2, 1.3, 5, 7, 'FOO   250117C00100000'),
+          (to_timestamp(1735828320), to_timestamp(1735828320), 193, 1.25, 'NaN'::DOUBLE, 5, 0, 'FOO   250117C00100000'))
+        AS t(ts_recv, ts_event, rtype, bid_px_00, ask_px_00, bid_sz_00, ask_sz_00, symbol))
+        TO '{q}' (FORMAT PARQUET)""")
+    res = _convert(paths)
+    out = paths.partition("option_quote_minute", "2025-01-02") / dbsrc.PART_NAME
+    assert _q(con, f"SELECT window_start, bid_price, ask_price FROM read_parquet('{out}') ORDER BY 1") \
+        == [(T0930, 1.2, 1.3), (T0930 + 60 * S, 1.25, None)], res.notes
 
 
 def test_osi_ticker_normalisation():
@@ -412,3 +430,90 @@ def test_cleanup_skipped_when_a_file_is_unreadable(tmp_path):
     assert tickers == {"FOO", "BAR"}             # FOO kept from its last good extraction
     assert any("cleanup skipped" in n for n in res.notes)
     assert any("last good" in n for n in res.notes)
+
+
+# ── overnight session (Blue Ocean, 20:00-04:00 ET) ──────────────────────
+
+@needs_dbn
+def test_overnight_venue_fills_night_without_displacing_day(tmp_path):
+    paths = _paths(tmp_path)
+    night = T0930 + int(11.5 * 3600) * S        # 21:00 ET on 2025-01-02
+    _write_dbn(paths.databento / "ocea" / "FOO.dbn", "OCEA.MEMOIR", "mbo", {"FOO": 7},
+               [_mbo(7, night, 99.0, 25, "T")], map_days=2)
+    _write_dbn(paths.databento / "xnas" / "FOO.dbn", "XNAS.ITCH", "trades", {"FOO": 7},
+               [_trade(7, T0930, 100.0, 10)])
+    # massive already has FOO's regular session on this date
+    part = paths.partition("stock_minute", "2025-01-02")
+    part.mkdir(parents=True)
+    con = duckdb.connect()
+    con.execute(f"""COPY (SELECT 'FOO' AS ticker, {T0930}::BIGINT AS window_start, 1.0 AS open,
+                    1.0 AS high, 1.0 AS low, 1.0 AS close, 500::BIGINT AS volume,
+                    5::BIGINT AS transactions, DATE '2025-01-02' AS trade_date)
+                    TO '{part / 'part-0000.parquet'}' (FORMAT PARQUET)""")
+    _convert(paths)
+    rows = _q(con, f"SELECT window_start, volume FROM read_parquet('{_store(paths, 'stock_minute')}')")
+    assert rows == [(night, 25)]                 # night bar added, XNAS day bar not duplicated
+    # the night trade never enters a daily bar (stock_daily comes from XNAS day trades only)
+    assert _q(con, f"SELECT volume FROM read_parquet('{_store(paths, 'stock_daily')}')") == [(10,)]
+
+    # massive re-converting the partition keeps our night bar
+    assert dbsrc.refilter_part(con, part) == 1
+
+
+# ── quote stores ─────────────────────────────────────────────────────────
+
+def _cbbo(rtype, iid, ts_recv, bid, ask, bsz=5, asz=7, price=None, size=0):
+    import databento_dbn as d
+    lv = d.ConsolidatedBidAskPair(bid_px=int(round(bid * PX)), ask_px=int(round(ask * PX)),
+                                  bid_sz=bsz, ask_sz=asz)
+    p = int(round(price * PX)) if price is not None else dbsrc.UNDEF_PRICE
+    return d.CBBOMsg(rtype, 30, iid, ts_recv, p, size, d.Side.NONE, ts_recv, levels=lv)
+
+
+@needs_dbn
+def test_cbbo_1m_becomes_option_quote_minute(tmp_path):
+    import databento_dbn as d
+    paths = _paths(tmp_path)
+    osi = "FOO   250117C00100000"
+    r = int(d.RType.CBBO_1M)
+    # sampled schemas stamp ts_recv at the END of the interval: 09:31:00 -> minute 09:30
+    recs = [_cbbo(r, 11, T0930 + 60 * S, 1.20, 1.30), _cbbo(r, 11, T0930 + 120 * S, 1.25, 1.35)]
+    _write_dbn(paths.databento / "cbbo" / "FOO.dbn.zst", "OPRA.PILLAR", "cbbo-1m", {osi: 11}, recs,
+               compress=True)
+    res = _convert(paths)
+    assert res.rows == 2, res.notes
+    con = duckdb.connect()
+    q = paths.partition("option_quote_minute", "2025-01-02") / dbsrc.PART_NAME
+    got = _q(con, f"SELECT contract, underlying, strike, \"right\", window_start, bid_price, ask_price, "
+                  f"bid_size, ask_size FROM read_parquet('{q}') ORDER BY window_start")
+    assert got == [("O:FOO250117C00100000", "FOO", 100.0, "C", T0930, 1.20, 1.30, 5, 7),
+                   ("O:FOO250117C00100000", "FOO", 100.0, "C", T0930 + 60 * S, 1.25, 1.35, 5, 7)]
+    from qfinzero.pipeline import schema
+    cols = [(c[0], c[1]) for c in _q(con, f"DESCRIBE SELECT * FROM read_parquet('{q}')")]
+    assert cols == [(c, _DUCK[t]) for c, t in schema.OPTION_QUOTE_MINUTE.items()]
+    # quote-only files produce no bars
+    assert not (paths.partition("option_minute", "2025-01-02") / dbsrc.PART_NAME).exists()
+
+
+@needs_dbn
+def test_cmbp1_yields_bars_and_last_quote_per_minute(tmp_path):
+    import databento_dbn as d
+    paths = _paths(tmp_path)
+    osi = "FOO   250117P00090000"
+
+    def rec(ts, bid, ask, action, price=None, size=0):
+        lv = d.ConsolidatedBidAskPair(bid_px=int(bid * PX), ask_px=int(ask * PX), bid_sz=3, ask_sz=4)
+        p = int(price * PX) if price is not None else dbsrc.UNDEF_PRICE
+        return d.CMBP1Msg(int(d.RType.CMBP_1), 30, 11, ts, p, size, action, d.Side.NONE, ts, levels=lv)
+
+    recs = [rec(T0930 + 5 * S, 2.0, 2.2, d.Action.ADD),
+            rec(T0930 + 20 * S, 2.05, 2.15, d.Action.TRADE, price=2.1, size=6),
+            rec(T0930 + 50 * S, 2.1, 2.2, d.Action.ADD)]          # last book in 09:30
+    _write_dbn(paths.databento / "cmbp" / "FOO.dbn", "OPRA.PILLAR", "cmbp-1", {osi: 11}, recs)
+    _convert(paths)
+    con = duckdb.connect()
+    bars = paths.partition("option_minute", "2025-01-02") / dbsrc.PART_NAME
+    quotes = paths.partition("option_quote_minute", "2025-01-02") / dbsrc.PART_NAME
+    assert _q(con, f"SELECT close, volume FROM read_parquet('{bars}')") == [(2.1, 6)]
+    assert _q(con, f"SELECT window_start, bid_price, ask_price FROM read_parquet('{quotes}')") \
+        == [(T0930, 2.1, 2.2)]

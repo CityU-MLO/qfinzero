@@ -23,6 +23,13 @@ class Side(str, Enum):
     SELL = "SELL"
 
 
+class TradingHours(str, Enum):
+    """Where an order may execute (see domain/trading_sessions.py)."""
+    REGULAR = "REGULAR"      # 09:30-16:00 ET
+    EXTENDED = "EXTENDED"    # 04:00-20:00 ET, LIMIT only
+    OVERNIGHT = "OVERNIGHT"  # 24/5 incl. 20:00-04:00 ET, LIMIT only
+
+
 class TimeInForce(str, Enum):
     DAY = "DAY"
     GTC = "GTC"

@@ -162,53 +162,49 @@ fn group_by_ticker(rows: &[Value]) -> Vec<(String, Vec<usize>)> {
 }
 
 fn compute_sma(closes: &[Option<f64>], window: usize) -> Vec<Option<f64>> {
-    let n = closes.len();
-    let mut result = vec![None; n];
-
-    for i in (window - 1)..n {
-        let mut sum = 0.0;
-        let mut valid = true;
-        for j in (i + 1 - window)..=i {
-            match closes[j] {
-                Some(v) => sum += v,
-                None => {
-                    valid = false;
-                    break;
-                }
-            }
-        }
-        if valid {
-            result[i] = Some(sum / window as f64);
+    let mut result = vec![None; closes.len()];
+    if window == 0 {
+        return result;
+    }
+    // a window with any missing close yields no value
+    for (slot, w) in result.iter_mut().skip(window - 1).zip(closes.windows(window)) {
+        if let Some(sum) = w.iter().try_fold(0.0, |acc, v| v.map(|x| acc + x)) {
+            *slot = Some(sum / window as f64);
         }
     }
     result
 }
 
 fn compute_ema(closes: &[Option<f64>], window: usize) -> Vec<Option<f64>> {
-    let n = closes.len();
-    let mut result = vec![None; n];
+    let mut result = vec![None; closes.len()];
     let multiplier = 2.0 / (window as f64 + 1.0);
 
     let seed_sma = compute_sma(closes, window);
 
     let mut ema_prev: Option<f64> = None;
-    for i in 0..n {
-        if ema_prev.is_none() {
-            if let Some(sma) = seed_sma[i] {
-                ema_prev = Some(sma);
-                result[i] = ema_prev;
+    for ((slot, close), seed) in result.iter_mut().zip(closes).zip(&seed_sma) {
+        match ema_prev {
+            None => {
+                if let Some(sma) = seed {
+                    ema_prev = Some(*sma);
+                    *slot = ema_prev;
+                }
             }
-        } else if let Some(close) = closes[i] {
-            let prev = ema_prev.unwrap();
-            let ema = close * multiplier + prev * (1.0 - multiplier);
-            ema_prev = Some(ema);
-            result[i] = Some(ema);
+            Some(prev) => {
+                if let Some(close) = close {
+                    let ema = close * multiplier + prev * (1.0 - multiplier);
+                    ema_prev = Some(ema);
+                    *slot = Some(ema);
+                }
+            }
         }
     }
     result
 }
 
-fn compute_macd(closes: &[Option<f64>]) -> (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>) {
+type Series = Vec<Option<f64>>;
+
+fn compute_macd(closes: &[Option<f64>]) -> (Series, Series, Series) {
     let n = closes.len();
     let ema_fast = compute_ema(closes, 12);
     let ema_slow = compute_ema(closes, 26);

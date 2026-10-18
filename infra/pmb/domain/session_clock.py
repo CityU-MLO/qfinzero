@@ -77,8 +77,9 @@ class SessionClock:
 
         For DAILY sessions this is always True (one bar = one day = EOD).
         For MINUTE sessions this returns True only when the next bar is on a
-        different date (or there is no next bar), so option expiry and order
-        cancellation fire at the last intraday bar rather than at 09:31.
+        different *trading* date (or there is no next bar), so option expiry and
+        order cancellation fire at the last intraday bar rather than at 09:31.
+        Overnight bars (20:00 ET onward) already belong to the next trading date.
         """
         if self._frequency == Frequency.DAILY:
             return True
@@ -87,9 +88,9 @@ class SessionClock:
             return True
         if idx + 1 >= len(self._timestamps):
             return True  # last bar in the whole session
-        next_date = ns_to_iso(self._timestamps[idx + 1])[:10]
-        current_date = ns_to_iso(ts_ns)[:10]
-        return next_date != current_date
+        from domain.trading_sessions import trading_date_of
+        # US trading dates, not UTC dates: 19:00/20:00 ET is not a day boundary.
+        return trading_date_of(self._timestamps[idx + 1]) != trading_date_of(ts_ns)
 
     def step(self, n: int = 1) -> list[int]:
         """Advance n bars. Returns list of timestamp_ns values traversed."""

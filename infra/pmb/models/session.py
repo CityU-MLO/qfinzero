@@ -34,6 +34,10 @@ class ExecutionConfig(BaseModel):
     option_spread_pct: float = 0.0  # bid-ask spread as % of premium (e.g. 0.05 = 5%)
     fee_model: FeeModel = FeeModel()
     partial_fill: PartialFillConfig = PartialFillConfig()
+    # Gate execution by session segment (REGULAR / EXTENDED / OVERNIGHT orders)
+    # and expire DAY / GTD orders. False restores the old "every bar is
+    # tradable, orders never expire" behaviour.
+    enforce_trading_hours: bool = True
 
 
 class ReproducibilityConfig(BaseModel):
@@ -62,6 +66,21 @@ class CreateSessionRequest(BaseModel):
 class StepRequest(BaseModel):
     step: int = 1
     target_ts: Optional[str] = None
+
+
+class PriceTrigger(BaseModel):
+    symbol: str                 # stock symbol or option contract
+    op: str = ">="              # ">=" or "<="
+    price: float
+
+
+class StepUntilRequest(BaseModel):
+    """Advance until a condition holds (see SessionService.step_until)."""
+    until_ts: Optional[str] = None
+    max_steps: int = 390
+    stop_on_fill: bool = True
+    price_triggers: List[PriceTrigger] = []
+    stop_on_segment: Optional[str] = None   # REGULAR | PRE | POST | OVERNIGHT
 
 
 class SessionSummary(BaseModel):

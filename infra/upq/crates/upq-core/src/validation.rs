@@ -34,10 +34,10 @@ pub fn validate_date(value: &str) -> Result<(), CoreError> {
 pub fn validate_datetime(value: &str) -> Result<(), CoreError> {
     // Strip UTC suffixes that LLMs commonly append (Z, +00:00).
     // Reject non-UTC offsets — UPQ timestamps are always UTC.
-    let bare = if value.ends_with('Z') {
-        &value[..value.len() - 1]
-    } else if value.ends_with("+00:00") {
-        &value[..value.len() - 6]
+    let bare = if let Some(stripped) = value.strip_suffix('Z') {
+        stripped
+    } else if let Some(stripped) = value.strip_suffix("+00:00") {
+        stripped
     } else if value.len() > 19 && (value.contains('+') || value[10..].contains('-')) {
         // Has a non-UTC offset like +05:30 or -04:00 — reject
         return Err(CoreError::InvalidDate(value.to_string()));

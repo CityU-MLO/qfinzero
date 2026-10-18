@@ -299,6 +299,32 @@ class PMBClient:
         data = self._post(f"/sessions/{session_id}/step", {"step": n})
         return StepResult(data)
 
+    def step_until(
+        self,
+        session_id: str,
+        until_ts: str = None,
+        max_steps: int = 390,
+        stop_on_fill: bool = True,
+        price_triggers: list = None,
+        stop_on_segment: str = None,
+    ) -> dict:
+        """Advance until a condition holds instead of one bar at a time.
+
+        Stops at the first of: ``until_ts`` reached, ``max_steps`` bars, a fill
+        (``stop_on_fill``), a price trigger such as
+        ``{"symbol": "SPY", "op": ">=", "price": 500}``, or entering segment
+        ``stop_on_segment`` (REGULAR / PRE / POST / OVERNIGHT). Market ticks are
+        summarized to the last bar so the response stays small.
+        """
+        body = {"max_steps": max_steps, "stop_on_fill": stop_on_fill}
+        if until_ts:
+            body["until_ts"] = until_ts
+        if price_triggers:
+            body["price_triggers"] = price_triggers
+        if stop_on_segment:
+            body["stop_on_segment"] = stop_on_segment
+        return self._post(f"/sessions/{session_id}/step_until", body)
+
     def stop_session(self, session_id: str) -> dict:
         return self._post(f"/sessions/{session_id}/stop")
 
@@ -372,6 +398,8 @@ class PMBClient:
         stop_price: float = None,
         time_in_force: str = "DAY",
         client_order_id: str = None,
+        trading_hours: str = "REGULAR",
+        expire_ts: str = None,
     ) -> dict:
         order_spec = {
             "instrument": instrument,
@@ -379,7 +407,10 @@ class PMBClient:
             "order_type": order_type,
             "qty": qty,
             "time_in_force": time_in_force,
+            "trading_hours": trading_hours,
         }
+        if expire_ts:
+            order_spec["expire_ts"] = expire_ts
         if limit_price is not None:
             order_spec["limit_price"] = limit_price
         if stop_price is not None:
@@ -405,13 +436,18 @@ class PMBClient:
         stop_price: float = None,
         time_in_force: str = "DAY",
         client_order_id: str = None,
+        trading_hours: str = "REGULAR",
+        expire_ts: str = None,
     ) -> dict:
+        """``trading_hours``: REGULAR (default), EXTENDED (04:00-20:00 ET) or
+        OVERNIGHT (24/5); outside REGULAR only LIMIT orders are accepted."""
         return self._place_order(
             session_id, account_id,
             instrument={"type": "STOCK", "symbol": symbol},
             side="BUY", qty=qty, order_type=order_type,
             limit_price=limit_price, stop_price=stop_price,
             time_in_force=time_in_force, client_order_id=client_order_id,
+            trading_hours=trading_hours, expire_ts=expire_ts,
         )
 
     def sell(
@@ -425,13 +461,18 @@ class PMBClient:
         stop_price: float = None,
         time_in_force: str = "DAY",
         client_order_id: str = None,
+        trading_hours: str = "REGULAR",
+        expire_ts: str = None,
     ) -> dict:
+        """``trading_hours``: REGULAR (default), EXTENDED (04:00-20:00 ET) or
+        OVERNIGHT (24/5); outside REGULAR only LIMIT orders are accepted."""
         return self._place_order(
             session_id, account_id,
             instrument={"type": "STOCK", "symbol": symbol},
             side="SELL", qty=qty, order_type=order_type,
             limit_price=limit_price, stop_price=stop_price,
             time_in_force=time_in_force, client_order_id=client_order_id,
+            trading_hours=trading_hours, expire_ts=expire_ts,
         )
 
     def buy_option(

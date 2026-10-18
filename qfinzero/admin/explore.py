@@ -16,7 +16,8 @@ from qfinzero.pipeline.paths import resolve
 from . import config_store
 
 # Partitioned price stores that carry a ``ticker`` + ``trade_date`` column.
-_SYMBOL_STORES = {"stock_daily", "stock_minute", "option_day", "option_minute"}
+_SYMBOL_STORES = {"stock_daily", "stock_minute", "option_day", "option_minute",
+                  "stock_quote_minute", "option_quote_minute"}
 
 
 def _paths():

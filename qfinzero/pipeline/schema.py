@@ -54,6 +54,33 @@ OPTION_DAY = {
 
 OPTION_MINUTE = dict(OPTION_DAY)  # identical shape; minute window_start resolution
 
+# Top of book at the end of each minute ``[window_start, window_start + 60s)``.
+# Minutes without an update are not stored; readers carry the last quote forward.
+STOCK_QUOTE_MINUTE = {
+    "ticker": "VARCHAR",
+    "window_start": "BIGINT",
+    "bid_price": "DOUBLE",
+    "ask_price": "DOUBLE",
+    "bid_size": "BIGINT",
+    "ask_size": "BIGINT",
+    "trade_date": "DATE",
+}
+
+OPTION_QUOTE_MINUTE = {
+    "ticker": "VARCHAR",
+    "contract": "VARCHAR",
+    "underlying": "VARCHAR",
+    "expiry": "DATE",
+    "strike": "DOUBLE",
+    "right": "VARCHAR",
+    "window_start": "BIGINT",
+    "bid_price": "DOUBLE",
+    "ask_price": "DOUBLE",
+    "bid_size": "BIGINT",
+    "ask_size": "BIGINT",
+    "trade_date": "DATE",
+}
+
 RATES = {
     "date": "DATE",
     "yield_1_month": "DOUBLE",

@@ -1,6 +1,7 @@
 import uuid
 
-from models.enums import OrderStatus, OrderType
+from models.enums import OrderStatus, OrderType, TimeInForce
+from domain.trading_sessions import validate_trading_hours
 from models.order import Order, OrderSpec, CreateOrderRequest
 
 
@@ -42,6 +43,8 @@ class OrderManager:
             limit_price=spec.limit_price,
             stop_price=spec.stop_price,
             time_in_force=spec.time_in_force,
+            expire_ts=spec.expire_ts,
+            trading_hours=spec.trading_hours,
             status=OrderStatus.NEW,
             created_ts=ts,
             last_update_ts=ts,
@@ -100,12 +103,32 @@ class OrderManager:
         order.last_update_ts = ts
         return order
 
-    def expire_day_orders(self, ts: str) -> list[Order]:
+    def expire_day_orders(self, ts: str, trading_date: str | None = None) -> list[Order]:
+        """Expire open DAY orders at the end of a trading date.
+
+        With ``trading_date``, only orders that became eligible on that date
+        expire; an order still waiting for its first eligible bar (e.g. a
+        REGULAR order sent after the close) carries over to the next day.
+        """
         expired = []
         for order in self._orders.values():
-            if order.is_terminal:
+            if order.is_terminal or order.time_in_force != TimeInForce.DAY:
                 continue
-            if order.time_in_force.value == "DAY":
+            if trading_date is not None and order.session_date != trading_date:
+                continue
+            order.status = OrderStatus.EXPIRED
+            order.last_update_ts = ts
+            expired.append(order)
+        return expired
+
+    def expire_gtd_orders(self, ts: str, ts_ns: int) -> list[Order]:
+        """Expire open GTD orders whose ``expire_ts`` is before this bar."""
+        from domain.session_clock import iso_to_ns
+        expired = []
+        for order in self._orders.values():
+            if order.is_terminal or order.time_in_force != TimeInForce.GTD or not order.expire_ts:
+                continue
+            if ts_ns > iso_to_ns(order.expire_ts):
                 order.status = OrderStatus.EXPIRED
                 order.last_update_ts = ts
                 expired.append(order)
@@ -149,4 +172,6 @@ class OrderManager:
                 return "stop_price required for STOP_LIMIT order"
             if spec.limit_price is None:
                 return "limit_price required for STOP_LIMIT order"
-        return None
+        if spec.time_in_force == TimeInForce.GTD and not spec.expire_ts:
+            return "expire_ts required for GTD order"
+        return validate_trading_hours(spec.trading_hours, spec.order_type, spec.instrument.type)

@@ -20,8 +20,10 @@ from models.event import (
     MarketTickPayload,
     AccountSnapshotPayload,
     RiskEventPayload,
+    OrderEventPayload,
 )
 from domain.session_clock import SessionClock, ns_to_iso, iso_to_ns
+from domain.trading_sessions import segment_of, trading_date_of
 from domain.market_data_cache import MarketDataCache
 from domain.order_manager import OrderManager
 from domain.execution_engine import ExecutionEngine
@@ -306,6 +308,8 @@ class SessionService:
                 slippage_bps=exec_config.slippage_bps,
                 fee_model=exec_config.fee_model,
                 option_spread_pct=exec_config.option_spread_pct,
+                partial_fill=exec_config.partial_fill,
+                enforce_trading_hours=exec_config.enforce_trading_hours,
             ),
             margin_engine=MarginEngine(account.margin_config),
             history=HistoryStore(),
@@ -361,8 +365,75 @@ class SessionService:
                 "current_ts": state.clock.current_ts,
                 "frequency": state.clock.frequency.value,
                 "status": state.status.value,
+                **self._session_info(state),
             },
             "events": all_events,
+        }
+
+    def step_until(self, session_id: str, req) -> dict:
+        """Step bar by bar until a stop condition, so an agent spends one call
+        per decision point rather than one per bar.
+
+        Stops on (first match): session finished, ``until_ts`` reached, a fill
+        (``stop_on_fill``), a price trigger crossing, entering
+        ``stop_on_segment``, or ``max_steps``. Non-tick events are returned in
+        full; market ticks are reduced to the last one.
+        """
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {"ok": False, "error": "session not found"}
+        if state.status != SessionStatus.RUNNING:
+            return {"ok": False, "error": "session not running"}
+        until_ns = iso_to_ns(req.until_ts) if req.until_ts else None
+        max_steps = max(1, min(int(req.max_steps), 100_000))
+        freq = state.clock.frequency
+        events: list[dict] = []
+        last_tick = None
+        reason = "max_steps"
+        steps = 0
+        prev_seg = segment_of(state.clock.current_ns, freq).value \
+            if state.clock.current_ns is not None else None
+        while steps < max_steps:
+            res = self.step(session_id, 1)
+            if not res.get("ok"):
+                return res
+            steps += 1
+            filled = False
+            prices: dict[str, float] = {}
+            for e in res["events"]:
+                if e.get("type") == EventType.MARKET_TICK.value:
+                    last_tick = e
+                    p = e.get("payload", {})
+                    prices.update({s["symbol"]: s["close"] for s in p.get("stocks", [])})
+                    prices.update({o["contract"]: o["close"] for o in p.get("options", [])})
+                    continue
+                if e.get("type") == EventType.TRADE_EVENT.value:
+                    filled = True
+                if e.get("type") != EventType.ACCOUNT_SNAPSHOT.value:
+                    events.append(e)
+            cur = state.clock.current_ns
+            seg = segment_of(cur, freq).value if cur is not None else None
+            hit = next((t for t in req.price_triggers if t.symbol in prices and (
+                prices[t.symbol] >= t.price if t.op == ">=" else prices[t.symbol] <= t.price)), None)
+            if state.status != SessionStatus.RUNNING:
+                reason = "finished"
+            elif until_ns is not None and cur is not None and cur >= until_ns:
+                reason = "until_ts"
+            elif req.stop_on_fill and filled:
+                reason = "fill"
+            elif hit is not None:
+                reason = f"price_trigger:{hit.symbol}{hit.op}{hit.price}"
+            elif req.stop_on_segment and seg == req.stop_on_segment and prev_seg != seg:
+                reason = f"segment:{seg}"
+            else:
+                prev_seg = seg
+                continue
+            break
+        snap = self.get_full_state(session_id) or {}
+        return {
+            "ok": True, "session_id": session_id, "steps": steps, "reason": reason,
+            "clock": self._clock_state(state), "events": events, "last_tick": last_tick,
+            "account": snap.get("account"),
         }
 
     def _process_tick(
@@ -437,8 +508,11 @@ class SessionService:
         # For DAILY sessions every bar is EOD, so this always fires.
         # For MINUTE sessions this fires only at the last intraday bar (e.g. 15:59/16:00),
         # not at 09:31, so the full day of option mark-to-market is preserved.
-        current_date = ts[:10]  # "YYYY-MM-DD"
+        freq = state.clock.frequency
+        current_date = trading_date_of(ts_ns, freq)   # US trading date, not UTC
+        segment = segment_of(ts_ns, freq)
         is_eod = state.clock.is_last_bar_of_date(ts_ns)
+        enforce = state.execution_engine._enforce_hours
 
         if is_eod:
             underlying_prices = {sym: bar.close for sym, bar in stock_bars.items()}
@@ -490,11 +564,30 @@ class SessionService:
             order_manager=state.order_manager,
             ledger=state.ledger,
             margin_engine=state.margin_engine,
+            segment=segment,
+            trading_date=current_date,
         )
 
         for evt in exec_events:
             events.append(evt.model_dump())
             state.history.append_event(evt)
+
+        # 4a. Time-in-force: GTD past its expiry; DAY at the end of its trading date
+        if enforce:
+            expired = state.order_manager.expire_gtd_orders(ts, ts_ns)
+            if is_eod:
+                expired += state.order_manager.expire_day_orders(ts, current_date)
+            for order in expired:
+                evt = EventEnvelope(
+                    event_id=state.next_event_id(), ts=ts, type=EventType.ORDER_EVENT,
+                    payload=OrderEventPayload(
+                        order_id=order.order_id, client_order_id=order.client_order_id,
+                        status=order.status.value, filled_qty=order.filled_qty,
+                        remaining_qty=order.remaining_qty, reason_code="EXPIRED",
+                    ).model_dump(),
+                )
+                events.append(evt.model_dump())
+                state.history.append_event(evt)
 
         for trade in trades:
             state.history.record_trade(trade)
@@ -617,7 +710,18 @@ class SessionService:
             "current_ts": state.clock.current_ts,
             "end_ts": state.clock.end_ts,
             "status": state.status.value,
+            **self._session_info(state),
         }
+
+    @staticmethod
+    def _session_info(state: SessionState) -> dict:
+        """Segment + trading date of the current bar (for agents and the UI)."""
+        ns = state.clock.current_ns
+        if ns is None:
+            return {}
+        freq = state.clock.frequency
+        return {"segment": segment_of(ns, freq).value,
+                "trading_date": trading_date_of(ns, freq)}
 
     async def _patch_daily_open_with_minute_price(
         self, req: CreateSessionRequest, cache: MarketDataCache

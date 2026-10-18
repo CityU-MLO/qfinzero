@@ -968,6 +968,36 @@ def pmb_step_session(
 
 
 @mcp.tool()
+def pmb_step_until(
+    session_id: str,
+    until_ts: Optional[str] = None,
+    max_steps: int = 390,
+    stop_on_fill: bool = True,
+    price_triggers: Optional[List[dict]] = None,
+    stop_on_segment: Optional[Literal["REGULAR", "PRE", "POST", "OVERNIGHT"]] = None,
+) -> str:
+    """Advance the clock until something worth deciding on happens.
+
+    Prefer this over many pmb_step_session calls in minute sessions: one call
+    covers up to ``max_steps`` bars and stops at the first of
+      - ``until_ts`` reached (ISO time),
+      - an order fill (``stop_on_fill``, default true),
+      - a price trigger, e.g. [{"symbol": "SPY", "op": ">=", "price": 600}],
+      - entering a session segment (``stop_on_segment``, e.g. "REGULAR" to
+        skip to the next open),
+      - the session ending.
+
+    Returns:
+        JSON with steps, reason, clock (incl. segment and trading_date), the
+        order/trade/risk events seen, last_tick (latest bars) and account.
+    """
+    with PMBClient(PMB_URL) as client:
+        return json.dumps(client.step_until(
+            session_id, until_ts=until_ts, max_steps=max_steps, stop_on_fill=stop_on_fill,
+            price_triggers=price_triggers, stop_on_segment=stop_on_segment))
+
+
+@mcp.tool()
 def pmb_get_market(session_id: str) -> str:
     """Get the current market state for a session (latest prices for all instruments).
 
@@ -1113,8 +1143,10 @@ def pmb_buy_stock(
     order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: Literal["DAY", "GTC"] = "DAY",
+    time_in_force: Literal["DAY", "GTC", "GTD"] = "DAY",
     client_order_id: Optional[str] = None,
+    trading_hours: Literal["REGULAR", "EXTENDED", "OVERNIGHT"] = "REGULAR",
+    expire_ts: Optional[str] = None,
 ) -> str:
     """Place a BUY order for a stock.
 
@@ -1126,8 +1158,13 @@ def pmb_buy_stock(
         order_type: "MARKET" (default), "LIMIT", "STOP", or "STOP_LIMIT"
         limit_price: Required for LIMIT and STOP_LIMIT orders
         stop_price: Required for STOP and STOP_LIMIT orders
-        time_in_force: "DAY" (default, expires end of day) or "GTC" (Good-Till-Cancel)
+        time_in_force: "DAY" (default, expires at the end of the trading date it
+            first becomes eligible on), "GTC" (good till cancel) or "GTD" (needs expire_ts)
         client_order_id: Optional idempotency key to prevent duplicate orders
+        trading_hours: "REGULAR" (09:30-16:00 ET, default), "EXTENDED"
+            (04:00-20:00 ET) or "OVERNIGHT" (24/5 incl. 20:00-04:00 ET).
+            Outside REGULAR only LIMIT orders are accepted.
+        expire_ts: ISO time a GTD order expires
 
     Returns:
         JSON order object with: order_id, status, instrument, side, qty, order_type
@@ -1144,6 +1181,8 @@ def pmb_buy_stock(
                 stop_price=stop_price,
                 time_in_force=time_in_force,
                 client_order_id=client_order_id,
+                trading_hours=trading_hours,
+                expire_ts=expire_ts,
             )
         )
 
@@ -1157,8 +1196,10 @@ def pmb_sell_stock(
     order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: Literal["DAY", "GTC"] = "DAY",
+    time_in_force: Literal["DAY", "GTC", "GTD"] = "DAY",
     client_order_id: Optional[str] = None,
+    trading_hours: Literal["REGULAR", "EXTENDED", "OVERNIGHT"] = "REGULAR",
+    expire_ts: Optional[str] = None,
 ) -> str:
     """Place a SELL order for a stock.
 
@@ -1170,8 +1211,11 @@ def pmb_sell_stock(
         order_type: "MARKET" (default), "LIMIT", "STOP", or "STOP_LIMIT"
         limit_price: Required for LIMIT and STOP_LIMIT orders
         stop_price: Required for STOP and STOP_LIMIT orders
-        time_in_force: "DAY" or "GTC"
+        time_in_force: "DAY", "GTC" or "GTD" (needs expire_ts)
         client_order_id: Optional idempotency key
+        trading_hours: "REGULAR" (default), "EXTENDED" or "OVERNIGHT"; outside
+            REGULAR only LIMIT orders are accepted
+        expire_ts: ISO time a GTD order expires
 
     Returns:
         JSON order object with: order_id, status, instrument, side, qty, order_type
@@ -1188,6 +1232,8 @@ def pmb_sell_stock(
                 stop_price=stop_price,
                 time_in_force=time_in_force,
                 client_order_id=client_order_id,
+                trading_hours=trading_hours,
+                expire_ts=expire_ts,
             )
         )
 

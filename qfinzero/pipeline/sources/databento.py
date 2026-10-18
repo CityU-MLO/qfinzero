@@ -62,9 +62,9 @@ from ..engine import _lit
 SUFFIXES = (".dbn.zst", ".dbn", ".parquet")
 PART_NAME = "part-databento-0000.parquet"
 INDEX_FILE = "databento_index.json"   # under <storage>/_state/
-INDEX_VERSION = 1
+INDEX_VERSION = 2   # 2: OCEA recognised as a US equity venue
 # Bump when extraction output changes so cached staging bars are rebuilt.
-EXTRACT_VERSION = 2
+EXTRACT_VERSION = 3   # 3: quote staging (<key>.q.parquet)
 
 UNDEF_PRICE = 9223372036854775807     # i64::MAX, Databento's "no price"
 UNDEF_TS = 18446744073709551615       # u64::MAX, Databento's "no timestamp"
@@ -84,6 +84,11 @@ OHLCV_KIND = {          # staging "kind" per OHLCV schema
     "ohlcv-eod": "e",
 }
 QUOTE_SCHEMAS = {"bbo-1s", "bbo-1m", "cbbo-1s", "cbbo-1m"}
+# Schemas whose records carry a top-of-book (bid/ask) -> quote stores, with a
+# preference rank: full-resolution consolidated updates beat sampled quotes.
+QUOTE_CAPABLE = {"cmbp-1": 4, "cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
+# Sampled schemas stamp ts_recv at the *end* of their interval.
+SAMPLED_QUOTES = {"cbbo-1s", "bbo-1s", "cbbo-1m", "bbo-1m"}
 
 # DBN rtype -> schema (for parquet files, which carry rtype but no header).
 # tbbo shares rtype 1 with mbp-1; both are filtered on action == 'T'.
@@ -100,6 +105,7 @@ EQUITY_DATASET_PREFIXES = (
     "XNAS", "XNYS", "XBOS", "XPSX", "XCHI", "XCIS", "XASE", "ARCX", "IEXG",
     "BATS", "BATY", "EDGA", "EDGX", "MEMX", "EPRL", "DBEQ", "EQUS", "XNDQ",
     "FINN", "FINY", "FINC", "LTSE",
+    "OCEA",     # Blue Ocean ATS: the 20:00-04:00 ET overnight session
 )
 CONSOLIDATED_PREFIXES = ("EQUS", "DBEQ", "OPRA")
 
@@ -184,8 +190,16 @@ class FileInfo:
     error: Optional[str] = None
 
     @property
+    def has_bars(self) -> bool:
+        return self.role in ("trades", "ohlcv")
+
+    @property
+    def has_quotes(self) -> bool:
+        return self.schema in QUOTE_CAPABLE
+
+    @property
     def convertible(self) -> bool:
-        return self.error is None and self.role in ("trades", "ohlcv") and (
+        return self.error is None and (self.has_bars or self.has_quotes) and (
             self.asset is not None or self.fmt == "parquet")
 
     def overlaps(self, start: str | None, end: str | None) -> bool:
@@ -448,6 +462,14 @@ class ExtractResult:
     assets: list[str] = field(default_factory=list)
     dropped_symbols: int = 0
     note: str = ""
+    q_rows: int = 0                                      # quote staging
+    q_dates: list[str] = field(default_factory=list)
+    q_assets: list[str] = field(default_factory=list)
+
+
+def quote_staging_path(out: Path) -> Path:
+    """Quote staging file next to a bar staging file (``<key>.q.parquet``)."""
+    return out.with_name(out.stem + ".q.parquet")
 
 
 def _write_staging(con, select_sql: str, out: Path) -> tuple[int, list[str], list[str]]:
@@ -473,11 +495,45 @@ def _arrow_table(cur):
     return out.read_all() if hasattr(out, "read_all") else out
 
 
+def _register_symbols(con, table: str, md) -> int:
+    """Register ``_sym(key, day, sym)`` mapping instrument ids in ``table``
+    (columns ``key``, ``ws``) to raw symbols, resolved per UTC date because
+    OPRA reuses ids. Returns how many (id, day) pairs could not be mapped."""
+    import pyarrow as pa
+    from databento.common.symbology import InstrumentMap
+
+    pairs = con.execute(f"SELECT DISTINCT key, ws // {NS_PER_DAY} FROM {table}").fetchall()
+    imap = InstrumentMap()
+    try:
+        imap.insert_metadata(md)
+    except Exception:  # noqa: BLE001 - files without mappings fall through below
+        pass
+    single = None
+    if md.symbols and len(md.symbols) == 1 and len({k for k, _ in pairs}) == 1:
+        single = str(md.symbols[0])
+    epoch = date(1970, 1, 1)
+    keys, days, syms = [], [], []
+    dropped = 0
+    for key, day in pairs:
+        try:
+            sym = imap.resolve(int(key), epoch + timedelta(days=int(day)))
+        except Exception:  # noqa: BLE001 - empty map
+            sym = None
+        sym = sym if sym is not None else single
+        if sym is None:
+            dropped += 1
+            continue
+        keys.append(int(key)); days.append(int(day)); syms.append(str(sym))
+    con.register("_sym", pa.table({"key": pa.array(keys, pa.int64()),
+                                   "day": pa.array(days, pa.int64()),
+                                   "sym": pa.array(syms, pa.string())}))
+    return dropped
+
+
 def _extract_dbn(info: FileInfo, out: Path, con, chunk: int) -> ExtractResult:
     import databento as db
     import numpy as np
     import pyarrow as pa
-    from databento.common.symbology import InstrumentMap
 
     res = ExtractResult(info.path)
     store = db.DBNStore.from_file(info.path)
@@ -560,34 +616,7 @@ def _extract_dbn(info: FileInfo, out: Path, con, chunk: int) -> ExtractResult:
                     "l AS low, c AS close, v AS volume, NULL::BIGINT AS transactions FROM _partials")
     con.unregister("_partials")
 
-    # instrument_id -> raw symbol, resolved per UTC date (OPRA ids are reused)
-    pairs = con.execute(
-        f"SELECT DISTINCT key, ws // {NS_PER_DAY} FROM _bars").fetchall()
-    imap = InstrumentMap()
-    try:
-        imap.insert_metadata(md)
-    except Exception:  # noqa: BLE001 - files without mappings fall through below
-        pass
-    single = None
-    if md.symbols and len(md.symbols) == 1 and len({k for k, _ in pairs}) == 1:
-        single = str(md.symbols[0])
-    epoch = date(1970, 1, 1)
-    keys, days, syms = [], [], []
-    for key, day in pairs:
-        sym = None
-        try:
-            sym = imap.resolve(int(key), epoch + timedelta(days=int(day)))
-        except Exception:  # noqa: BLE001 - empty map
-            sym = None
-        if sym is None:
-            sym = single
-        if sym is None:
-            res.dropped_symbols += 1
-            continue
-        keys.append(int(key)); days.append(int(day)); syms.append(str(sym))
-    con.register("_sym", pa.table({"key": pa.array(keys, pa.int64()),
-                                   "day": pa.array(days, pa.int64()),
-                                   "sym": pa.array(syms, pa.string())}))
+    res.dropped_symbols += _register_symbols(con, "_bars", md)
     con.execute(f"""CREATE OR REPLACE TEMP VIEW _named AS
         SELECT '{asset}' AS asset, s.sym, b.ws, b.open, b.high, b.low, b.close,
                b.volume, b.transactions
@@ -657,6 +686,180 @@ def _extract_parquet(info: FileInfo, out: Path, con) -> ExtractResult:
     return res
 
 
+# ── quotes: top of book sampled at the end of each minute ────────────────
+
+QUOTE_STAGING_COLUMNS = (
+    "asset", "ticker", "trade_date", "window_start", "bid_price", "ask_price",
+    "bid_size", "ask_size", "last_ts", "drank", "srank", "src",
+)
+
+# Per chunk: the last book state in each (instrument, minute), by file order.
+_QUOTE_PARTIAL_SQL = """
+    SELECT key, ws, max(rn) AS last_rn, max(ts) AS last_ts,
+           arg_max(bid, rn) AS bid, arg_max(ask, rn) AS ask,
+           arg_max(bsz, rn) AS bsz, arg_max(asz, rn) AS asz
+    FROM {src} GROUP BY key, ws
+"""
+_QUOTE_FINAL_SQL = """
+    SELECT key, ws, max(last_ts) AS last_ts,
+           arg_max(bid, last_rn) AS bid, arg_max(ask, last_rn) AS ask,
+           arg_max(bsz, last_rn) AS bsz, arg_max(asz, last_rn) AS asz
+    FROM {src} GROUP BY key, ws
+"""
+
+
+def _write_quote_staging(con, src: str, info: FileInfo, out: Path) -> tuple[int, list[str], list[str]]:
+    """``src`` has (asset, sym, ws, last_ts, bid, ask, bsz, asz) -> quote staging."""
+    srank = QUOTE_CAPABLE.get(info.schema or "", 1)
+    drank = dataset_rank(info.dataset) if info.dataset else (2 if info.asset == "option" else 1)
+    et = f"timezone('{_ET}', to_timestamp(ws // 1000000000))"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _qstg AS
+        SELECT asset, {_ticker_sql('sym', 'asset')} AS ticker,
+               CAST({et} AS DATE) AS trade_date, CAST(ws AS BIGINT) AS window_start,
+               CAST(bid AS DOUBLE) AS bid_price, CAST(ask AS DOUBLE) AS ask_price,
+               CAST(bsz AS BIGINT) AS bid_size, CAST(asz AS BIGINT) AS ask_size,
+               CAST(last_ts AS BIGINT) AS last_ts, {int(drank)} AS drank, {int(srank)} AS srank,
+               '{source_id(info)}' AS src
+        FROM {src}
+        WHERE (bid IS NOT NULL OR ask IS NOT NULL)""")
+    con.execute("DELETE FROM _qstg WHERE ticker IS NULL")
+    n = con.execute("SELECT count(*) FROM _qstg").fetchone()[0]
+    if n:
+        tmp = out.with_suffix(".parquet.tmp")
+        con.execute(f"COPY (SELECT {', '.join(QUOTE_STAGING_COLUMNS)} FROM _qstg "
+                    f"ORDER BY asset, trade_date, ticker, window_start) "
+                    f"TO '{_lit(tmp)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        os.replace(tmp, out)
+    dates = [r[0] for r in con.execute(
+        "SELECT DISTINCT strftime(trade_date, '%Y-%m-%d') FROM _qstg ORDER BY 1").fetchall()]
+    assets = [r[0] for r in con.execute("SELECT DISTINCT asset FROM _qstg ORDER BY 1").fetchall()]
+    con.execute("DROP TABLE _qstg")
+    return int(n), dates, assets
+
+
+def _extract_dbn_quotes(info: FileInfo, out: Path, con, chunk: int) -> tuple[int, list[str], list[str]]:
+    import databento as db
+    import numpy as np
+    import pyarrow as pa
+
+    store = db.DBNStore.from_file(info.path)
+    lag = 1 if info.schema in SAMPLED_QUOTES else 0   # interval-end stamps -> its minute
+    partials, offset = [], 0
+    for arr in store.to_ndarray(count=chunk):
+        if len(arr) == 0:
+            continue
+        ok = arr["ts_recv"] < UNDEF_TS
+        idx = np.nonzero(ok)[0]
+        if len(idx):
+            sel = arr[idx]
+            ts = sel["ts_recv"].astype(np.int64)
+
+            def px(field_name):
+                raw = sel[field_name]
+                return pa.array(raw.astype(np.float64) / PRICE_DIVISOR, mask=raw == UNDEF_PRICE)
+
+            tbl = pa.table({
+                "key": sel["instrument_id"].astype(np.int64),
+                "ws": ((ts - lag) // NS_PER_MIN) * NS_PER_MIN,
+                "ts": ts,
+                "rn": (idx + offset).astype(np.int64),
+                "bid": px("bid_px_00"), "ask": px("ask_px_00"),
+                "bsz": sel["bid_sz_00"].astype(np.int64), "asz": sel["ask_sz_00"].astype(np.int64),
+            })
+            con.register("_qchunk", tbl)
+            partials.append(_arrow_table(con.execute(_QUOTE_PARTIAL_SQL.format(src="_qchunk"))))
+            con.unregister("_qchunk")
+        offset += len(arr)
+    if not partials:
+        return 0, [], []
+    con.register("_qpartials", pa.concat_tables(partials))
+    con.execute(f"CREATE OR REPLACE TEMP TABLE _quotes AS {_QUOTE_FINAL_SQL.format(src='_qpartials')}")
+    con.unregister("_qpartials")
+    _register_symbols(con, "_quotes", store.metadata)
+    con.execute(f"""CREATE OR REPLACE TEMP VIEW _qnamed AS
+        SELECT '{info.asset}' AS asset, s.sym, q.ws, q.last_ts, q.bid, q.ask, q.bsz, q.asz
+        FROM _quotes q JOIN _sym s ON s.key = q.key AND s.day = q.ws // {NS_PER_DAY}""")
+    result = _write_quote_staging(con, "_qnamed", info, out)
+    con.execute("DROP VIEW _qnamed")
+    con.unregister("_sym")
+    con.execute("DROP TABLE _quotes")
+    return result
+
+
+def _extract_parquet_quotes(info: FileInfo, out: Path, con) -> tuple[int, list[str], list[str]]:
+    path = Path(info.path)
+    cols = _parquet_columns(con, path)
+    if not {"bid_px_00", "ask_px_00"} <= set(cols):
+        return 0, [], []
+    ts_col = "ts_recv" if "ts_recv" in cols else "ts_event"
+    ts = _ts_ns_expr(ts_col, cols[ts_col])
+    lag = 1 if info.schema in SAMPLED_QUOTES else 0
+
+    def price(col: str) -> str:
+        if "INT" in cols.get(col, ""):
+            return f"CASE WHEN {col} = {UNDEF_PRICE} THEN NULL ELSE {col} / {PRICE_DIVISOR} END"
+        return f"CASE WHEN isnan(CAST({col} AS DOUBLE)) THEN NULL ELSE CAST({col} AS DOUBLE) END"
+
+    asset_expr = (f"'{info.asset}'" if info.dataset else
+                  f"CASE WHEN regexp_matches(symbol, '{OSI_RE}') THEN 'option' ELSE 'stock' END")
+    rp = f"read_parquet('{_lit(path)}', file_row_number=true)"
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _qsrc AS
+        SELECT {asset_expr} AS asset, CAST(symbol AS VARCHAR) AS sym,
+               (({ts}) - {lag}) // {NS_PER_MIN} * {NS_PER_MIN} AS ws,
+               max({ts}) AS last_ts,
+               arg_max({price('bid_px_00')}, file_row_number) AS bid,
+               arg_max({price('ask_px_00')}, file_row_number) AS ask,
+               arg_max(CAST(bid_sz_00 AS BIGINT), file_row_number) AS bsz,
+               arg_max(CAST(ask_sz_00 AS BIGINT), file_row_number) AS asz
+        FROM {rp} WHERE {ts} IS NOT NULL GROUP BY ALL""")
+    result = _write_quote_staging(con, "_qsrc", info, out)
+    con.execute("DROP TABLE _qsrc")
+    return result
+
+
+def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+    """Quote store: one source per ticker (consolidated, then finer sampling,
+    then more samples), one row per (ticker, minute) keeping the latest book."""
+    asset = "stock" if store == "stock_quote_minute" else "option"
+    base = f"""
+        WITH src AS (
+            SELECT * FROM read_parquet({_staging_list(staging)})
+            WHERE asset = '{asset}' AND trade_date = DATE '{trade_date}'
+              {_excluded(siblings)}
+        ),
+        rank AS (
+            SELECT ticker, src, row_number() OVER (
+                PARTITION BY ticker ORDER BY max(drank) DESC, max(srank) DESC, count(*) DESC, src) AS rn
+            FROM src GROUP BY ticker, src
+        ),
+        q AS (
+            SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
+            QUALIFY row_number() OVER (PARTITION BY ticker, window_start ORDER BY last_ts DESC) = 1
+        )"""
+    if asset == "stock":
+        return base + f"""
+        SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size,
+               DATE '{trade_date}' AS trade_date
+        FROM q ORDER BY ticker, window_start"""
+    return base + f"""
+        SELECT ticker, ticker AS contract,
+               regexp_extract(ticker, '{_OPRA_RE}', 1) AS underlying,
+               strptime('20' || regexp_extract(ticker, '{_OPRA_RE}', 2), '%Y%m%d')::DATE AS expiry,
+               CAST(regexp_extract(ticker, '{_OPRA_RE}', 4) AS DOUBLE) / 1000.0 AS strike,
+               regexp_extract(ticker, '{_OPRA_RE}', 3) AS "right",
+               window_start, bid_price, ask_price, bid_size, ask_size,
+               DATE '{trade_date}' AS trade_date
+        FROM q WHERE regexp_matches(ticker, '{_OPRA_RE}')
+        ORDER BY contract, window_start"""
+
+
+QUOTE_STORES_FOR_ASSET = {
+    "stock": ("stock_quote_minute",),
+    "option": ("option_quote_minute",),
+}
+
+
 def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = None,
                  chunk: int = 2_000_000) -> ExtractResult:
     """Convert one raw file into staging bars at ``out``. Picklable entry point
@@ -667,12 +870,21 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
     out = Path(out)
     con = connect(threads)
     try:
-        if info.fmt == "parquet":
+        if not info.has_bars:
+            res = ExtractResult(info.path)
+        elif info.fmt == "parquet":
             res = _extract_parquet(info, out, con)
         else:
             res = _extract_dbn(info, out, con, chunk)
         if res.rows == 0:
             out.unlink(missing_ok=True)
+        qout = quote_staging_path(out)
+        if info.has_quotes:
+            q = (_extract_parquet_quotes(info, qout, con) if info.fmt == "parquet"
+                 else _extract_dbn_quotes(info, qout, con, chunk))
+            res.q_rows, res.q_dates, res.q_assets = q
+        if res.q_rows == 0:
+            qout.unlink(missing_ok=True)
         return res
     finally:
         con.close()
@@ -683,12 +895,33 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
 _OPRA_RE = r"^O:([A-Z]+)[0-9]{0,2}([0-9]{6})([CP])([0-9]{8})$"   # == massive._OPRA_RE
 
 
+# Overnight segment (20:00-04:00 ET). No other vendor covers it (massive stops
+# at 20:00), so overnight bars are only dropped where another vendor has the
+# very same (ticker, minute); daytime bars are dropped per ticker.
+NIGHT_SQL = "coalesce(et_min >= 1200 OR et_min < 240, false)"
+
+
+def _sib_list(siblings: list[Path]) -> str:
+    return ", ".join(f"'{_lit(p)}'" for p in siblings)
+
+
 def _excluded(siblings: list[Path], col: str = "ticker") -> str:
     """Fill precedence: drop tickers another vendor wrote into this partition."""
     if not siblings:
         return ""
-    lst = ", ".join(f"'{_lit(p)}'" for p in siblings)
-    return f" AND ticker NOT IN (SELECT DISTINCT {col} FROM read_parquet([{lst}]))"
+    return f" AND ticker NOT IN (SELECT DISTINCT {col} FROM read_parquet([{_sib_list(siblings)}]))"
+
+
+def _excluded_by_segment(siblings: list[Path], night_expr: str = NIGHT_SQL,
+                         alias: str = "z") -> str:
+    """Minute stores: daytime rows by ticker, overnight rows by (ticker, minute)."""
+    if not siblings:
+        return ""
+    sibs = f"read_parquet([{_sib_list(siblings)}])"
+    return f""" AND CASE WHEN {night_expr}
+            THEN NOT EXISTS (SELECT 1 FROM {sibs} s
+                             WHERE s.ticker = {alias}.ticker AND s.window_start = {alias}.window_start)
+            ELSE {alias}.ticker NOT IN (SELECT DISTINCT ticker FROM {sibs}) END"""
 
 
 # One bar per (ticker, source, kind, window_start): files of one source that
@@ -709,19 +942,22 @@ def _staging_list(files: list[Path]) -> str:
 def minute_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
     """Minute store (stock_minute / option_minute): best source per ticker."""
     asset = "stock" if store == "stock_minute" else "option"
+    # Sources are ranked per (ticker, segment): an overnight venue (OCEA) adds
+    # the night bars without displacing the daytime source.
     base = f"""
         WITH src AS (
-            SELECT * FROM read_parquet({_staging_list(staging)})
+            SELECT z.*, CASE WHEN {NIGHT_SQL} THEN 'night' ELSE 'day' END AS seg
+            FROM read_parquet({_staging_list(staging)}) z
             WHERE asset = '{asset}' AND kind = 'm' AND trade_date = DATE '{trade_date}'
-              {_excluded(siblings)}
+              {_excluded_by_segment(siblings)}
         ),
         rank AS (
-            SELECT ticker, src, row_number() OVER (
-                PARTITION BY ticker ORDER BY max(drank) DESC, sum(volume) DESC, src) AS rn
-            FROM src GROUP BY ticker, src
+            SELECT ticker, seg, src, row_number() OVER (
+                PARTITION BY ticker, seg ORDER BY max(drank) DESC, sum(volume) DESC, src) AS rn
+            FROM src GROUP BY ticker, seg, src
         ),
         bars AS (
-            SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
+            SELECT s.* FROM src s JOIN rank r USING (ticker, seg, src) WHERE r.rn = 1
             {_DEDUPE}
         )"""
     if asset == "stock":
@@ -755,6 +991,7 @@ def daily_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
     (after consolidated-over-venue). Stock bars aggregated from minutes take
     O/H/L/C from the regular session (09:30-16:00 ET) when it traded, and
     volume/transactions from the whole day, matching the massive day aggs.
+    Overnight (20:00-04:00 ET) bars never enter a daily bar.
     """
     asset = "stock" if store == "stock_daily" else "option"
     rth = "et_min BETWEEN 570 AND 959" if asset == "stock" else "et_min IS NOT NULL"
@@ -762,6 +999,7 @@ def daily_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
         WITH raw AS (
             SELECT * FROM read_parquet({_staging_list(staging)})
             WHERE asset = '{asset}' AND trade_date = DATE '{trade_date}'
+              AND NOT {NIGHT_SQL}
               {_excluded(siblings)}
         ),
         src AS (SELECT * FROM raw {_DEDUPE_DAILY}),
@@ -842,8 +1080,14 @@ def refilter_part(con, partition_dir: Path) -> Optional[int]:
     if not sibs:
         return None
     tmp = ours.with_suffix(".parquet.refilter")
+    if partition_dir.parent.name in ("stock_minute", "option_minute"):
+        et = f"timezone('{_ET}', to_timestamp(z.window_start // 1000000000))"
+        night = (f"(date_part('hour', {et}) >= 20 OR date_part('hour', {et}) < 4)")
+        cond = _excluded_by_segment(sibs, night)
+    else:
+        cond = _excluded(sibs)
     con.execute(
-        f"COPY (SELECT * FROM read_parquet('{_lit(ours)}') WHERE TRUE{_excluded(sibs)}) "
+        f"COPY (SELECT z.* FROM read_parquet('{_lit(ours)}') z WHERE TRUE{cond}) "
         f"TO '{_lit(tmp)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
     n = con.execute(f"SELECT count(*) FROM read_parquet('{_lit(tmp)}')").fetchone()[0]
     if n == 0:

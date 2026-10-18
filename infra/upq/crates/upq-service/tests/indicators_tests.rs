@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)] // tests may panic on fixture errors
+
 use upq_service::indicators::{parse_indicators, Indicator, max_lookback, compute_indicators};
 use serde_json::json;
 
