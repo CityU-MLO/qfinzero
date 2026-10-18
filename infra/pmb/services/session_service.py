@@ -21,7 +21,9 @@ from models.event import (
     AccountSnapshotPayload,
     RiskEventPayload,
     OrderEventPayload,
+    VariationMarginPayload,
 )
+from domain.futures import session_date_of
 from domain.session_clock import SessionClock, ns_to_iso, iso_to_ns
 from domain.trading_sessions import segment_of, trading_date_of
 from domain.market_data_cache import MarketDataCache
@@ -98,6 +100,9 @@ class SessionService:
         config.universe.options = sorted(
             set(config.universe.options) | set(state.cache._option_bars)
         )
+        config.universe.futures = sorted(
+            set(config.universe.futures) | set(state.cache._future_bars)
+        )
         ledger = state.ledger
         engine = state.execution_engine
         margin = state.margin_engine
@@ -132,6 +137,7 @@ class SessionService:
             "margin": {
                 "status": margin.margin_status.value,
                 "call_count": margin.margin_call_count,
+                "call_sessions": margin.call_sessions,
             },
             "action_log": state.action_log,
             "chain_skeleton": state.chain_skeleton,
@@ -214,6 +220,7 @@ class SessionService:
             margin.get("status", MarginStatus.NORMAL.value)
         )
         state.margin_engine._margin_call_count = int(margin.get("call_count", 0))
+        state.margin_engine._call_sessions = int(margin.get("call_sessions", 0))
         state.event_seq = int(checkpoint.get("event_seq", 0))
         state.run_id = checkpoint.get("run_id")
         state.action_log = list(checkpoint.get("action_log") or [])
@@ -284,6 +291,9 @@ class SessionService:
                     )
                 cache.load_option_bars(contract, opt_bars)
 
+        if req.universe.futures:
+            await self._load_futures(cache, req.universe.futures, req.frequency, req.start_ts, req.end_ts)
+
         # Minute sessions: load the options' minute NBBO so they fill and mark
         # against the book (see ExecutionConfig.option_fill_model).
         exec_cfg = req.execution_config or ExecutionConfig()
@@ -335,6 +345,105 @@ class SessionService:
         )
 
         return session_id, clock_state
+
+    async def _load_futures(self, cache: MarketDataCache, symbols: list[str], frequency: Frequency,
+                            start_ts: str, end_ts: str) -> int:
+        """Prefetch futures bars, their book (minute sessions) and the daily
+        settlement prices that variation margin marks to. Returns symbols loaded."""
+        syms = sorted({s.strip().upper() for s in symbols if s.strip()} - set(cache._future_bars))
+        if not syms:
+            return 0
+        start_d, end_d = start_ts[:10], end_ts[:10]
+        # sessions end at 17:00 ET; the session of an evening end_ts is the next date
+        end_session = max(end_d, session_date_of(iso_to_ns(end_ts)))
+        daily = await self._upq.get_future_daily_bars(syms, start_d, end_session)
+        for bar in daily:
+            if bar.settle is not None:
+                cache.load_future_settles(bar.symbol, {bar.session_date: bar.settle})
+        if frequency == Frequency.MINUTE:
+            bars = await self._upq.get_future_minute_bars(syms, start_ts, end_ts)
+        else:
+            bars = [b for b in daily if start_d <= b.session_date <= end_d]
+        by_sym: dict[str, list] = {}
+        for bar in bars:
+            by_sym.setdefault(bar.symbol, []).append(bar)
+        for sym, rows in by_sym.items():
+            cache.load_future_bars(sym, rows)
+            if frequency == Frequency.MINUTE:
+                quotes = await self._upq.get_future_quotes(sym, start_ts, end_ts)
+                if quotes:
+                    cache.load_future_quotes(sym, quotes)
+        return len(by_sym)
+
+    async def add_futures(self, session_id: str, symbols: list[str]) -> dict:
+        """Load futures (contracts or roots) into a running session. Like
+        :meth:`add_stocks` the bar grid is unchanged (replays stay
+        deterministic): the futures trade at the session's existing bars, so
+        put them in the universe at creation for their overnight hours."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return {"ok": False, "error": "session not found"}
+        unknown = [s for s in symbols if state.margin_engine.future_spec(s) is None]
+        known = [s for s in symbols if s not in unknown]
+        try:
+            loaded = await self._load_futures(state.cache, known, state.clock.frequency,
+                                              state.config.start_ts, state.config.end_ts)
+        except Exception as e:  # noqa: BLE001 — UPQ without futures
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": True, "loaded": loaded, "unknown_spec": unknown}
+
+    def _is_last_future_bar(self, state: SessionState, ts_ns: int) -> bool:
+        """Last bar of a CME session (daily sessions: every bar). The very last
+        bar of a minute run is not a settlement unless the session ended there."""
+        if state.clock.frequency == Frequency.DAILY:
+            return True
+        ts = state.clock._timestamps
+        idx = state.clock._ts_index_map.get(ts_ns)
+        if idx is None or idx + 1 >= len(ts):
+            return False
+        return session_date_of(ts[idx + 1]) != session_date_of(ts_ns)
+
+    def _settle_futures(self, state: SessionState, ts_ns: int, ts: str) -> list[dict]:
+        """Daily settlement of open futures, then the futures margin call check:
+        an unmet call past its grace settlements is liquidated at the settle."""
+        events: list[dict] = []
+        if state.clock.frequency == Frequency.DAILY:
+            day = trading_date_of(ts_ns, Frequency.DAILY)
+        else:
+            day = session_date_of(ts_ns)
+        settles: dict[str, float] = {}
+        for pos in state.ledger.future_positions():
+            px = state.cache.future_settle(pos.instrument_id.split(":", 1)[1], day, ts_ns)
+            if px is not None:
+                settles[pos.instrument_id] = px
+        for rec in state.ledger.settle_futures(settles, day):
+            evt = EventEnvelope(event_id=state.next_event_id(), ts=ts, type=EventType.VARIATION_MARGIN,
+                                payload=VariationMarginPayload(**rec).model_dump())
+            events.append(evt.model_dump())
+            state.history.append_event(evt)
+        if not settles:
+            return events
+        equity = state.ledger.total_equity()
+        risk = state.margin_engine.check_maintenance(equity, state.ledger.positions)
+        if state.margin_engine.on_settlement(equity, state.ledger.positions) == "LIQUIDATE":
+            mm = state.margin_engine.total_maintenance_margin(state.ledger.positions)
+            liq_events, trades = state.execution_engine.liquidate_futures(
+                ts, settles, state.ledger, state.margin_engine)
+            risk_evt = EventEnvelope(
+                event_id=state.next_event_id(), ts=ts, type=EventType.RISK_EVENT,
+                payload=RiskEventPayload(
+                    level="LIQUIDATION", reason_code="MARGIN_CALL_NOT_MET", equity=round(equity, 2),
+                    maintenance_margin_req=round(mm, 2), action="LIQUIDATE_FUTURES",
+                ).model_dump())
+            for evt in [risk_evt, *liq_events]:
+                events.append(evt.model_dump())
+                state.history.append_event(evt)
+            for trade in trades:
+                state.history.record_trade(trade)
+            state.margin_engine.check_maintenance(state.ledger.total_equity(), state.ledger.positions)
+        elif risk is not None:
+            pass    # reported by the end-of-tick risk check
+        return events
 
     def step(self, session_id: str, n: int = 1) -> dict:
         """Advance clock by n ticks and return events."""
@@ -414,6 +523,7 @@ class SessionService:
                     p = e.get("payload", {})
                     prices.update({s["symbol"]: s["close"] for s in p.get("stocks", [])})
                     prices.update({o["contract"]: o["close"] for o in p.get("options", [])})
+                    prices.update({f["symbol"]: f["close"] for f in p.get("futures", [])})
                     continue
                 if e.get("type") == EventType.TRADE_EVENT.value:
                     filled = True
@@ -495,6 +605,14 @@ class SessionService:
                 opt_entry["greek_status"] = bar.greek_status
             options_payload.append(opt_entry)
 
+        future_bars = state.cache.get_future_bars_at(ts_ns)
+        futures_payload = [
+            {"symbol": sym, "root": bar.root, "window_start_ns": bar.window_start_ns, "open": bar.open,
+             "high": bar.high, "low": bar.low, "close": bar.close, "volume": bar.volume,
+             **({"settle": bar.settle} if bar.settle is not None else {})}
+            for sym, bar in future_bars.items()
+        ]
+
         market_event = EventEnvelope(
             event_id=state.next_event_id(),
             ts=ts,
@@ -503,6 +621,7 @@ class SessionService:
                 frequency=state.clock.frequency.value,
                 stocks=stocks_payload,
                 options=options_payload,
+                futures=futures_payload,
             ).model_dump(),
         )
         events.append(market_event.model_dump())
@@ -575,6 +694,8 @@ class SessionService:
             segment=segment,
             trading_date=current_date,
             option_quotes=state.cache.get_option_quotes_at(ts_ns),
+            future_bars=future_bars,
+            future_quotes=state.cache.get_future_quotes_at(ts_ns),
         )
 
         for evt in exec_events:
@@ -608,6 +729,10 @@ class SessionService:
         # 4b. Re-mark positions created/modified by fills to bar close
         if trades:
             state.ledger.update_market_prices(prices)
+
+        # 4c. Futures daily settlement (variation margin) at the end of a CME session
+        if state.ledger.future_positions() and self._is_last_future_bar(state, ts_ns):
+            events.extend(self._settle_futures(state, ts_ns, ts))
 
         # 4. Account snapshot
         im = state.margin_engine.total_initial_margin(state.ledger.positions)
@@ -1147,6 +1272,7 @@ class SessionService:
         ts_ns = state.clock.current_ns
         stock_bars = state.cache.get_stock_bars_at(ts_ns) if ts_ns is not None else {}
         option_bars = state.cache.get_option_bars_at(ts_ns) if ts_ns is not None else {}
+        future_bars = state.cache.get_future_bars_at(ts_ns) if ts_ns is not None else {}
 
         stocks = [
             {
@@ -1211,8 +1337,30 @@ class SessionService:
                 "ts": state.clock.current_ts,
                 "stocks": stocks,
                 "options": options,
+                "futures": [
+                    {"symbol": s, "root": b.root, "open": b.open, "high": b.high, "low": b.low,
+                     "close": b.close, "volume": b.volume}
+                    for s, b in future_bars.items()
+                ],
             },
+            "futures_specs": self._futures_specs(state),
         }
+
+    def _futures_specs(self, state: SessionState) -> dict:
+        """Specs and per-contract margins of the session's futures (for the UI)."""
+        out = {}
+        symbols = set(state.cache._future_bars) | {
+            p.instrument_id.split(":", 1)[1] for p in state.ledger.future_positions()}
+        now = state.clock.current_ns or 0
+        for sym in sorted(symbols):
+            spec = state.margin_engine.future_spec(sym)
+            if spec is None:
+                continue
+            ref = state.cache.get_latest_price(f"FUTURE:{sym}", now) or 0.0
+            out[sym] = {**spec.model_dump(), "ref_price": ref,
+                        "initial_per_contract": round(spec.initial_per_contract(ref), 2),
+                        "maintenance_per_contract": round(spec.maintenance_per_contract(ref), 2)}
+        return out
 
     def _reset_state(self, state: SessionState) -> None:
         """Rebuild all mutable domain objects, keeping the immutable market cache."""
@@ -1229,6 +1377,9 @@ class SessionService:
             slippage_bps=exec_config.slippage_bps,
             fee_model=exec_config.fee_model,
             option_spread_pct=exec_config.option_spread_pct,
+            partial_fill=exec_config.partial_fill,
+            enforce_trading_hours=exec_config.enforce_trading_hours,
+            option_fill_model=exec_config.option_fill_model,
         )
         state.margin_engine = MarginEngine(account.margin_config)
         state.history = HistoryStore()

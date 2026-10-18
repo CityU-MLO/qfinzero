@@ -4,7 +4,7 @@ import uuid
 from models.enums import Side, OrderType, OrderStatus, InstrumentType, EventType
 from models.order import Order
 from models.trade import Trade
-from models.market import StockBar, OptionBar, Quote
+from models.market import StockBar, OptionBar, FutureBar, Quote
 from models.event import (
     EventEnvelope,
     OrderEventPayload,
@@ -37,6 +37,8 @@ class ExecutionEngine:
         self._enforce_hours = enforce_trading_hours
         self._quote_model = option_fill_model == "quote"
         self._quotes: dict[str, Quote] = {}
+        self._future_bars: dict[str, FutureBar] = {}
+        self._future_quotes: dict[str, Quote] = {}
         self._slippage_bps = slippage_bps
         self._option_spread_pct = option_spread_pct
         self._fee_model = fee_model
@@ -58,6 +60,8 @@ class ExecutionEngine:
         segment: Segment = Segment.REGULAR,
         trading_date: str | None = None,
         option_quotes: dict[str, Quote] | None = None,
+        future_bars: dict[str, FutureBar] | None = None,
+        future_quotes: dict[str, Quote] | None = None,
     ) -> tuple[list[EventEnvelope], list[Trade]]:
         """Process all open orders against current bars.
 
@@ -74,6 +78,9 @@ class ExecutionEngine:
         events: list[EventEnvelope] = []
         trades: list[Trade] = []
         self._quotes = (option_quotes or {}) if self._quote_model else {}
+        # Futures fill against their book whenever the session loaded one.
+        self._future_bars = future_bars or {}
+        self._future_quotes = future_quotes or {}
 
         open_orders = order_manager.get_open_orders()
         if self._enforce_hours:
@@ -228,6 +235,13 @@ class ExecutionEngine:
         if fill_price is None:
             return events, trades
 
+        is_future = order.instrument_id.startswith("FUTURE:")
+        spec = margin_engine.future_spec(order.instrument_id.split(":", 1)[1]) if is_future else None
+        if is_future and spec is None:
+            return self._reject(order, "UNKNOWN_FUTURE_SPEC", ts, order_manager), trades
+        if spec is not None:
+            fill_price = spec.round_to_tick(fill_price)
+
         # Check if this is an opening position and margin allows it
         is_opening = self._is_opening_trade(order, ledger)
         if is_opening and not margin_engine.can_open_position():
@@ -249,8 +263,17 @@ class ExecutionEngine:
             )
             return events, trades
 
+        # Futures: the opening contracts' initial margin must be free
+        # (equity minus the initial margin of everything already held).
+        if is_opening and is_future:
+            need = margin_engine.future_initial_for_order(
+                order.instrument_id.split(":", 1)[1], order.remaining_qty, fill_price) or 0.0
+            free = ledger.total_equity() - margin_engine.total_initial_margin(ledger.positions)
+            if need > free:
+                return self._reject(order, "INSUFFICIENT_MARGIN", ts, order_manager), trades
+
         # Check buying power for this order
-        if is_opening:
+        if is_opening and not is_future:
             mult = OPTION_MULTIPLIER if order.instrument_id.startswith("OPTION:") else 1
             order_cost = order.remaining_qty * fill_price * mult
             total_needed = order_cost if order.side == Side.BUY else 0
@@ -290,6 +313,8 @@ class ExecutionEngine:
                 return events, trades      # no liquidity this bar: wait
             fill_qty = min(fill_qty, cap)
         fees = self._calculate_fees(order, fill_qty)
+        if spec is not None and spec.fee_per_contract is not None:
+            fees = round(fill_qty * spec.fee_per_contract, 4)
 
         instrument_type = self._instrument_type(order)
 
@@ -300,6 +325,7 @@ class ExecutionEngine:
             qty=fill_qty,
             price=fill_price,
             fees=fees,
+            multiplier=spec.multiplier if spec is not None else None,
         )
 
         order_manager.record_fill(order.order_id, fill_qty, fill_price, ts)
@@ -367,12 +393,27 @@ class ExecutionEngine:
         elif iid.startswith("OPTION:"):
             contract = iid.split(":", 1)[1]
             return option_bars.get(contract)
+        elif iid.startswith("FUTURE:"):
+            return self._future_bars.get(iid.split(":", 1)[1])
         return None
 
     def _quote_for(self, order: Order) -> Quote | None:
+        if order.instrument_id.startswith("FUTURE:"):
+            return self._future_quotes.get(order.instrument_id.split(":", 1)[1])
         if not self._quote_model or not order.instrument_id.startswith("OPTION:"):
             return None
         return self._quotes.get(order.instrument_id.split(":", 1)[1])
+
+    def _reject(self, order: Order, reason: str, ts: str, order_manager: OrderManager) -> list[EventEnvelope]:
+        order_manager.reject(order.order_id, reason, ts)
+        return [EventEnvelope(
+            event_id=self._next_event_id(), ts=ts, type=EventType.ORDER_EVENT,
+            payload=OrderEventPayload(
+                order_id=order.order_id, client_order_id=order.client_order_id,
+                status=OrderStatus.REJECTED.value, filled_qty=order.filled_qty,
+                remaining_qty=order.remaining_qty, reason_code=reason,
+            ).model_dump(),
+        )]
 
     def _quote_fill_price(self, quote: Quote, bar: OptionBar | None, order: Order) -> float | None:
         """Fill against the book in force at the bar open.
@@ -464,12 +505,44 @@ class ExecutionEngine:
     def _calculate_fees(self, order: Order, qty: int) -> float:
         if order.instrument_id.startswith("OPTION:"):
             return round(qty * self._fee_model.option_fee_per_contract, 4)
+        if order.instrument_id.startswith("FUTURE:"):
+            return round(qty * self._fee_model.future_fee_per_contract, 4)
         return round(qty * self._fee_model.stock_fee_per_share, 4)
 
     def _instrument_type(self, order: Order) -> InstrumentType:
         if order.instrument_id.startswith("STOCK:"):
             return InstrumentType.STOCK
+        if order.instrument_id.startswith("FUTURE:"):
+            return InstrumentType.FUTURE
         return InstrumentType.OPTION
+
+    def liquidate_futures(self, ts: str, prices: dict[str, float], ledger: Ledger,
+                          margin_engine: MarginEngine) -> tuple[list[EventEnvelope], list[Trade]]:
+        """Close every futures position at ``prices`` (the settlement) after an
+        unmet margin call. Fills carry the order id ``LIQUIDATION``."""
+        events: list[EventEnvelope] = []
+        trades: list[Trade] = []
+        for pos in list(ledger.future_positions()):
+            price = prices.get(pos.instrument_id, pos.mark_price)
+            spec = margin_engine.future_spec(pos.instrument_id.split(":", 1)[1])
+            qty = abs(pos.qty)
+            side = Side.SELL if pos.qty > 0 else Side.BUY
+            per = spec.fee_per_contract if spec is not None and spec.fee_per_contract is not None \
+                else self._fee_model.future_fee_per_contract
+            fees = round(qty * per, 4)
+            ledger.apply_fill(pos.instrument_id, InstrumentType.FUTURE, side, qty, price, fees,
+                              multiplier=pos.multiplier)
+            trade = Trade(trade_id=f"trd_{uuid.uuid4().hex[:8]}", order_id="LIQUIDATION",
+                          instrument_id=pos.instrument_id, side=side, qty=qty, price=price,
+                          fees=fees, ts=ts)
+            trades.append(trade)
+            events.append(EventEnvelope(
+                event_id=self._next_event_id(), ts=ts, type=EventType.TRADE_EVENT,
+                payload=TradeEventPayload(trade_id=trade.trade_id, order_id="LIQUIDATION",
+                                          instrument_id=pos.instrument_id, side=side.value,
+                                          qty=qty, price=price, fees=fees).model_dump(),
+            ))
+        return events, trades
 
     def _is_opening_trade(self, order: Order, ledger: Ledger) -> bool:
         """Check if this order opens or increases a position."""

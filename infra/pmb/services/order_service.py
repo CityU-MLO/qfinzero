@@ -17,6 +17,14 @@ class OrderService:
         error = state.order_manager.validate_order(req.order)
         if error:
             return {"ok": False, "error": error}
+        from models.enums import InstrumentType
+        if req.order.instrument.type == InstrumentType.FUTURE:
+            sym = req.order.instrument.instrument_id().split(":", 1)[1]
+            if not sym:
+                return {"ok": False, "error": "futures orders need instrument.symbol (e.g. ZN or ZNZ6)"}
+            if state.margin_engine.future_spec(sym) is None:
+                return {"ok": False, "error": f"no contract spec for {sym}: add its root to "
+                                              "the account's margin_config.future_specs"}
 
         ts = state.clock.current_ts
 
@@ -88,6 +96,8 @@ class OrderService:
         iid = old_order.instrument_id
         if iid.startswith("STOCK:"):
             instrument = Instrument(type=InstrumentType.STOCK, symbol=iid.split(":", 1)[1])
+        elif iid.startswith("FUTURE:"):
+            instrument = Instrument(type=InstrumentType.FUTURE, symbol=iid.split(":", 1)[1])
         else:
             instrument = Instrument(type=InstrumentType.OPTION, contract=iid.split(":", 1)[1])
 

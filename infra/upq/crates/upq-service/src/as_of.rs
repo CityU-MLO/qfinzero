@@ -8,6 +8,7 @@
 //! * a minute bar `[t, t+60s)` is visible once `t + 60s <= as_of`;
 //! * a stock daily bar for date D once `as_of >= D 16:00 ET`;
 //! * an option daily bar (and the end-of-day chain) once `as_of >= D 16:15 ET`;
+//! * a futures daily bar for session D once `as_of >= D 17:00 ET`;
 //! * rates and dividends up to the trading date of `as_of`.
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
@@ -19,6 +20,10 @@ pub const NS_PER_MIN: i64 = 60_000_000_000;
 pub const STOCK_CLOSE: (u32, u32) = (16, 0);
 /// 16:15 ET: an option daily bar is final (index/ETF options trade to 16:15).
 pub const OPTION_CLOSE: (u32, u32) = (16, 15);
+/// 17:00 ET: a futures session (18:00 ET the evening before to 17:00 ET) has closed.
+pub const FUTURE_CLOSE: (u32, u32) = (17, 0);
+/// A futures session opens at 18:00 ET, so shifting by 6 h gives its trade date.
+pub const FUTURE_SESSION_SHIFT_NS: i64 = 6 * 3_600 * 1_000_000_000;
 
 /// Parse an `as_of` value: integer nanoseconds or an ISO datetime.
 pub fn parse_as_of(input: &str) -> Result<i64, &'static str> {
@@ -111,6 +116,15 @@ pub fn et_date_bounds(start_ns: i64, end_ns: i64) -> Option<(String, String)> {
     Some((a.format("%Y-%m-%d").to_string(), b.format("%Y-%m-%d").to_string()))
 }
 
+/// Futures session dates bounding a `[start_ns, end_ns]` window: futures
+/// partitions are CME session dates, so 18:00-24:00 ET belongs to the next date.
+pub fn session_date_bounds(start_ns: i64, end_ns: i64) -> Option<(String, String)> {
+    et_date_bounds(
+        start_ns.saturating_add(FUTURE_SESSION_SHIFT_NS),
+        end_ns.saturating_add(FUTURE_SESSION_SHIFT_NS),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +177,16 @@ mod tests {
         );
         let midnight = NaiveDate::from_ymd_opt(2026, 8, 21).and_then(et_midnight_ns);
         assert_eq!(midnight, Some(1_787_284_800_000_000_000));
+    }
+
+    #[test]
+    fn futures_sessions_start_at_18_et() {
+        // 17:59 ET on 2025-01-02 is still that session; 18:00 ET opens 2025-01-03
+        let a = ns("2025-01-02T22:59:00Z");
+        let b = ns("2025-01-02T23:00:00Z");
+        assert_eq!(session_date_bounds(a, b), Some(("2025-01-02".to_string(), "2025-01-03".to_string())));
+        let d = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
+        assert_eq!(daily_cap_date(ns("2025-01-02T21:59:00Z"), FUTURE_CLOSE), d("2025-01-01"));
+        assert_eq!(daily_cap_date(ns("2025-01-02T22:00:00Z"), FUTURE_CLOSE), d("2025-01-02"));
     }
 }

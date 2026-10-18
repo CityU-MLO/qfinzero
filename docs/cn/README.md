@@ -98,7 +98,7 @@ qfz-auth create-user you --role admin    # 或在首次启动前设置 QFZ_ADMIN
 qfz-server                                # 然后打开 http://127.0.0.1:19777/login
 ```
 
-`QFZ_AUTH_MODE=off` 可在本地开发时关闭登录。全部设置见[平台指南第 5 节](platform-guide.md#5-账号角色与-api-key)。
+`QFZ_AUTH_MODE=off` 可在本地开发时关闭登录。全部设置见[平台指南第 6 节](platform-guide.md#6-账号角色与-api-key)。
 
 ## 数据管道
 

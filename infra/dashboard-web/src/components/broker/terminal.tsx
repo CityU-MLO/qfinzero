@@ -24,7 +24,10 @@ import {
   placeOptionOrder,
   cancelOrder,
   addStocks,
+  addFutures,
   etMinutes,
+  instName,
+  isFutureId,
   money,
   num,
   fmtET,
@@ -85,17 +88,20 @@ export function Terminal({
   sessionId,
   accountId,
   watchlist,
+  futures = [],
   onExit,
 }: {
   sessionId: string;
   accountId: string;
   watchlist: string[];
+  futures?: string[];
   onExit: () => void;
 }) {
   const [state, setState] = useState<FullState | null>(null);
   const [timeline, setTimeline] = useState<string[]>([]);
-  const [wl, setWl] = useState<string[]>(watchlist);
-  const [selected, setSelected] = useState(watchlist[0] ?? "AAPL");
+  const [wl, setWl] = useState<string[]>([...watchlist, ...futures]);
+  const [futs, setFuts] = useState<string[]>(futures);
+  const [selected, setSelected] = useState(watchlist[0] ?? futures[0] ?? "AAPL");
   const [newSym, setNewSym] = useState("");
   const [addingSym, setAddingSym] = useState(false);
   const [chartKind, setChartKind] = useState<"candles" | "line">("candles");
@@ -142,7 +148,7 @@ export function Terminal({
       });
       setPriceHist((prev) => {
         const next = { ...prev };
-        for (const q of s.market.stocks) {
+        for (const q of [...s.market.stocks, ...(s.market.futures ?? [])]) {
           const arr = (next[q.symbol] ?? []).filter((p) => p.ts <= curTs);
           if (!arr.length || arr[arr.length - 1].ts !== curTs)
             arr.push({ ts: curTs, price: q.close });
@@ -153,7 +159,7 @@ export function Terminal({
       });
       setOhlcHist((prev) => {
         const next = { ...prev };
-        for (const q of s.market.stocks) {
+        for (const q of [...s.market.stocks, ...(s.market.futures ?? [])]) {
           const arr = (next[q.symbol] ?? []).filter((p) => p.ts <= curTs);
           const bar: Candle = { ts: curTs, o: q.open, h: q.high, l: q.low, c: q.close, v: q.volume };
           if (!arr.length || arr[arr.length - 1].ts !== curTs) arr.push(bar);
@@ -282,13 +288,14 @@ export function Terminal({
         qty,
         order_type: orderType,
         limit_price: orderType === "LIMIT" ? Number(limit) : null,
+        instrument_type: futs.includes(selected) ? "FUTURE" : "STOCK",
       });
       const s = await getState(sessionId);
       apply(s, true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [sessionId, accountId, selected, side, qty, orderType, limit, apply]);
+  }, [sessionId, accountId, selected, side, qty, orderType, limit, futs, apply]);
 
   const tradeContract = useCallback(
     async (contract: string, oside: "BUY" | "SELL") => {
@@ -316,7 +323,10 @@ export function Terminal({
   );
 
   const addSymbol = useCallback(async () => {
-    const sym = newSym.trim().toUpperCase();
+    const raw = newSym.trim().toUpperCase();
+    // "/ZN" or "/CLX6" adds a future (contract or front-month root)
+    const isFut = raw.startsWith("/");
+    const sym = isFut ? raw.slice(1) : raw;
     if (!sym) return;
     if (wl.includes(sym)) {
       setSelected(sym);
@@ -326,10 +336,14 @@ export function Terminal({
     setAddingSym(true);
     setErr(null);
     try {
-      const r = await addStocks(sessionId, [sym]);
-      if (r.loaded === 0) {
+      const r = isFut ? await addFutures(sessionId, [sym]) : await addStocks(sessionId, [sym]);
+      if (isFut && "unknown_spec" in r && r.unknown_spec.length) {
+        setErr(t(`No contract spec for ${sym}: add it to the account's margin_config.future_specs.`,
+          `${sym} 没有合约规格：请在账户的 margin_config.future_specs 中添加。`));
+      } else if (r.loaded === 0) {
         setErr(t(`No market data for ${sym} on this trading day.`, `${sym} 在该交易日没有行情数据。`));
       } else {
+        if (isFut) setFuts((f) => [...f, sym]);
         setWl((w) => [...w, sym]);
         setSelected(sym);
         const s = await getState(sessionId);
@@ -359,7 +373,17 @@ export function Terminal({
       try {
         const oside = (p.qty > 0 ? "SELL" : "BUY") as "BUY" | "SELL";
         const q = Math.abs(p.qty);
-        if (p.instrument_id.startsWith("OPTION:")) {
+        if (isFutureId(p.instrument_id)) {
+          await placeOrder({
+            session_id: sessionId,
+            account_id: accountId,
+            symbol: instName(p.instrument_id),
+            side: oside,
+            qty: q,
+            order_type: "MARKET",
+            instrument_type: "FUTURE",
+          });
+        } else if (p.instrument_id.startsWith("OPTION:")) {
           await placeOptionOrder({
             session_id: sessionId,
             account_id: accountId,
@@ -380,7 +404,7 @@ export function Terminal({
         }
         const s = await getState(sessionId);
         apply(s, true);
-        const inst = p.instrument_id.replace(/^(STOCK|OPTION):/, "");
+        const inst = instName(p.instrument_id);
         setToast(t(`Flatten ${inst} submitted`, `平仓 ${inst} 已提交`));
         setTimeout(() => setToast(null), 2500);
       } catch (e) {
@@ -425,8 +449,13 @@ export function Terminal({
     speedRef.current = speed;
   }, [speed]);
 
+  // a share-sized quantity is far too many futures contracts
+  useEffect(() => {
+    if (futs.includes(selected)) setQty((q) => (q > 10 ? 1 : q));
+  }, [selected, futs]);
+
   // ── derived ──
-  const quotes = state?.market.stocks ?? [];
+  const quotes = [...(state?.market.stocks ?? []), ...(state?.market.futures ?? [])];
   const quoteFor = (sym: string) => quotes.find((q) => q.symbol === sym);
   const sel = quoteFor(selected);
   const selHist = priceHist[selected] ?? [];
@@ -441,8 +470,14 @@ export function Terminal({
     const open = h[0].o;
     return open ? ((h[h.length - 1].c - open) / open) * 100 : null;
   };
+  const selFut = futs.includes(selected);
+  const spec = selFut ? state?.futures_specs?.[selected] : undefined;
   const estCost = sel ? qty * sel.close : 0;
   const bpAfter = acct ? acct.buying_power - (side === "BUY" ? estCost : 0) : 0;
+  // futures: opening contracts need initial margin free, nothing is paid for them
+  const futMargin = spec ? qty * spec.initial_per_contract : 0;
+  const futNotional = spec && sel ? qty * sel.close * spec.multiplier : 0;
+  const freeMargin = acct ? acct.equity - acct.initial_margin_req : 0;
 
   return (
     <div className="broker-root relative flex h-full flex-col bg-card text-foreground">
@@ -537,7 +572,7 @@ export function Terminal({
               value={newSym}
               onChange={(e) => setNewSym(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === "Enter" && addSymbol()}
-              placeholder={t("Add symbol…", "添加代码…")}
+              placeholder={t("Add symbol… (/ZN for a future)", "添加代码…（期货用 /ZN）")}
               className="w-full rounded-md border border-input bg-card px-2 py-1.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             />
             <button
@@ -710,13 +745,13 @@ export function Terminal({
             >
               {wl.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {futs.includes(s) ? `${s} · ${t("future", "期货")}` : s}
                 </option>
               ))}
             </select>
           </TicketField>
 
-          <TicketField label={t("Quantity (shares)", "数量（股）")}>
+          <TicketField label={selFut ? t("Quantity (contracts)", "数量（手）") : t("Quantity (shares)", "数量（股）")}>
             <input
               type="number"
               min={1}
@@ -755,6 +790,30 @@ export function Terminal({
             </TicketField>
           )}
 
+          {selFut ? (
+          <div className="mb-3 space-y-1 rounded-lg bg-card px-3 py-2 text-xs text-muted-foreground">
+            <div>
+              {t("Initial margin", "初始保证金")}
+              <span className="float-right font-mono text-foreground">{spec ? money(futMargin) : "—"}</span>
+            </div>
+            <div>
+              {t("Notional", "名义价值")}
+              <span className="float-right font-mono text-foreground">{spec ? money(futNotional) : "—"}</span>
+            </div>
+            <div>
+              {t("Free margin after", "下单后可用保证金")}
+              <span className={`float-right font-mono ${freeMargin - futMargin < 0 ? "text-down" : "text-foreground"}`}>
+                {acct ? money(freeMargin - futMargin) : "—"}
+              </span>
+            </div>
+            {spec && (
+              <div className="pt-1 text-[11px]">
+                {spec.name} · ×{spec.multiplier} · {t("tick", "最小变动")} {spec.tick_size} ·{" "}
+                {t("maint.", "维持")} {money(spec.maintenance_per_contract)}/{t("contract", "手")}
+              </div>
+            )}
+          </div>
+          ) : (
           <div className="mb-3 space-y-1 rounded-lg bg-card px-3 py-2 text-xs text-muted-foreground">
             <div>
               {side === "BUY" ? t("Est. cost", "预估成本") : t("Est. proceeds", "预估收入")}
@@ -767,6 +826,7 @@ export function Terminal({
               </span>
             </div>
           </div>
+          )}
 
           <button
             onClick={submitOrder}
@@ -789,6 +849,10 @@ export function Terminal({
             <AcctRow label={t("Cash locked", "冻结资金")} value={money(acct?.cash_locked)} />
             <AcctRow label={t("Equity", "权益")} value={money(acct?.equity)} />
             <AcctRow label={t("Buying power", "购买力")} value={money(acct?.buying_power)} />
+            <AcctRow
+              label={t("Initial margin", "初始保证金")}
+              value={money(acct?.initial_margin_req)}
+            />
             <AcctRow
               label={t("Maint. margin", "维持保证金")}
               value={money(acct?.maintenance_margin_req)}
@@ -887,7 +951,7 @@ function PositionsTable({
       <tbody>
         {positions.map((p) => (
           <tr key={p.instrument_id} className="border-t border-border">
-            <td className="py-1 text-foreground">{p.instrument_id.replace(/^(STOCK|OPTION):/, "")}</td>
+            <td className="py-1 text-foreground">{instName(p.instrument_id)}</td>
             <td className="py-1 text-right">{p.qty}</td>
             <td className="py-1 text-right">{num(p.avg_price)}</td>
             <td className="py-1 text-right">{num(p.mark_price)}</td>
@@ -937,7 +1001,7 @@ function OrdersTable({
       <tbody>
         {orders.map((o) => (
           <tr key={o.order_id} className="border-t border-border">
-            <td className="py-1 text-foreground">{o.instrument_id.replace("STOCK:", "")}</td>
+            <td className="py-1 text-foreground">{instName(o.instrument_id)}</td>
             <td className={o.side === "BUY" ? "text-up" : "text-down"}>{enumLabel(t, o.side)}</td>
             <td className="text-muted-foreground">{enumLabel(t, o.order_type)}</td>
             <td className="py-1 text-right">{o.qty}</td>
@@ -975,7 +1039,7 @@ function TradesTable({ trades }: { trades: FullState["trades"] }) {
           .slice()
           .reverse()
           .map((tr, i) => {
-            const inst = String(tr.instrument_id ?? tr.symbol ?? "").replace("STOCK:", "");
+            const inst = instName(String(tr.instrument_id ?? tr.symbol ?? ""));
             const s = String(tr.side ?? "");
             return (
               <tr key={i} className="border-t border-border">

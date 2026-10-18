@@ -15,6 +15,7 @@ class MarketTickPayload(BaseModel):
     frequency: str
     stocks: list = []
     options: list = []
+    futures: list = []
 
 
 class OrderEventPayload(BaseModel):
@@ -57,6 +58,18 @@ class RiskEventPayload(BaseModel):
     equity: float
     maintenance_margin_req: float
     action: str
+    initial_margin_req: Optional[float] = None
+    call_amount: Optional[float] = None       # deposit that would meet the call
+
+
+class VariationMarginPayload(BaseModel):
+    """Daily futures settlement of one position."""
+    instrument_id: str
+    session_date: str
+    qty: int
+    prev_price: float      # previous settle (or the trade price)
+    settle: float
+    amount: float          # credited (+) or debited (-) to cash
 
 
 class ErrorEventPayload(BaseModel):

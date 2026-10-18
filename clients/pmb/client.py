@@ -386,6 +386,10 @@ class PMBClient:
         """Load option contracts into a running session so they can be traded."""
         return self._post(f"/sessions/{session_id}/add_contracts", {"contracts": contracts})
 
+    def add_futures(self, session_id: str, symbols: list) -> dict:
+        """Load futures (contracts such as ZNZ6, or front-month roots such as ZN)."""
+        return self._post(f"/sessions/{session_id}/add_futures", {"symbols": symbols})
+
     # ── Order helpers ─────────────────────────────────────────────
 
     def _place_order(
@@ -514,6 +518,35 @@ class PMBClient:
             limit_price=limit_price, time_in_force=time_in_force,
             client_order_id=client_order_id,
         )
+
+    def trade_future(
+        self,
+        session_id: str,
+        account_id: str,
+        symbol: str,
+        side: str,
+        qty: int,
+        order_type: str = "MARKET",
+        limit_price: float = None,
+        stop_price: float = None,
+        time_in_force: str = "DAY",
+        client_order_id: str = None,
+    ) -> dict:
+        """Futures order: ``qty`` contracts of ``symbol`` (contract or front-month
+        root). Opening contracts need their initial margin free; positions settle
+        daily (variation margin)."""
+        return self._place_order(
+            session_id, account_id,
+            instrument={"type": "FUTURE", "symbol": symbol},
+            side=side, qty=qty, order_type=order_type, limit_price=limit_price,
+            stop_price=stop_price, time_in_force=time_in_force, client_order_id=client_order_id,
+        )
+
+    def buy_future(self, session_id: str, account_id: str, symbol: str, qty: int, **kw) -> dict:
+        return self.trade_future(session_id, account_id, symbol, "BUY", qty, **kw)
+
+    def sell_future(self, session_id: str, account_id: str, symbol: str, qty: int, **kw) -> dict:
+        return self.trade_future(session_id, account_id, symbol, "SELL", qty, **kw)
 
     def cancel_order(self, order_id: str, session_id: str, account_id: str) -> dict:
         return self._post(

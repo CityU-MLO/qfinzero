@@ -375,6 +375,41 @@ class UPQClient:
             params["include_greeks"] = "true"
         return self._get("/option/chain_snapshot", params)
 
+    # ── Futures ───────────────────────────────────────────────────
+    #
+    # Futures partitions are CME sessions (18:00 ET the evening before to
+    # 17:00 ET). ``tickers`` are contracts (``ZNZ6``) or front-month roots
+    # (``ZN``); ``roots`` selects every series of a product.
+
+    @staticmethod
+    def _future_params(tickers, roots, start, end, **extra) -> dict:
+        params = {"start": start, "end": end}
+        if tickers:
+            params["tickers"] = ",".join(tickers)
+        if roots:
+            params["roots"] = ",".join(roots)
+        params.update({k: v for k, v in extra.items() if v is not None})
+        return params
+
+    def future_minute(self, tickers: list[str] = None, start: str = None, end: str = None,
+                      roots: list[str] = None, fields: str = None, limit: int = None,
+                      as_of: str = None) -> list[dict]:
+        """Futures minute bars: ticker, root, window_start (ns), OHLCV, transactions."""
+        return self._get("/future", self._future_params(tickers, roots, start, end, fields=fields,
+                                                        limit=limit, as_of=as_of))
+
+    def future_daily(self, tickers: list[str] = None, start: str = None, end: str = None,
+                     roots: list[str] = None, fields: str = None, as_of: str = None) -> list[dict]:
+        """Futures daily bars per session with ``settle`` (final at 17:00 ET)."""
+        return self._get("/future/daily", self._future_params(tickers, roots, start, end, fields=fields,
+                                                              as_of=as_of))
+
+    def future_quote(self, tickers: list[str] = None, start: str = None, end: str = None,
+                     roots: list[str] = None, limit: int = None, as_of: str = None) -> list[dict]:
+        """Futures top of book per kept minute (carry the previous row forward)."""
+        return self._get("/future/quote", self._future_params(tickers, roots, start, end, limit=limit,
+                                                              as_of=as_of))
+
     # ── Utilities ─────────────────────────────────────────────────
 
     @staticmethod

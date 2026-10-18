@@ -12,6 +12,8 @@ class Instrument(BaseModel):
     def instrument_id(self) -> str:
         if self.type == InstrumentType.STOCK:
             return f"STOCK:{self.symbol}"
+        if self.type == InstrumentType.FUTURE:
+            return f"FUTURE:{(self.symbol or self.contract or '').upper()}"
         return f"OPTION:{self.contract}"
 
 

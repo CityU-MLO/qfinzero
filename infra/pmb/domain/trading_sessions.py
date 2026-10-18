@@ -17,8 +17,11 @@ An order's ``trading_hours`` decides where it may execute:
 * ``EXTENDED``  PRE + REGULAR + POST; LIMIT orders only.
 * ``OVERNIGHT`` all four segments (24/5); LIMIT orders only.
 
-Options always execute in REGULAR only. Daily-frequency sessions have one bar per
-day, so every bar is REGULAR and is its own trading date.
+Options always execute in REGULAR only. Futures trade whenever their venue
+prints a bar (CME Globex: 18:00-17:00 ET), whatever ``trading_hours`` says,
+and settle on CME session dates (see ``domain/futures.py``). Daily-frequency
+sessions have one bar per day, so every bar is REGULAR and is its own trading
+date.
 
 Exchange holidays and 13:00 early closes come from :mod:`qfinzero.market_calendar`:
 on an early-close day REGULAR ends at 13:00 and POST at 17:00.
@@ -105,6 +108,8 @@ def is_option(instrument_id: str) -> bool:
 def order_may_execute(trading_hours: TradingHours, instrument_id: str,
                       segment: Segment) -> bool:
     """Whether an order with these hours may match against a bar in ``segment``."""
+    if instrument_id.startswith("FUTURE:"):
+        return True
     if is_option(instrument_id):
         return segment == Segment.REGULAR
     return segment in ALLOWED[trading_hours]
@@ -113,7 +118,7 @@ def order_may_execute(trading_hours: TradingHours, instrument_id: str,
 def validate_trading_hours(trading_hours: TradingHours, order_type: OrderType,
                            instrument_type: InstrumentType | None) -> str | None:
     """Submission-time rule check. Returns an error message or ``None``."""
-    if trading_hours == TradingHours.REGULAR:
+    if trading_hours == TradingHours.REGULAR or instrument_type == InstrumentType.FUTURE:
         return None
     if instrument_type == InstrumentType.OPTION:
         return "options trade in regular hours only (trading_hours must be REGULAR)"

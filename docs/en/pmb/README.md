@@ -43,13 +43,16 @@ python main.py
 Time advances only via `POST /sessions/{id}/step`. No wall-clock dependency — the agent controls time progression. Each step returns typed events in a fixed order:
 
 ```
-MARKET_TICK → ORDER_EVENT → TRADE_EVENT → ACCOUNT_SNAPSHOT → RISK_EVENT
+MARKET_TICK → ORDER_EVENT → TRADE_EVENT → VARIATION_MARGIN → ACCOUNT_SNAPSHOT → RISK_EVENT
 ```
 
 ### Supported Assets
 
 - **Stocks**: OHLCV bars at minute/daily resolution
 - **Options**: OPRA contracts with full chain data
+- **Futures**: CME-style contracts with per-contract initial/maintenance margin,
+  daily variation margin and margin-call liquidation (see the platform guide,
+  *Futures and margin*)
 
 ### Order Types
 
@@ -160,6 +163,8 @@ with PMBClient() as pmb:
 | `sell(session_id, account_id, symbol, qty, ...)` | Sell stock |
 | `buy_option(session_id, account_id, contract, qty, ...)` | Buy option |
 | `sell_option(session_id, account_id, contract, qty, ...)` | Sell option |
+| `trade_future(session_id, account_id, symbol, side, qty, ...)` | Futures order (`buy_future` / `sell_future`) |
+| `add_futures(session_id, symbols)` | Load futures into a running session |
 | `cancel_order(order_id, session_id, account_id)` | Cancel order |
 | `get_summary(session_id)` | Get session performance metrics |
 | `export(session_id, fmt="json")` | Export orders, trades, equity curve |

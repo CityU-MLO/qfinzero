@@ -221,6 +221,19 @@ async def add_stocks(session_id: str, request: Request):
     return result
 
 
+@router.post("/v1/sessions/{session_id}/add_futures")
+async def add_futures(session_id: str, request: Request):
+    body = await request.json()
+    session_svc = request.app.state.session_service
+    result = await session_svc.add_futures(session_id, body.get("symbols", []))
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": result.get("error", "unknown")},
+        )
+    return result
+
+
 @router.post("/v1/sessions/{session_id}/add_contracts")
 async def add_contracts(session_id: str, request: Request):
     body = await request.json()

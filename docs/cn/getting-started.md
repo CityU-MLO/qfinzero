@@ -36,7 +36,7 @@ QFZ_DATA_ROOT=./qfz-sample QFZ_ADMIN_PASSWORD='设置一个足够长的密码' q
 19777 端口提供。`curl http://127.0.0.1:19777/health` 会列出各子服务及其是否正常。
 
 `QFZ_ADMIN_PASSWORD` 只在首次启动时创建 `admin` 账户，之后可以去掉。创建首个管理员的其他方式见
-[平台指南](platform-guide.md#5-账号角色与-api-key)。
+[平台指南](platform-guide.md#6-账号角色与-api-key)。
 
 ## 2. 浏览控制台
 

@@ -5,6 +5,14 @@ from models.event import AccountSnapshotPayload
 OPTION_MULTIPLIER = 100
 
 
+def multiplier_of(pos: Position) -> float:
+    if pos.type == InstrumentType.OPTION:
+        return OPTION_MULTIPLIER
+    if pos.type == InstrumentType.FUTURE:
+        return pos.multiplier or 1.0
+    return 1
+
+
 class Ledger:
     """Pure in-memory accounting: cash, positions, P&L."""
 
@@ -49,11 +57,19 @@ class Ledger:
         return [p for p in self._positions.values() if p.qty != 0]
 
     def net_positions_value(self) -> float:
+        """Market value of stocks and options plus the open trade equity of
+        futures (their change since the last settlement; futures have no
+        market value of their own)."""
         total = 0.0
         for p in self._positions.values():
-            mult = OPTION_MULTIPLIER if p.type == InstrumentType.OPTION else 1
-            total += p.qty * p.mark_price * mult
+            if p.type == InstrumentType.FUTURE:
+                total += p.qty * (p.mark_price - (p.basis_price or p.avg_price)) * multiplier_of(p)
+            else:
+                total += p.qty * p.mark_price * multiplier_of(p)
         return total
+
+    def future_positions(self) -> list[Position]:
+        return [p for p in self._positions.values() if p.type == InstrumentType.FUTURE and p.qty]
 
     def total_equity(self) -> float:
         return self._cash + self.net_positions_value() - self._loan
@@ -66,12 +82,17 @@ class Ledger:
         qty: int,
         price: float,
         fees: float,
+        multiplier: float | None = None,
     ) -> float:
         """Apply a trade fill. Returns realized_pnl for this fill.
 
         For options, qty is in contracts and price is per-share premium.
         The multiplier (100) is applied to convert to notional value.
+        Futures (``multiplier`` = the contract's) move only fees and realized
+        P&L through cash; see :meth:`_apply_future_fill`.
         """
+        if instrument_type == InstrumentType.FUTURE:
+            return self._apply_future_fill(instrument_id, side, qty, price, fees, multiplier or 1.0)
         self._total_fees += fees
         realized = 0.0
         is_buy = side == Side.BUY
@@ -144,13 +165,73 @@ class Ledger:
 
         return realized
 
+    def _apply_future_fill(self, instrument_id: str, side: Side, qty: int, price: float,
+                           fees: float, mult: float) -> float:
+        """A futures fill posts no premium: cash pays the fees, and a closing
+        fill settles the move since the basis (the last settlement) in cash.
+        Realized P&L is measured from the trade price (``avg_price``)."""
+        self._total_fees += fees
+        self._cash -= fees
+        signed = qty if side == Side.BUY else -qty
+        pos = self._positions.get(instrument_id)
+        realized = 0.0
+        if pos is None or pos.qty == 0:
+            self._positions[instrument_id] = Position(
+                instrument_id=instrument_id, type=InstrumentType.FUTURE, qty=signed,
+                avg_price=price, mark_price=price, multiplier=mult, basis_price=price,
+                realized_pnl=pos.realized_pnl if pos else 0.0,
+            )
+            return 0.0
+        basis = pos.basis_price if pos.basis_price is not None else pos.avg_price
+        if (pos.qty > 0) == (signed > 0):          # adding
+            n0, n = abs(pos.qty), abs(pos.qty) + qty
+            pos.avg_price = (pos.avg_price * n0 + price * qty) / n
+            pos.basis_price = (basis * n0 + price * qty) / n
+            pos.qty += signed
+        else:                                       # reducing, closing or flipping
+            close = min(qty, abs(pos.qty))
+            direction = 1 if pos.qty > 0 else -1
+            realized = close * (price - pos.avg_price) * mult * direction
+            self._cash += close * (price - basis) * mult * direction
+            self._realized_pnl += realized
+            pos.realized_pnl += realized
+            pos.qty += signed
+            if pos.qty == 0:
+                self._positions.pop(instrument_id, None)
+            elif qty > close:                       # flipped: the rest opens at this price
+                pos.avg_price = price
+                pos.basis_price = price
+                pos.last_settle_date = None
+        return realized
+
+    def settle_futures(self, settles: dict[str, float], session_date: str) -> list[dict]:
+        """Daily settlement: pay ``qty * (settle - basis) * multiplier`` into cash
+        for each futures position with a settle price, and move its basis to the
+        settle. Returns one record per settled position."""
+        out = []
+        for iid, pos in self._positions.items():
+            if pos.type != InstrumentType.FUTURE or not pos.qty or iid not in settles:
+                continue
+            if pos.last_settle_date == session_date:
+                continue
+            settle = settles[iid]
+            prev = pos.basis_price if pos.basis_price is not None else pos.avg_price
+            amount = pos.qty * (settle - prev) * multiplier_of(pos)
+            self._cash += amount
+            pos.basis_price = settle
+            pos.mark_price = settle
+            pos.last_settle_date = session_date
+            pos.unrealized_pnl = pos.qty * (settle - pos.avg_price) * multiplier_of(pos)
+            out.append({"instrument_id": iid, "session_date": session_date, "qty": pos.qty,
+                        "prev_price": round(prev, 10), "settle": settle, "amount": round(amount, 2)})
+        return out
+
     def update_market_prices(self, prices: dict[str, float]):
         """Mark-to-market all positions."""
         for iid, pos in self._positions.items():
             if iid in prices:
                 pos.mark_price = prices[iid]
-                mult = OPTION_MULTIPLIER if pos.type == InstrumentType.OPTION else 1
-                pos.unrealized_pnl = pos.qty * (pos.mark_price - pos.avg_price) * mult
+                pos.unrealized_pnl = pos.qty * (pos.mark_price - pos.avg_price) * multiplier_of(pos)
 
     def get_snapshot(
         self,

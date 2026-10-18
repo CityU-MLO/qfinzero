@@ -15,7 +15,7 @@ async def get_market_snapshot(session_id: str, request: Request):
 
     ts_ns = state.clock.current_ns
     if ts_ns is None:
-        return {"ts": "", "stocks": [], "options": []}
+        return {"ts": "", "stocks": [], "options": [], "futures": []}
 
     stock_bars = state.cache.get_stock_bars_at(ts_ns)
     option_bars = state.cache.get_option_bars_at(ts_ns)
@@ -43,8 +43,15 @@ async def get_market_snapshot(session_id: str, request: Request):
             }
         )
 
+    futures = [
+        {"symbol": sym, "root": bar.root, "open": bar.open, "high": bar.high, "low": bar.low,
+         "close": bar.close, "volume": bar.volume}
+        for sym, bar in state.cache.get_future_bars_at(ts_ns).items()
+    ]
+
     return {
         "ts": state.clock.current_ts,
         "stocks": stocks,
         "options": options,
+        "futures": futures,
     }

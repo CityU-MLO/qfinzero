@@ -1,6 +1,6 @@
 import bisect
 
-from models.market import OptionBar, Quote, StockBar
+from models.market import FutureBar, OptionBar, Quote, StockBar
 
 NS_PER_MIN = 60_000_000_000
 
@@ -13,7 +13,47 @@ class MarketDataCache:
         self._option_bars: dict[str, dict[int, OptionBar]] = {}  # contract -> {ns -> bar}
         self._option_quotes: dict[str, list[Quote]] = {}  # contract -> quotes by time
         self._quote_keys: dict[str, list[int]] = {}
+        self._future_bars: dict[str, dict[int, FutureBar]] = {}   # ticker -> {ns -> bar}
+        self._future_quotes: dict[str, list[Quote]] = {}
+        self._future_quote_keys: dict[str, list[int]] = {}
+        self._future_settles: dict[str, dict[str, float]] = {}    # ticker -> {session date -> settle}
         self._all_timestamps: list[int] = []
+
+    # ── futures ──────────────────────────────────────────────────────
+
+    def load_future_bars(self, symbol: str, bars: list[FutureBar]) -> None:
+        self._future_bars[symbol] = {b.window_start_ns: b for b in bars}
+        self._rebuild_timestamps()
+
+    def load_future_quotes(self, symbol: str, quotes: list[Quote]) -> None:
+        qs = sorted(quotes, key=lambda q: q.window_start_ns)
+        self._future_quotes[symbol] = qs
+        self._future_quote_keys[symbol] = [q.window_start_ns for q in qs]
+
+    def load_future_settles(self, symbol: str, settles: dict[str, float]) -> None:
+        self._future_settles.setdefault(symbol, {}).update(settles)
+
+    def get_future_bars_at(self, ts_ns: int) -> dict[str, FutureBar]:
+        return {s: b for s, by_ts in self._future_bars.items() if (b := by_ts.get(ts_ns)) is not None}
+
+    def get_future_quote_at(self, symbol: str, ts_ns: int) -> Quote | None:
+        """The futures book in force when the bar at ``ts_ns`` opens (see options)."""
+        keys = self._future_quote_keys.get(symbol)
+        if not keys:
+            return None
+        i = bisect.bisect_right(keys, ts_ns - NS_PER_MIN)
+        return self._future_quotes[symbol][i - 1] if i else None
+
+    def get_future_quotes_at(self, ts_ns: int) -> dict[str, Quote]:
+        return {s: q for s in self._future_quotes if (q := self.get_future_quote_at(s, ts_ns)) is not None}
+
+    def future_settle(self, symbol: str, session_date: str, up_to_ns: int) -> float | None:
+        """Settlement price of ``symbol`` for a session: the daily settle when
+        loaded, else the last trade at or before ``up_to_ns``."""
+        s = self._future_settles.get(symbol, {}).get(session_date)
+        if s is not None:
+            return s
+        return self.get_latest_price(f"FUTURE:{symbol}", up_to_ns)
 
     # ── option quotes (NBBO at minute ends) ──────────────────────────
 
@@ -63,6 +103,8 @@ class MarketDataCache:
             ts_set.update(by_ts.keys())
         for by_ts in self._option_bars.values():
             ts_set.update(by_ts.keys())
+        for by_ts in self._future_bars.values():
+            ts_set.update(by_ts.keys())
         self._all_timestamps = sorted(ts_set)
 
     def get_all_timestamps(self) -> list[int]:
@@ -103,6 +145,10 @@ class MarketDataCache:
             if best_ns is not None:
                 return by_ts[best_ns].close
 
+        if instrument_id.startswith("FUTURE:") and key in self._future_bars:
+            past = [ns for ns in self._future_bars[key] if ns <= up_to_ns]
+            return self._future_bars[key][max(past)].close if past else None
+
         if key in self._option_bars:
             by_ts = self._option_bars[key]
             best_ns = None
@@ -131,4 +177,12 @@ class MarketDataCache:
             q = self.get_option_quote_at(contract, ts_ns + NS_PER_MIN)   # book at bar close
             if q is not None and q.mid is not None:
                 prices[f"OPTION:{contract}"] = q.mid
+        for symbol, by_ts in self._future_bars.items():
+            bar = by_ts.get(ts_ns)
+            if bar is not None:
+                prices[f"FUTURE:{symbol}"] = bar.close
+        for symbol in self._future_quotes:
+            q = self.get_future_quote_at(symbol, ts_ns + NS_PER_MIN)
+            if q is not None and q.mid is not None:
+                prices[f"FUTURE:{symbol}"] = q.mid
         return prices

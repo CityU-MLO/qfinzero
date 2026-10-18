@@ -96,7 +96,44 @@ step 的返回结果会带上 `clock.segment` 和 `clock.trading_date`。
 
 `option_fill_model = "bar"` 保留只看 bar 的旧模型，用 `option_spread_pct` 近似点差。
 
-## 4. 日内研究
+## 4. 期货与保证金
+
+期货由 Databento 适配器（CME Globex `GLBX.MDP3` 及其他期货交易所）写入 `future_minute`、`future_daily`（带 `settle`）
+和 `future_quote_minute`，按 CME 交易时段分区：前一天美东 18:00 到当天 17:00。代码是单一合约（`ZNZ6`），
+或主力连续数据的品种代码（`ZN`）。
+
+| 接口 | MCP 工具 | 内容 |
+|------|----------|------|
+| `/future?tickers=&roots=` | `upq_future_minute` | 分钟线；`roots=ZN` 返回该品种的所有序列 |
+| `/future/daily` | `upq_future_daily` | 每个交易时段一根，带 `settle`，美东 17:00 后才可见 |
+| `/future/quote` | `upq_future_quote` | 每个保留分钟的最优买卖价 |
+
+用 `universe.futures`（`pmb_create_session` 的 `future_universe`）把期货放进会话，或之后调用
+`POST /v1/sessions/{id}/add_futures`；下单时用 `instrument: {"type": "FUTURE", "symbol": "ZN"}`（`pmb_trade_future`）。
+期货在交易所有 bar 的每一分钟都可成交，不受委托的 `trading_hours` 限制；载入报价时按盘口成交。
+
+保证金按交易所清算的方式计算：
+
+- **不付权利金。** 成交只扣手续费（`fee_model.future_fee_per_contract`，默认每边 1.50），成交价按合约最小变动价位取整。
+- **初始保证金。** 开仓需要 `数量 × 初始保证金` 的可用资金：权益减去已持仓位的初始保证金，不足时以
+  `INSUFFICIENT_MARGIN` 拒单。
+- **每日结算。** 每个交易时段的最后一根 bar（日线会话为每根 bar）按该时段的 `settle` 结算：
+  `数量 × (结算价 − 上次结算价) × 合约乘数` 以 `VARIATION_MARGIN` 事件转入现金。两次结算之间，浮动盈亏计入权益，
+  持仓按 bar 收盘价或报价中间价估值。
+- **追加保证金。** 权益低于维持保证金时发出带 `call_amount` 的 `RISK_EVENT`，禁止开新仓（`MARGIN_RESTRICTED`），
+  平仓单照常成交。权益回到**初始**保证金才算补足。经过 `margin_config.future_margin_call_sessions` 次结算
+  （默认 1；0 表示从不强平）仍未补足时，按结算价强制平仓（`LIQUIDATION` 成交）。
+
+每手保证金来自合约规格：固定的 `maintenance_margin`（美元，即交易所公布的数值），或按上次结算价名义价值的
+`margin_rate` 计算；`初始 = 维持 × initial_ratio`（1.10）。内置规格覆盖常见 CME 合约（ES、NQ、YM、RTY 及其微型合约，
+CL、NG、RB、HO、GC、SI、HG、PL、ZT、ZF、ZN、TN、ZB、UB、6E、6J、6B、6A、6C、ZC、ZS、ZW），费率为近似值。
+请在账户的 `margin_config.future_specs` 中按品种设置真实数值，例如
+`{"ZN": {"root": "ZN", "multiplier": 1000, "tick_size": 0.015625, "maintenance_margin": 2100}}`；没有规格的品种会被拒单。
+`GET /v1/sessions/{id}/state` 的 `futures_specs` 列出会话中各合约的规格和按当前价格计算的每手保证金。
+
+暂未模拟：合约到期与移仓（主力连续序列不会到期）、交易所结算价（目前用时段最后成交价），以及跨品种价差的保证金减免。
+
+## 5. 日内研究
 
 `qfinzero.research` 用 DuckDB 直接读取 UPQ 存储。一个因子就是一个表达式：
 
@@ -134,7 +171,7 @@ qfz-research backtest "cs_rank(-pct(close, 15))" --start 2026-08-10 --end 2026-0
 
 agent 通过 `research_eval_factor` 和 `research_backtest` 使用同一个引擎。这两个工具受 `QFZ_RESEARCH_MAX_DAYS`（默认 40 个交易日）和 `QFZ_RESEARCH_MAX_UNIVERSE`（默认 1000）限制，并遵守时间锁。
 
-## 5. 账号、角色与 API key
+## 6. 账号、角色与 API key
 
 hub 对网站、`/svc/*` 和 `/mcp` 的每个请求做身份认证。
 

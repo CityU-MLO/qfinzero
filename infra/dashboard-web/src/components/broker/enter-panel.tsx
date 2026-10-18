@@ -21,6 +21,7 @@ export function EnterPanel({
     sessionId: string;
     accountId: string;
     watchlist: string[];
+    futures: string[];
   }) => void;
 }) {
   const t = useT();
@@ -29,6 +30,8 @@ export function EnterPanel({
   const [date, setDate] = useState("");
   const [minuteRange, setMinuteRange] = useState<{ start: string; end: string } | null>(null);
   const [symbols, setSymbols] = useState("SPY,QQQ,NVDA,AAPL");
+  const [futureSyms, setFutureSyms] = useState("");
+  const [futRange, setFutRange] = useState<{ start: string; end: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -51,9 +54,12 @@ export function EnterPanel({
     // default to the latest day with minute bars, so the session has data
     fetch("/api/coverage/extent")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { stores?: { minute?: { start: string; end: string } | null; daily?: { end: string } | null } } | null) => {
+      .then((d: { stores?: { minute?: { start: string; end: string } | null; daily?: { end: string } | null;
+                             futures_minute?: { start: string; end: string } | null } } | null) => {
         const m = d?.stores?.minute;
         if (m) setMinuteRange({ start: m.start, end: m.end });
+        const f = d?.stores?.futures_minute;
+        if (f) setFutRange({ start: f.start, end: f.end });
         setDate((cur) => cur || m?.end || d?.stores?.daily?.end || new Date().toISOString().slice(0, 10));
       })
       .catch(() => setDate((cur) => cur || new Date().toISOString().slice(0, 10)));
@@ -62,21 +68,24 @@ export function EnterPanel({
 
   async function launch() {
     setErr(null);
-    const watchlist = symbols
-      .split(",")
-      .map((s) => s.trim().toUpperCase())
-      .filter(Boolean);
+    const split = (v: string) => v.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const watchlist = split(symbols);
+    const futures = split(futureSyms);
     if (!accountId) return setErr(t("Select an account first.", "请先选择一个账户。"));
-    if (!watchlist.length) return setErr(t("Add at least one symbol.", "请至少添加一个代码。"));
+    if (!watchlist.length && !futures.length) return setErr(t("Add at least one symbol.", "请至少添加一个代码。"));
     setBusy(true);
     try {
+      // futures trade from 18:00 ET the evening before (22:00/23:00 UTC)
+      const prev = new Date(`${date}T00:00:00Z`);
+      prev.setUTCDate(prev.getUTCDate() - 1);
       const { session_id } = await createSession({
         account_id: accountId,
-        start_ts: `${date}T00:00:00`,
+        start_ts: futures.length ? `${prev.toISOString().slice(0, 10)}T22:00:00` : `${date}T00:00:00`,
         end_ts: `${date}T23:59:59`,
         stocks: watchlist,
+        futures,
       });
-      onEnter({ sessionId: session_id, accountId, watchlist });
+      onEnter({ sessionId: session_id, accountId, watchlist, futures });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -158,6 +167,21 @@ export function EnterPanel({
             className={inputCls}
           />
           <span className="text-xs text-muted-foreground">{t("Comma-separated tickers to trade.", "要交易的代码，用逗号分隔。")}</span>
+        </label>
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-foreground">{t("Futures (optional)", "期货（可选）")}</span>
+          <input
+            value={futureSyms}
+            onChange={(e) => setFutureSyms(e.target.value)}
+            placeholder="ZN, CL, GC"
+            className={inputCls}
+          />
+          <span className="text-xs text-muted-foreground">
+            {t("Front-month roots or contracts. Margined per contract and settled daily.",
+              "主力品种代码或合约代码。按手收取保证金，每日结算。")}
+            {futRange && <> {t(`Futures data: ${futRange.start} → ${futRange.end}.`, `期货数据范围：${futRange.start} → ${futRange.end}。`)}</>}
+          </span>
         </label>
       </div>
 

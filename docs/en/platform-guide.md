@@ -115,7 +115,62 @@ Minute sessions load each option's quotes. With
 `option_fill_model = "bar"` keeps the bar-only model, where
 `option_spread_pct` approximates the spread.
 
-## 4. Intraday research
+## 4. Futures and margin
+
+Futures come from the Databento adapter (CME Globex `GLBX.MDP3` and other
+futures venues) into `future_minute`, `future_daily` (with `settle`) and
+`future_quote_minute`, partitioned by CME session: 18:00 ET the evening before
+to 17:00 ET. A ticker is a contract (`ZNZ6`) or, for front-month continuous
+data, the root (`ZN`).
+
+| Endpoint | MCP tool | What |
+|----------|----------|------|
+| `/future?tickers=&roots=` | `upq_future_minute` | minute bars; `roots=ZN` returns every series of a product |
+| `/future/daily` | `upq_future_daily` | one bar per session with `settle`, final at 17:00 ET |
+| `/future/quote` | `upq_future_quote` | top of book per kept minute |
+
+Put futures in a session with `universe.futures` (`future_universe` in
+`pmb_create_session`), or later with `POST /v1/sessions/{id}/add_futures`, and
+trade them with `instrument: {"type": "FUTURE", "symbol": "ZN"}`
+(`pmb_trade_future`). They trade on every bar their venue prints, whatever the
+order's `trading_hours`, and fill against their book when quotes are loaded.
+
+Margin works the way an exchange clears it:
+
+- **No premium.** A fill costs only fees (`fee_model.future_fee_per_contract`,
+  default 1.50 per side). Fill prices are rounded to the contract's tick.
+- **Initial margin.** Opening contracts need `qty × initial` free: equity minus
+  the initial margin of everything already held. Otherwise the order is
+  rejected with `INSUFFICIENT_MARGIN`.
+- **Daily settlement.** At the last bar of each session (every bar in daily
+  sessions) each position is settled at the session's `settle`:
+  `qty × (settle − previous settle) × multiplier` moves into cash as a
+  `VARIATION_MARGIN` event. Between settlements the open trade equity counts
+  toward equity, and positions are marked at the bar close or the quote mid.
+- **Margin call.** When equity falls below the maintenance margin, a
+  `RISK_EVENT` with `call_amount` is raised and new positions are refused
+  (`MARGIN_RESTRICTED`); closing orders still execute. The call is met only
+  when equity is back at the **initial** margin. A call still open after
+  `margin_config.future_margin_call_sessions` settlements (default 1; 0 never
+  liquidates) is liquidated at the settlement price (`LIQUIDATION` fills).
+
+Margin per contract comes from the contract spec: either a fixed
+`maintenance_margin` in USD (what the exchange publishes) or `margin_rate` of
+the notional at the last settlement, with `initial = maintenance ×
+initial_ratio` (1.10). Built-in specs cover the common CME contracts (ES, NQ,
+YM, RTY and their micros, CL, NG, RB, HO, GC, SI, HG, PL, ZT, ZF, ZN, TN, ZB,
+UB, 6E, 6J, 6B, 6A, 6C, ZC, ZS, ZW) with approximate rates. Set the real
+numbers per root in the account's `margin_config.future_specs`, for example
+`{"ZN": {"root": "ZN", "multiplier": 1000, "tick_size": 0.015625,
+"maintenance_margin": 2100}}`; an order on a root without a spec is refused.
+`GET /v1/sessions/{id}/state` lists the session's specs with the margin per
+contract at the current price (`futures_specs`).
+
+Not modelled yet: contract expiry and rolls (front-month continuous series do
+not expire), exchange settlement prices other than the session's last trade,
+and spread (inter-commodity) margin credits.
+
+## 5. Intraday research
 
 `qfinzero.research` reads the UPQ stores directly with DuckDB. Factors are one
 expression:
@@ -155,7 +210,7 @@ Agents use the same engine through `research_eval_factor` and
 (default 40 trading days) and `QFZ_RESEARCH_MAX_UNIVERSE` (default 1000), and
 they honour the time lock.
 
-## 5. Accounts, roles and API keys
+## 6. Accounts, roles and API keys
 
 The hub authenticates every request to the website, `/svc/*` and `/mcp`.
 

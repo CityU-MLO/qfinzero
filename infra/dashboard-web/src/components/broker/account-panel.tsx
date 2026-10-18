@@ -20,7 +20,8 @@ function pnlCls(n: number) {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-foreground";
 }
 
-function mult(instrumentId: string) {
+function mult(instrumentId: string, multiplier?: number | null) {
+  if (instrumentId.startsWith("FUTURE:")) return multiplier ?? 1;
   return instrumentId.startsWith("OPTION:") ? 100 : 1;
 }
 
@@ -179,11 +180,12 @@ export function AccountPanel({
                 </thead>
                 <tbody>
                   {state.positions.map((p) => {
-                    const mv = p.qty * p.mark_price * mult(p.instrument_id);
+                    // futures: notional exposure (they have no market value of their own)
+                    const mv = p.qty * p.mark_price * mult(p.instrument_id, p.multiplier);
                     const w = a.equity ? (mv / a.equity) * 100 : 0;
                     return (
                       <tr key={p.instrument_id} className="border-t border-border text-right">
-                        <td className="px-3 py-1.5 text-left text-foreground">{p.instrument_id.replace("STOCK:", "").replace("OPTION:", "")}</td>
+                        <td className="px-3 py-1.5 text-left text-foreground">{p.instrument_id.replace(/^(STOCK|OPTION|FUTURE):/, "")}</td>
                         <td className="px-3">{p.qty}</td>
                         <td className="px-3">{num(p.avg_price)}</td>
                         <td className="px-3">{num(p.mark_price)}</td>
@@ -229,7 +231,7 @@ export function AccountPanel({
                       return (
                         <tr key={i} className="border-t border-border">
                           <td className="px-3 py-1.5 text-muted-foreground">{tr.ts ? fmtET(String(tr.ts)) : "—"}</td>
-                          <td className="px-3 text-foreground">{String(tr.instrument_id ?? tr.symbol ?? "").replace("STOCK:", "").replace("OPTION:", "")}</td>
+                          <td className="px-3 text-foreground">{String(tr.instrument_id ?? tr.symbol ?? "").replace(/^(STOCK|OPTION|FUTURE):/, "")}</td>
                           <td className={`px-3 ${s === "BUY" ? "text-up" : "text-down"}`}>{enumLabel(t, s)}</td>
                           <td className="px-3 text-right">{tr.qty ?? "—"}</td>
                           <td className="px-3 text-right">{tr.price != null ? num(Number(tr.price)) : "—"}</td>

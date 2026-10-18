@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any, Dict
 
+from domain.futures import FutureSpec
+
 from .enums import MarginStatus, Market, AccountStatus, Side
 
 
@@ -11,6 +13,11 @@ class MarginConfig(BaseModel):
     short_stock_maintenance: float = 1.30
     option_short_a: float = 0.20
     option_short_b: float = 0.10
+    # futures (see domain/futures.py): per-root overrides of the built-in
+    # contract specs, and how many settlements a margin call may stay open
+    # before the futures are liquidated (0 = never liquidate)
+    future_specs: Dict[str, FutureSpec] = {}
+    future_margin_call_sessions: int = 1
 
 
 class AccountConstraints(BaseModel):

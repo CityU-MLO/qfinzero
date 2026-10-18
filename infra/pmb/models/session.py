@@ -9,6 +9,7 @@ from .enums import Frequency, SessionStatus
 class Universe(BaseModel):
     stocks: List[str] = []
     options: List[str] = []
+    futures: List[str] = []     # contracts (ZNZ6) or front-month roots (ZN)
 
 
 class UPQConfig(BaseModel):
@@ -21,6 +22,7 @@ class FeeModel(BaseModel):
     stock_fee_per_share: float = 0.0005
     option_fee_per_contract: float = 0.65
     option_exercise_fee: float = 0.0  # per-contract fee on expiry/assignment (default 0, IBKR-style)
+    future_fee_per_contract: float = 1.50  # commission + exchange fees per futures contract, each side
 
 
 class PartialFillConfig(BaseModel):

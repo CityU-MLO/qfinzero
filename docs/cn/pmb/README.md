@@ -42,13 +42,15 @@ python main.py
 时间仅通过 `POST /sessions/{id}/step` 推进。不依赖真实挂钟时间——由代理控制时间进程。每一步按固定顺序返回带类型的事件：
 
 ```
-MARKET_TICK → ORDER_EVENT → TRADE_EVENT → ACCOUNT_SNAPSHOT → RISK_EVENT
+MARKET_TICK → ORDER_EVENT → TRADE_EVENT → VARIATION_MARGIN → ACCOUNT_SNAPSHOT → RISK_EVENT
 ```
 
 ### 支持的资产
 
 - **股票**: 分钟/日级别的 OHLCV K 线
 - **期权**: 带完整期权链数据的 OPRA 合约
+- **期货**: CME 方式的合约，按手计算初始/维持保证金，每日结算（variation margin），未补足的追加保证金会被强平
+  （见平台指南「期货与保证金」）
 
 ### 订单类型
 
@@ -159,6 +161,8 @@ with PMBClient() as pmb:
 | `sell(session_id, account_id, symbol, qty, ...)` | 卖出股票 |
 | `buy_option(session_id, account_id, contract, qty, ...)` | 买入期权 |
 | `sell_option(session_id, account_id, contract, qty, ...)` | 卖出期权 |
+| `trade_future(session_id, account_id, symbol, side, qty, ...)` | 期货下单（`buy_future` / `sell_future`） |
+| `add_futures(session_id, symbols)` | 向运行中的会话加入期货 |
 | `cancel_order(order_id, session_id, account_id)` | 取消订单 |
 | `get_summary(session_id)` | 获取会话绩效指标 |
 | `export(session_id, fmt="json")` | 导出订单、成交、权益曲线 |

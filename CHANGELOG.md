@@ -44,6 +44,16 @@ Added:
 - A data availability dashboard (`/availability`): data levels per ticker and day (daily, minute
   by session, quotes, option EOD / minute / quotes) with news, earnings and
   macro releases on the same time axis; ESP `GET /esp/news/counts`.
+- Minute BBO at a chosen sampling interval (1, 5, 15, 30 or 60 minutes per
+  asset class), from Databento quote schemas and massive quotes flat files,
+  REST samples and snapshots.
+- Futures: Databento futures venues (CME Globex `GLBX.MDP3`, ICE, Nodal) convert
+  into `future_minute`, `future_daily` (with `settle`) and `future_quote_minute`
+  on CME session dates; UPQ `/future`, `/future/daily`, `/future/quote` and the
+  `upq_future_*` tools; PMB futures with contract specs, per-contract initial
+  and maintenance margin, daily variation margin, margin calls met at initial
+  margin and liquidation of unmet calls (`pmb_trade_future`, `universe.futures`,
+  `add_futures`); futures in the broker terminal and the availability map.
 - Model groups for Chat: OpenAI, Claude and Gemini via Antigravity endpoints,
   model lists fetched from `/models`, import of Claude Code settings, export
   lines or Codex `config.toml`, and JSON import / export.
@@ -59,6 +69,12 @@ Fixed:
 - ESP leaked earnings and macro results before their release time in replays.
 - The PMB page embedded `:19380` directly, which failed behind the hub.
 - `esp_get_event`, `esp_news_body` and `esp_search_news` ignored the session clock.
+- ESP connected to its news and event sources only at start-up; it now
+  reconnects when one comes back.
+- Rewinding a PMB session dropped its partial-fill, trading-hours and option
+  fill settings.
+- The data setup and availability components, the coverage route and the
+  shipped benchmark tasks were excluded from the repository by `.gitignore`.
 
 ## 0.1.0 (2026-10-16)
 

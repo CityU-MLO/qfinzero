@@ -34,6 +34,19 @@ class OptionBar(BaseModel):
     greek_status: Optional[str] = None
 
 
+class FutureBar(BaseModel):
+    symbol: str
+    window_start_ns: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    root: Optional[str] = None
+    settle: Optional[float] = None       # daily bars
+    session_date: Optional[str] = None   # CME trade date
+
+
 class Quote(BaseModel):
     """Top of book at the end of the minute ``[window_start, window_start+60s)``."""
     window_start_ns: int

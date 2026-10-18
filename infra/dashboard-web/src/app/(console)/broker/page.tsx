@@ -19,6 +19,7 @@ interface Live {
   sessionId: string;
   accountId: string;
   watchlist: string[];
+  futures: string[];
 }
 
 const TABS = [
@@ -45,6 +46,7 @@ export default function BrokerPage() {
           sessionId={live.sessionId}
           accountId={live.accountId}
           watchlist={live.watchlist}
+          futures={live.futures}
           onExit={() => {
             setLive(null);
             setView("landing");

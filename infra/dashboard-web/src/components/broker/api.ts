@@ -52,12 +52,29 @@ export interface AccountSnapshot {
 
 export interface Position {
   instrument_id: string;
+  type?: string;
   qty: number;
   avg_price: number;
   mark_price: number;
   unrealized_pnl: number;
   realized_pnl: number;
+  multiplier?: number | null;   // futures
+  basis_price?: number | null;  // futures: last settlement
 }
+
+/** Contract spec and margin per contract of a session's future (PMB state). */
+export interface FutureSpecView {
+  root: string;
+  name: string;
+  multiplier: number;
+  tick_size: number;
+  ref_price: number;
+  initial_per_contract: number;
+  maintenance_per_contract: number;
+}
+
+export const isFutureId = (iid: string) => iid.startsWith("FUTURE:");
+export const instName = (iid: string) => iid.replace(/^(STOCK|OPTION|FUTURE):/, "");
 
 export interface OpenOrder {
   order_id: string;
@@ -109,7 +126,8 @@ export interface FullState {
   positions: Position[];
   open_orders: OpenOrder[];
   trades: Trade[];
-  market: { ts: string; stocks: StockQuote[]; options: unknown[] };
+  market: { ts: string; stocks: StockQuote[]; options: unknown[]; futures?: StockQuote[] };
+  futures_specs?: Record<string, FutureSpecView>;
 }
 
 // ── Allocate account ───────────────────────────────────────────────────────
@@ -138,6 +156,7 @@ export function createSession(p: {
   start_ts: string;
   end_ts: string;
   stocks: string[];
+  futures?: string[];
   frequency?: string;
 }) {
   return req<{ session_id: string }>("/sessions", {
@@ -147,7 +166,7 @@ export function createSession(p: {
       frequency: p.frequency ?? "1m",
       start_ts: p.start_ts,
       end_ts: p.end_ts,
-      universe: { stocks: p.stocks, options: [] },
+      universe: { stocks: p.stocks, options: [], futures: p.futures ?? [] },
     }),
   });
 }
@@ -186,6 +205,7 @@ export function placeOrder(p: {
   qty: number;
   order_type: "MARKET" | "LIMIT";
   limit_price?: number | null;
+  instrument_type?: "STOCK" | "FUTURE";
 }) {
   return req<{ ok: boolean; order_id: string; status: string }>("/orders", {
     method: "POST",
@@ -193,7 +213,7 @@ export function placeOrder(p: {
       session_id: p.session_id,
       account_id: p.account_id,
       order: {
-        instrument: { type: "STOCK", symbol: p.symbol.toUpperCase() },
+        instrument: { type: p.instrument_type ?? "STOCK", symbol: p.symbol.toUpperCase() },
         side: p.side,
         order_type: p.order_type,
         qty: p.qty,
@@ -292,6 +312,14 @@ export function sessionOptionChain(
 export function addStocks(sessionId: string, symbols: string[]) {
   return req<{ ok: boolean; loaded: number; skipped: number }>(
     `/sessions/${sessionId}/add_stocks`,
+    { method: "POST", body: JSON.stringify({ symbols }) },
+  );
+}
+
+/** Load futures (contracts or front-month roots) into a running session. */
+export function addFutures(sessionId: string, symbols: string[]) {
+  return req<{ ok: boolean; loaded: number; unknown_spec: string[] }>(
+    `/sessions/${sessionId}/add_futures`,
     { method: "POST", body: JSON.stringify({ symbols }) },
   );
 }

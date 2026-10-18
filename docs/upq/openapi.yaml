@@ -603,8 +603,117 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/ChainSnapshotRecord'}
+  /future:
+    get:
+      summary: Futures minute bars
+      description: |
+        Partitions are CME sessions (18:00 ET the evening before to 17:00 ET), so
+        evening bars belong to the next trade date.
+      operationId: getFutureMinute
+      parameters:
+        - {name: tickers, in: query, required: false, description: "contracts (ZNZ6) or front-month roots (ZN); tickers or roots is required", schema: {type: string, example: "ZN,CL"}}
+        - {name: roots, in: query, required: false, description: every series of these products, schema: {type: string, example: "ZN"}}
+        - {name: start, in: query, required: true, schema: {type: string, format: date-time, example: "2026-09-01T22:00:00"}}
+        - {name: end, in: query, required: true, schema: {type: string, format: date-time, example: "2026-09-02T21:00:00"}}
+        - {name: fields, in: query, required: false, schema: {type: string, example: "ticker,window_start,close"}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100000, default: 10000}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime or nanoseconds). Minute rows are
+            visible once window_start + 60s <= as_of; a futures daily bar for
+            session D after 17:00 ET on D. UPQ_AS_OF applies as well.
+          schema: {type: string, example: "2026-09-02T14:36:00Z"}
+      responses:
+        '200':
+          description: Bars
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/FutureMinuteRecord'}
+  /future/daily:
+    get:
+      summary: Futures daily bars with settle
+      description: One bar per CME session; `settle` is the price daily variation margin marks to.
+      operationId: getFutureDaily
+      parameters:
+        - {name: tickers, in: query, required: false, description: "contracts (ZNZ6) or front-month roots (ZN); tickers or roots is required", schema: {type: string, example: "ZN,CL"}}
+        - {name: roots, in: query, required: false, description: every series of these products, schema: {type: string, example: "ZN"}}
+        - {name: start, in: query, required: true, schema: {type: string, format: date, example: "2026-09-01"}}
+        - {name: end, in: query, required: true, schema: {type: string, format: date, example: "2026-09-30"}}
+        - {name: fields, in: query, required: false, schema: {type: string, example: "ticker,date,settle"}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime or nanoseconds). Minute rows are
+            visible once window_start + 60s <= as_of; a futures daily bar for
+            session D after 17:00 ET on D. UPQ_AS_OF applies as well.
+          schema: {type: string, example: "2026-09-02T14:36:00Z"}
+      responses:
+        '200':
+          description: Bars
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/FutureDailyRecord'}
+  /future/quote:
+    get:
+      summary: Futures top of book
+      description: The book at the end of each kept minute; carry the previous row forward.
+      operationId: getFutureQuote
+      parameters:
+        - {name: tickers, in: query, required: false, description: "contracts (ZNZ6) or front-month roots (ZN); tickers or roots is required", schema: {type: string, example: "ZN,CL"}}
+        - {name: roots, in: query, required: false, description: every series of these products, schema: {type: string, example: "ZN"}}
+        - {name: start, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: end, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100000, default: 10000}}
+        - name: as_of
+          in: query
+          required: false
+          description: >-
+            Point-in-time cap (ISO datetime or nanoseconds). Minute rows are
+            visible once window_start + 60s <= as_of; a futures daily bar for
+            session D after 17:00 ET on D. UPQ_AS_OF applies as well.
+          schema: {type: string, example: "2026-09-02T14:36:00Z"}
+      responses:
+        '200':
+          description: Quote rows (QuoteRecord plus root)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/QuoteRecord'}
 components:
   schemas:
+    FutureMinuteRecord:
+      type: object
+      properties:
+        ticker: {type: string, example: ZN}
+        root: {type: string, example: ZN}
+        window_start: {type: integer, format: int64}
+        open: {type: number}
+        high: {type: number}
+        low: {type: number}
+        close: {type: number}
+        volume: {type: integer}
+        transactions: {type: integer}
+    FutureDailyRecord:
+      type: object
+      properties:
+        ticker: {type: string}
+        root: {type: string}
+        date: {type: string, format: date, description: CME session date}
+        open: {type: number}
+        high: {type: number}
+        low: {type: number}
+        close: {type: number}
+        settle: {type: number}
+        volume: {type: integer}
+        transactions: {type: integer}
     QuoteRecord:
       type: object
       properties:

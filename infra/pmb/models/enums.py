@@ -9,6 +9,7 @@ class Frequency(str, Enum):
 class InstrumentType(str, Enum):
     STOCK = "STOCK"
     OPTION = "OPTION"
+    FUTURE = "FUTURE"
 
 
 class OrderType(str, Enum):
@@ -61,6 +62,7 @@ class EventType(str, Enum):
     RISK_EVENT = "RISK_EVENT"
     ERROR_EVENT = "ERROR_EVENT"
     OPTION_EXPIRY_EVENT = "OPTION_EXPIRY_EVENT"
+    VARIATION_MARGIN = "VARIATION_MARGIN"
 
 
 class SessionStatus(str, Enum):

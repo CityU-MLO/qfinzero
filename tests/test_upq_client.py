@@ -281,3 +281,23 @@ class TestContextManager:
         with UPQClient(MOCK_URL) as c:
             result = c.health()
         assert result == {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Futures
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestFutures:
+    @responses.activate
+    def test_future_endpoints_send_tickers_or_roots(self, client):
+        responses.get(f"{MOCK_URL}/future", json=[{"ticker": "ZN"}])
+        responses.get(f"{MOCK_URL}/future/daily", json=[{"ticker": "ZN", "settle": 110.5}])
+        responses.get(f"{MOCK_URL}/future/quote", json=[])
+        assert client.future_minute(["ZN"], "2025-01-02T14:00:00", "2025-01-02T15:00:00", limit=5) == [{"ticker": "ZN"}]
+        assert client.future_daily(roots=["ZN", "CL"], start="2025-01-01", end="2025-01-31")[0]["settle"] == 110.5
+        client.future_quote(["ZNH5"], "2025-01-02T14:00:00", "2025-01-02T15:00:00", as_of="2025-01-02T14:31:00Z")
+        q = [c.request.params for c in responses.calls]
+        assert q[0] == {"tickers": "ZN", "start": "2025-01-02T14:00:00", "end": "2025-01-02T15:00:00", "limit": "5"}
+        assert q[1] == {"roots": "ZN,CL", "start": "2025-01-01", "end": "2025-01-31"}
+        assert q[2]["as_of"] == "2025-01-02T14:31:00Z" and q[2]["tickers"] == "ZNH5"

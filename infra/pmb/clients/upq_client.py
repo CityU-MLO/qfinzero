@@ -141,6 +141,57 @@ class UPQClient:
             for r in resp.json()
         ]
 
+    # ── futures ──────────────────────────────────────────────────────
+
+    async def _get_rows(self, path: str, params: dict) -> list[dict]:
+        resp = await self._client.get(path, params=params)
+        if resp.status_code == 404:      # a UPQ build without futures endpoints
+            return []
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_future_minute_bars(self, tickers: list[str], start: str, end: str) -> list:
+        """GET /future — minute bars (contracts or front-month roots)."""
+        from domain.futures import session_date_of
+        from domain.session_clock import iso_to_ns, ns_to_iso
+        from models.market import FutureBar
+        out, cursor, end_s = [], ns_to_iso(iso_to_ns(start))[:19], ns_to_iso(iso_to_ns(end))[:19]
+        while True:      # 24-hour sessions: page through the 100k row limit
+            rows = await self._get_rows("/future", {"tickers": ",".join(tickers), "start": cursor,
+                                                    "end": end_s, "limit": 100000})
+            out += [FutureBar(symbol=r["ticker"], root=r.get("root"), window_start_ns=r["window_start"],
+                              open=r["open"], high=r["high"], low=r["low"], close=r["close"],
+                              volume=r["volume"], session_date=session_date_of(r["window_start"]))
+                    for r in rows]
+            if len(rows) < 100000:
+                return out
+            cursor = ns_to_iso(max(r["window_start"] for r in rows) + 60_000_000_000)[:19]
+
+    async def get_future_daily_bars(self, tickers: list[str], start: str, end: str) -> list:
+        """GET /future/daily — one bar per CME session with ``settle``; stamped
+        ``date T00:00Z`` like stock daily bars."""
+        from domain.session_clock import iso_to_ns
+        from models.market import FutureBar
+        rows = await self._get_rows("/future/daily", {"tickers": ",".join(tickers), "start": start, "end": end})
+        return [FutureBar(symbol=r["ticker"], root=r.get("root"),
+                          window_start_ns=iso_to_ns(r["date"] + "T00:00:00+00:00"),
+                          open=r["open"], high=r["high"], low=r["low"], close=r["close"],
+                          volume=r["volume"], settle=r.get("settle"), session_date=r["date"])
+                for r in rows]
+
+    async def get_future_quotes(self, symbol: str, start: str, end: str):
+        """GET /future/quote — the book per kept minute (empty when absent)."""
+        from domain.session_clock import iso_to_ns, ns_to_iso
+        from models.market import Quote
+        try:
+            rows = await self._get_rows("/future/quote", {
+                "tickers": symbol, "start": ns_to_iso(iso_to_ns(start))[:19],
+                "end": ns_to_iso(iso_to_ns(end))[:19], "limit": 100000})
+        except Exception:  # noqa: BLE001 - quotes are optional
+            return []
+        return [Quote(window_start_ns=r["window_start"], bid=r.get("bid_price"), ask=r.get("ask_price"),
+                      bid_size=r.get("bid_size") or 0, ask_size=r.get("ask_size") or 0) for r in rows]
+
     async def option_chain(self, underlying: str, date: str, expiry_min: str | None = None) -> list[dict]:
         """GET /option/chain_query — the day's option chain (strikes, greeks) for an underlying."""
         params = {

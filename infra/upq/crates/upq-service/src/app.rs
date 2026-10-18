@@ -198,6 +198,9 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         .route("/stock/quote", get(stock_quote))
         .route("/option/quote", get(option_quote))
         .route("/option/chain_snapshot", get(option_chain_snapshot))
+        .route("/future", get(future_minute))
+        .route("/future/daily", get(future_daily))
+        .route("/future/quote", get(future_quote))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
@@ -740,6 +743,8 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
         ("stock_daily", "tickers", false),
         ("option_minute", "tickers", true),
         ("option_day", "tickers", true),
+        ("future_minute", "tickers", true),
+        ("future_daily", "tickers", false),
     ];
 
     for (dataset_name, unique_key_label, has_window_start) in &partitioned_datasets {
@@ -1399,6 +1404,18 @@ fn quote_window(
     end: &str,
     requested_as_of: Option<&str>,
 ) -> Result<Option<(i64, i64, String, String)>, axum::response::Response> {
+    window_with(state, start, end, requested_as_of, as_of::et_date_bounds)
+}
+
+/// [`quote_window`] with a choice of partition dates (ET or futures session).
+#[allow(clippy::result_large_err)]
+fn window_with(
+    state: &AppState,
+    start: &str,
+    end: &str,
+    requested_as_of: Option<&str>,
+    bounds: fn(i64, i64) -> Option<(String, String)>,
+) -> Result<Option<(i64, i64, String, String)>, axum::response::Response> {
     if validate_datetime(start).is_err() || validate_datetime(end).is_err() {
         return Err(invalid_argument("start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS"));
     }
@@ -1409,9 +1426,188 @@ fn quote_window(
     if end_ns < start_ns {
         return Ok(None);
     }
-    let (a, b) = as_of::et_date_bounds(start_ns, end_ns)
-        .ok_or_else(|| invalid_argument("start/end out of range"))?;
+    let (a, b) = bounds(start_ns, end_ns).ok_or_else(|| invalid_argument("start/end out of range"))?;
     Ok(Some((start_ns, end_ns, a, b)))
+}
+
+// ── futures ──────────────────────────────────────────────────────────────
+//
+// `future_minute`, `future_daily` and `future_quote_minute` are partitioned by
+// CME session date (18:00 ET the evening before to 17:00 ET). A `ticker` is a
+// contract (`ZNZ6`) or, for front-month continuous data, the root (`ZN`);
+// `roots=` selects every series of a product.
+
+#[derive(Debug, Deserialize)]
+struct FutureQuery {
+    tickers: Option<String>,
+    roots: Option<String>,
+    start: String,
+    end: String,
+    fields: Option<String>,
+    limit: Option<usize>,
+    as_of: Option<String>,
+}
+
+/// `(ticker IN (...) OR root IN (...))` from the `tickers` / `roots` lists.
+fn future_symbol_filter(tickers: Option<&str>, roots: Option<&str>) -> Result<String, &'static str> {
+    let t = tickers.map(parse_csv_list).unwrap_or_default();
+    let r = roots.map(parse_csv_list).unwrap_or_default();
+    if t.is_empty() && r.is_empty() {
+        return Err("tickers or roots is required");
+    }
+    let list = |v: &[String]| v.iter().map(|x| sql_quote(x)).collect::<Vec<_>>().join(", ");
+    let mut parts = Vec::new();
+    if !t.is_empty() {
+        parts.push(format!("ticker IN ({})", list(&t)));
+    }
+    if !r.is_empty() {
+        parts.push(format!("root IN ({})", list(&r)));
+    }
+    Ok(format!("({})", parts.join(" OR ")))
+}
+
+#[allow(clippy::result_large_err)]
+fn future_limit(limit: Option<usize>) -> Result<usize, axum::response::Response> {
+    let limit = limit.unwrap_or(10_000);
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(invalid_argument("limit must be between 1 and 100000"));
+    }
+    Ok(limit)
+}
+
+async fn future_series(
+    state: &AppState,
+    params: &FutureQuery,
+    store: &str,
+    projection: &str,
+) -> axum::response::Response {
+    let limit = match future_limit(params.limit) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let symbols = match future_symbol_filter(params.tickers.as_deref(), params.roots.as_deref()) {
+        Ok(f) => f,
+        Err(m) => return invalid_argument(m),
+    };
+    let (start_ns, end_ns, start_date, end_date) = match window_with(
+        state,
+        &params.start,
+        &params.end,
+        params.as_of.as_deref(),
+        as_of::session_date_bounds,
+    ) {
+        Ok(Some(w)) => w,
+        Ok(None) => return (StatusCode::OK, Json(json!([]))).into_response(),
+        Err(response) => return response,
+    };
+    let dataset_dir = state.storage_root.join(store);
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let sql = format!(
+        "SELECT {projection} FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND {symbols} AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         ORDER BY ticker, window_start LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// Futures minute bars; a bar is visible once its minute has closed.
+async fn future_minute(
+    State(state): State<AppState>,
+    Query(params): Query<FutureQuery>,
+) -> axum::response::Response {
+    let default = [
+        "ticker", "root", "window_start", "open", "high", "low", "close", "volume", "transactions",
+    ];
+    let allow = [
+        "ticker", "root", "window_start", "open", "high", "low", "close", "volume", "transactions",
+        "trade_date",
+    ];
+    let projection = match parse_projection(params.fields.as_deref(), &default, &allow) {
+        Ok(p) => p,
+        Err(m) => return invalid_argument(m),
+    };
+    future_series(&state, &params, "future_minute", &projection).await
+}
+
+/// Futures top of book at the end of each kept minute (carry it forward).
+async fn future_quote(
+    State(state): State<AppState>,
+    Query(params): Query<FutureQuery>,
+) -> axum::response::Response {
+    let projection = "ticker, root, window_start, bid_price, ask_price, bid_size, ask_size";
+    future_series(&state, &params, "future_quote_minute", projection).await
+}
+
+/// Futures daily bars per session, with `settle` (the price variation margin
+/// marks to). Session D is final at 17:00 ET on D.
+async fn future_daily(
+    State(state): State<AppState>,
+    Query(params): Query<FutureQuery>,
+) -> axum::response::Response {
+    if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
+        return invalid_argument("start/end must be date: YYYY-MM-DD");
+    }
+    let limit = match future_limit(params.limit) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let symbols = match future_symbol_filter(params.tickers.as_deref(), params.roots.as_deref()) {
+        Ok(f) => f,
+        Err(m) => return invalid_argument(m),
+    };
+    let allow = [
+        "ticker", "root", "trade_date", "date", "open", "high", "low", "close", "settle", "volume",
+        "transactions",
+    ];
+    let fields = match params.fields.as_deref().map(parse_csv_list) {
+        Some(f) if !f.is_empty() => f,
+        _ => ["ticker", "root", "date", "open", "high", "low", "close", "settle", "volume", "transactions"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    };
+    let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+    if validate_fields(&refs, &allow).is_err() {
+        return invalid_argument("fields contains unsupported column");
+    }
+    let projection = refs
+        .iter()
+        .map(|f| if *f == "date" { "trade_date AS date".to_string() } else { (*f).to_string() })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let cap = match request_cap(&state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    let end = clamp_date(&params.end, cap.and_then(|c| as_of::daily_cap_date(c, as_of::FUTURE_CLOSE)));
+    if end.as_str() < params.start.as_str() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let dataset_dir = state.storage_root.join("future_daily");
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let sql = format!(
+        "SELECT {projection} FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start}' AND trade_date <= DATE '{end}' AND {symbols} \
+         ORDER BY ticker, trade_date LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+        start = sql_escape_literal(&params.start),
+        end = sql_escape_literal(&end),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
 }
 
 async fn stock_quote(

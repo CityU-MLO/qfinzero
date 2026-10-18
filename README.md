@@ -135,7 +135,7 @@ qfz-server                                # then open http://127.0.0.1:19777/log
 ```
 
 `QFZ_AUTH_MODE=off` disables sign-in for local development. All settings:
-[platform guide §5](docs/en/platform-guide.md#5-accounts-roles-and-api-keys).
+[platform guide §5](docs/en/platform-guide.md#6-accounts-roles-and-api-keys).
 
 ## Data Pipeline
 

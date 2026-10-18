@@ -42,7 +42,7 @@ http://127.0.0.1:19777/health` lists the children and whether each one is up.
 
 `QFZ_ADMIN_PASSWORD` creates the `admin` account on the first start only. You
 can drop it afterwards. Other ways to create the first admin are listed in the
-[platform guide](platform-guide.md#5-accounts-roles-and-api-keys).
+[platform guide](platform-guide.md#6-accounts-roles-and-api-keys).
 
 ## 2. Look around the console
 

@@ -421,6 +421,89 @@ def upq_stock_quote(
 
 
 @mcp.tool()
+def upq_future_minute(
+    start: str,
+    end: str,
+    tickers: Optional[list[str]] = None,
+    roots: Optional[list[str]] = None,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Futures minute bars (CME Globex and other futures venues).
+
+    A ticker is a contract (``ZNZ6``, ``CLX6``) or, for front-month continuous
+    data, the product root (``ZN``, ``CL``, ``GC``); ``roots`` returns every
+    series of a product. Rows: ticker, root, window_start (ns since epoch),
+    open, high, low, close, volume, transactions. Sessions run 18:00 ET the
+    evening before to 17:00 ET.
+
+    Args:
+        start: ISO datetime (UTC), e.g. "2026-09-02T13:00:00"
+        end: ISO datetime (UTC)
+        tickers: Contracts or roots, e.g. ["ZN"]
+        roots: Products, e.g. ["ZN", "CL"] (all their contracts)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.future_minute(tickers, start, end, roots=roots, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
+def upq_future_daily(
+    start: str,
+    end: str,
+    tickers: Optional[list[str]] = None,
+    roots: Optional[list[str]] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Futures daily bars per CME session with ``settle``, the price daily
+    variation margin marks to. Session D (18:00 ET on D-1 to 17:00 ET on D) is
+    final at 17:00 ET on D.
+
+    Args:
+        start: Date, e.g. "2026-09-01"
+        end: Date
+        tickers: Contracts or roots, e.g. ["CL"]
+        roots: Products (all their contracts)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.future_daily(tickers, start, end, roots=roots, as_of=as_of))
+
+
+@mcp.tool()
+def upq_future_quote(
+    start: str,
+    end: str,
+    tickers: Optional[list[str]] = None,
+    roots: Optional[list[str]] = None,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Futures top of book (bid/ask price and size). Each row is the book at the
+    end of the minute ``window_start``; minutes without a row keep the previous
+    book (the store may also be sampled every 5-60 minutes).
+
+    Args:
+        start: ISO datetime (UTC)
+        end: ISO datetime (UTC)
+        tickers: Contracts or roots, e.g. ["ZN"]
+        roots: Products (all their contracts)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.future_quote(tickers, start, end, roots=roots, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
 def upq_option_quote(
     contract: str,
     start: str,
@@ -1314,6 +1397,7 @@ def pmb_create_session(
     end_ts: str,
     stock_universe: Optional[list[str]] = None,
     option_universe: Optional[list[str]] = None,
+    future_universe: Optional[list[str]] = None,
     ctx: Context = None,
 ) -> str:
     """Create a new backtesting / simulation session.
@@ -1327,6 +1411,9 @@ def pmb_create_session(
         stock_universe: Stock symbols to include, e.g. ["AAPL", "NVDA", "SPY"]
         option_universe: Option contracts to include, e.g. ["O:SPY250117C00500000"]
                          (use upq_make_opra or a chain query to get symbols)
+        future_universe: Futures to include: contracts ("ZNZ6") or front-month
+                         roots ("ZN", "CL", "GC"); they trade around the clock
+                         (CME 18:00-17:00 ET) and settle daily
 
     Returns:
         JSON with: session_id, account_id, clock (frequency, current_ts, end_ts, status)
@@ -1337,6 +1424,8 @@ def pmb_create_session(
         universe["stocks"] = stock_universe
     if option_universe:
         universe["options"] = option_universe
+    if future_universe:
+        universe["futures"] = future_universe
 
     with _pmb(ctx) as client:
         return json.dumps(
@@ -1670,6 +1759,50 @@ def pmb_sell_stock(
                 expire_ts=expire_ts,
             )
         )
+
+
+@mcp.tool()
+def pmb_trade_future(
+    session_id: str,
+    account_id: str,
+    symbol: str,
+    side: Literal["BUY", "SELL"],
+    qty: int,
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET",
+    limit_price: Optional[float] = None,
+    stop_price: Optional[float] = None,
+    time_in_force: Literal["DAY", "GTC"] = "DAY",
+    client_order_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Place a futures order (BUY or SELL; selling with no position opens a short).
+
+    Futures are margined, not paid for: opening contracts need their initial
+    margin free (equity minus the initial margin already in use), fills cost
+    only fees, and each position settles daily at the session's settlement
+    price (VARIATION_MARGIN events move the gain or loss into cash). When
+    equity falls below maintenance margin the account is in a margin call
+    (no new positions) until equity is back at initial margin; an unmet call
+    is liquidated at a later settlement. The session state lists each
+    contract's multiplier, tick size and margin per contract.
+
+    Args:
+        session_id: The active session (futures must be in its future_universe)
+        account_id: The account identifier
+        symbol: Contract ("ZNZ6") or front-month root ("ZN")
+        side: "BUY" or "SELL"
+        qty: Number of contracts
+        order_type: "MARKET" (default), "LIMIT", "STOP" or "STOP_LIMIT"
+        limit_price / stop_price: Prices in the contract's quote units
+        time_in_force: "DAY" (default) or "GTC"
+        client_order_id: Optional idempotency key
+    """
+    with _pmb(ctx) as client:
+        return json.dumps(client.trade_future(
+            session_id=session_id, account_id=account_id, symbol=symbol, side=side, qty=qty,
+            order_type=order_type, limit_price=limit_price, stop_price=stop_price,
+            time_in_force=time_in_force, client_order_id=client_order_id,
+        ))
 
 
 @mcp.tool()

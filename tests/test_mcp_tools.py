@@ -269,6 +269,26 @@ class TestPMBTools:
         assert json.loads(result)["order_id"] == "o2"
 
     @responses.activate
+    def test_pmb_trade_future_and_future_universe(self):
+        responses.post(f"{MOCK_PMB_URL}/v1/sessions", json={"session_id": "s1"})
+        responses.post(f"{MOCK_PMB_URL}/v1/orders", json={"order_id": "o5"})
+        _srv().pmb_create_session("a1", "1m", "2026-09-02T00:00:00", "2026-09-03T00:00:00",
+                                  future_universe=["ZN", "CLX6"])
+        assert json.loads(responses.calls[0].request.body)["universe"] == {"futures": ["ZN", "CLX6"]}
+        result = _srv().pmb_trade_future("s1", "a1", "ZN", "SELL", 2, order_type="LIMIT", limit_price=107.5)
+        assert json.loads(result)["order_id"] == "o5"
+        order = json.loads(responses.calls[1].request.body)["order"]
+        assert order["instrument"] == {"type": "FUTURE", "symbol": "ZN"}
+        assert (order["side"], order["qty"], order["limit_price"]) == ("SELL", 2, 107.5)
+
+    @responses.activate
+    def test_upq_future_tools(self):
+        responses.get(f"{MOCK_UPQ_URL}/future/daily", json=[{"ticker": "CL", "settle": 90.6}])
+        out = json.loads(_srv().upq_future_daily("2026-09-01", "2026-09-03", roots=["CL"]))
+        assert out[0]["settle"] == 90.6
+        assert responses.calls[0].request.params["roots"] == "CL"
+
+    @responses.activate
     def test_pmb_buy_option(self):
         responses.post(f"{MOCK_PMB_URL}/v1/orders", json={"order_id": "o3"})
         result = _srv().pmb_buy_option("s1", "a1", "O:NVDA250117C00136000", 5)
