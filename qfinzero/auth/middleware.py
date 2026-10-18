@@ -29,7 +29,7 @@ IDENTITY_HEADERS = (b"x-qfz-user", b"x-qfz-role", b"x-qfz-user-id")
 
 # Paths anyone may load (the public site, login, health, static assets).
 PUBLIC_EXACT = {"/", "/login", "/setup", "/health", "/favicon.ico", "/robots.txt",
-                "/auth/login", "/auth/logout", "/auth/status", "/auth/setup"}
+                "/auth/login", "/auth/logout", "/auth/status", "/auth/setup", "/auth/me"}
 PUBLIC_PREFIXES = ("/_next/", "/static/", "/brand/")
 ADMIN_PREFIXES = ("/svc/data-admin", "/api/data-admin", "/auth/users", "/data", "/admin")
 READ_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -148,12 +148,29 @@ class AuthMiddleware:
                                     (b"cache-control", b"no-store")]})
             await send({"type": "http.response.body", "body": b""})
             return
+        if status == 403 and scope.get("method") == "GET" and _wants_html(headers):
+            page = (_FORBIDDEN_HTML % message).encode()
+            await send({"type": "http.response.start", "status": 403,
+                        "headers": [(b"content-type", b"text/html; charset=utf-8"),
+                                    (b"cache-control", b"no-store")]})
+            await send({"type": "http.response.body", "body": page})
+            return
         body = json.dumps({"error": message, "status": status}).encode()
         hdrs = [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]
         if status == 401:
             hdrs.append((b"www-authenticate", b'Bearer realm="qfinzero"'))
         await send({"type": "http.response.start", "status": status, "headers": hdrs})
         await send({"type": "http.response.body", "body": body})
+
+
+_FORBIDDEN_HTML = """<!doctype html><meta charset=utf-8><title>No access · QFinZero</title>
+<style>body{font:15px/1.6 "Avenir Next",system-ui,sans-serif;background:#f6fbfc;color:#173a47;
+display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:26rem;padding:2rem;
+background:#fff;border:1px solid #d3e3e6;border-radius:16px;box-shadow:0 8px 30px #0b4c5c14}
+a{color:#147d93;font-weight:600}</style><main><h1 style="margin:0 0 .5rem;font-size:1.4rem">
+You don't have access to this page</h1><p>Your account's role does not allow it (%s). Ask an
+admin to change your role.</p><p><a href="/chat">Back to the console</a> &middot;
+<a href="/account">Your account</a></p></main>"""
 
 
 class LoginThrottle:

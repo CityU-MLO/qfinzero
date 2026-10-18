@@ -7,7 +7,8 @@ import { LEGACY_PREFIX, SKIN_HEADER, SKIN_LEGACY } from "@/lib/legacy";
 // /data, …) and tag the request with x-ui-skin=legacy so the root layout knows to apply
 // the retro skin. No redirect — the address bar stays at /legacy.
 export function middleware(req: NextRequest) {
-  const rest = req.nextUrl.pathname.slice(LEGACY_PREFIX.length) || "/";
+  // /legacy alone opens the chat (the console home); /legacy/<page> maps to /<page>
+  const rest = req.nextUrl.pathname.slice(LEGACY_PREFIX.length) || "/chat";
   const url = req.nextUrl.clone();
   url.pathname = rest;
 

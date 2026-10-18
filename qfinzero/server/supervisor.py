@@ -91,9 +91,12 @@ class Child:
 
 
 def _default_children() -> list[Child]:
-    upq_bin = REPO_ROOT / "infra/upq/target/release/upq-service"
-    if not upq_bin.exists():
-        upq_bin = REPO_ROOT / "infra/upq/target/debug/upq-service"
+    # UPQ_BIN overrides; else the release/debug build (CARGO_TARGET_DIR honoured)
+    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO_ROOT / "infra/upq/target"))
+    candidates = [os.environ.get("UPQ_BIN", ""), target / "release/upq-service",
+                  target / "debug/upq-service"]
+    upq_bin = next((Path(c) for c in candidates if c and Path(c).exists()),
+                   REPO_ROOT / "infra/upq/target/release/upq-service")
 
     children = [
         Child("upq", [str(upq_bin)], REPO_ROOT / "infra/upq",

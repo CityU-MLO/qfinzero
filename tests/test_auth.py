@@ -135,7 +135,8 @@ def test_roles_cookies_keys_and_header_spoofing(hub):
     client.cookies.clear()
     bearer = {"authorization": f"Bearer {key}"}
     assert client.get("/auth/me", headers=bearer).json()["user"]["username"] == "vic"
-    assert client.get("/auth/me", headers={"authorization": "Bearer qfz_bad_x"}).status_code == 401
+    assert client.get("/auth/me", headers={"authorization": "Bearer qfz_bad_x"}).json()["user"] is None
+    assert client.get("/admin/users", headers={**bearer, "accept": "text/html"}).status_code == 403
 
 
 def test_csrf_and_password_change_invalidate(hub):
@@ -152,7 +153,8 @@ def test_csrf_and_password_change_invalidate(hub):
     assert r.status_code == 200
     client.cookies.clear()
     client.cookies.set("qfz_session", old)
-    assert client.get("/auth/me").status_code == 401     # version bumped
+    assert client.get("/auth/me").json()["user"] is None   # version bumped
+    assert client.get("/svc/upq/health").status_code == 401
 
 
 def test_login_throttle(hub):

@@ -47,7 +47,7 @@ export function LegacyFooter() {
       <hr />
       You are visitor <span className="legacy-counter">00013370</span> &nbsp;|&nbsp;
       <span className="legacy-blink"> &#9679; </span> Made with Notepad &nbsp;|&nbsp; &copy; 2003
-      QFinZero Labs &nbsp;|&nbsp; <a href="/">&laquo; back to the modern site</a>
+      QFinZero Labs &nbsp;|&nbsp; <a href="/chat">&laquo; back to the modern site</a>
       <div style={{ marginTop: 6 }}>
         [&nbsp;
         {SECTION_LINKS.map((l, i) => (

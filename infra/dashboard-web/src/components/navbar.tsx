@@ -5,29 +5,33 @@ import { usePathname } from "next/navigation";
 import { MessageSquare, Database, LineChart, Settings, BookOpen, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLegacySkin } from "@/components/app-providers";
+import { UserMenu, useMe } from "@/components/user-menu";
 
 const ASSAY_URL = process.env.NEXT_PUBLIC_ASSAY_WEB_URL ?? "https://assay.example.com";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Chat", icon: MessageSquare },
-  { href: "/data", label: "Data", icon: Database },
-  { href: "/broker", label: "Broker", icon: LineChart },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/doc", label: "Doc", icon: BookOpen },
+  { href: "/chat", label: "Chat", icon: MessageSquare, admin: false },
+  { href: "/data", label: "Data", icon: Database, admin: true },
+  { href: "/broker", label: "Broker", icon: LineChart, admin: false },
+  { href: "/settings", label: "Settings", icon: Settings, admin: false },
+  { href: "/doc", label: "Doc", icon: BookOpen, admin: false },
 ];
 
 export function Navbar() {
   const legacy = useLegacySkin();
   const pathname = usePathname();
+  const { data: me } = useMe();
+  // Without the hub (no /auth) everything is shown; with it, admin-only links need admin.
+  const items = NAV_ITEMS.filter((i) => !i.admin || !me || me.role === "admin");
   // Active state compares against the path with any /legacy prefix stripped; links keep
   // the user on the current skin by re-adding the prefix in legacy mode.
   const base = pathname.replace(/^\/legacy(?=\/|$)/, "") || "/";
-  const withSkin = (href: string) => (legacy ? (href === "/" ? "/legacy" : `/legacy${href}`) : href);
+  const withSkin = (href: string) => (legacy ? (href === "/chat" ? "/legacy" : `/legacy${href}`) : href);
 
   return (
     <header className="site-nav mb-6 rounded-2xl border bg-white/80 p-4 backdrop-blur shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3" title="QFinZero home">
           <div className="nav-logo flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-emerald-500 text-white font-bold">
             Q
           </div>
@@ -37,10 +41,10 @@ export function Navbar() {
             </p>
             <h1 className="text-xl font-bold text-primary tracking-tight leading-none">Console</h1>
           </div>
-        </div>
+        </Link>
         <nav className="flex flex-wrap items-center gap-1.5">
-          {NAV_ITEMS.map((item) => {
-            const isActive = item.href === "/" ? base === "/" : base.startsWith(item.href);
+          {items.map((item) => {
+            const isActive = item.href === "/chat" ? base === "/chat" || base === "/" : base.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -67,6 +71,7 @@ export function Navbar() {
             Assay
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
+          <UserMenu className="ml-1 border-l pl-2" />
         </nav>
       </div>
     </header>

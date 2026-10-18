@@ -105,7 +105,10 @@ def build_router(store_factory, secret_factory) -> APIRouter:
 
     @r.get("/me")
     def whoami(request: Request):
-        user = me(request)
+        """The signed-in user, or ``{"user": null}`` (public, so the site can ask)."""
+        user = getattr(request.state, "user", None)
+        if user is None:
+            return {"user": None}
         return {"user": user.public(), "via": getattr(request.state, "auth_via", "")}
 
     @r.post("/password")

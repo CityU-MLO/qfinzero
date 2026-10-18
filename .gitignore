@@ -31,6 +31,8 @@ env/
 dist/
 build/
 data/
+# ...but not the console's /data page (a Next.js route directory)
+!infra/dashboard-web/src/app/(console)/data/
 runs/
 logs/
 node_modules/
