@@ -56,7 +56,7 @@ The sample is a fictional market: 20 tickers on the real NYSE calendar for
   earnings after that day's close, so its price gaps the next morning.
 - **News** and **Calendar**: search `ACME`, or open the earnings calendar for
   March 2025.
-- **Coverage**: which data exists per ticker and day, with news, earnings and
+- **Data availability**: which data exists per ticker and day, with news, earnings and
   macro releases on the same axis; click a cell for the details of that day.
 - **Chat**: first add a model group under *Settings* (gear icon): choose
   OpenAI, Claude or Gemini · Antigravity, enter the base URL and key, and fetch
@@ -103,8 +103,10 @@ To evaluate a model instead, see [Agent benchmark](bench.md).
 
 ## 5. Use your own data
 
-Convert vendor files with `qfz-data` into a data root, then start the hub with
-`QFZ_DATA_ROOT` pointing at it. [Data adapters](data-adapters.md) covers
+Open **Data setup** (admins) to import Databento or massive files already on
+the server, or to download with your key; see [Data setup utility](data-setup.md).
+From the command line, `qfz-data` does the same, and `QFZ_DATA_ROOT` points the
+hub at a data root. [Data adapters](data-adapters.md) covers
 massive, Tushare and Databento. [Configuration](configuration.md) lists every
 setting, and [Deployment and operations](operations.md) covers running
 QFinZero for a team.

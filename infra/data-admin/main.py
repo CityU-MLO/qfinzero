@@ -190,6 +190,83 @@ def explore_symbols(
     return explore.store_symbols(store, limit=limit, start=start, end=end)
 
 
+# ── data setup utility: browse / inspect / import local files, download + convert ──
+def _setup_error(e: Exception):
+    if isinstance(e, PermissionError):
+        raise HTTPException(status_code=403, detail=str(e))
+    if isinstance(e, (FileNotFoundError, NotADirectoryError)):
+        raise HTTPException(status_code=404, detail=str(e))
+    raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.get("/setup/status")
+def setup_status() -> dict:
+    from qfinzero.admin import datasetup, massive_dl
+    return {**datasetup.status(), "massive_indices": list(massive_dl.INDICES)}
+
+
+@app.get("/setup/browse")
+def setup_browse(path: str | None = None, hidden: bool = False) -> dict:
+    from qfinzero.admin import datasetup
+    try:
+        return datasetup.browse(path, show_hidden=hidden)
+    except (PermissionError, FileNotFoundError, NotADirectoryError, ValueError) as e:
+        _setup_error(e)
+
+
+@app.post("/setup/inspect")
+def setup_inspect(body: dict = Body(...)) -> dict:
+    from qfinzero.admin import datasetup
+    try:
+        return datasetup.inspect(str(body.get("vendor", "")), list(body.get("paths") or []))
+    except (PermissionError, FileNotFoundError, ValueError) as e:
+        _setup_error(e)
+
+
+@app.post("/setup/import")
+def setup_import(body: dict = Body(...)) -> dict:
+    from qfinzero.admin import datasetup
+    vendor = str(body.get("vendor", ""))
+    paths = list(body.get("paths") or [])
+    if vendor not in datasetup.VENDORS or not paths:
+        raise HTTPException(422, "vendor and at least one path are required")
+    try:
+        for p in paths:
+            datasetup._allowed(datasetup.Path(p))
+    except PermissionError as e:
+        _setup_error(e)
+    convert, jobs = bool(body.get("convert", True)), int(body.get("jobs", 4))
+
+    def _task(job):
+        return datasetup.import_local(vendor, paths, on_line=job.log, convert=convert, jobs=jobs)
+
+    return registry.submit("import", f"import {vendor} ({len(paths)} selection(s))", _task).snapshot()
+
+
+@app.post("/setup/download")
+def setup_download(body: dict = Body(...)) -> dict:
+    """``dry_run`` (default) answers at once with the quote; otherwise a job."""
+    from qfinzero.admin import datasetup
+    vendor = str(body.get("vendor", ""))
+    params = body.get("params") or {}
+    dry_run = bool(body.get("dry_run", True))
+    if vendor not in datasetup.VENDORS:
+        raise HTTPException(422, f"vendor must be one of {datasetup.VENDORS}")
+    if dry_run:
+        lines: list[str] = []
+        try:
+            res = datasetup.download(vendor, params, dry_run=True, on_line=lines.append)
+        except Exception as e:  # noqa: BLE001 — bad parameters or credentials
+            return {"ok": False, "error": f"{type(e).__name__}: {e}", "lines": lines}
+        return {**res, "lines": lines}
+    convert, jobs = bool(body.get("convert", True)), int(body.get("jobs", 4))
+
+    def _task(job):
+        return datasetup.download(vendor, params, dry_run=False, convert=convert, on_line=job.log, jobs=jobs)
+
+    return registry.submit("download", f"download {vendor}", _task).snapshot()
+
+
 # ── coverage map (read-only; the hub lets every signed-in user GET it via /api/coverage) ──
 @app.get("/coverage/extent")
 def coverage_extent() -> dict:

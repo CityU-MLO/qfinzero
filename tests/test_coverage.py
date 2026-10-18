@@ -70,9 +70,15 @@ def test_cell_detail(root):
 
 def test_suggest_and_limits(root):
     top = C.suggest(limit=3, root=root)
-    assert len(top) == 3 and top[0]["volume"] >= top[1]["volume"]
+    assert len(top) == 3 and top[0]["dollar_volume"] >= top[1]["dollar_volume"]
+    assert top[0]["ticker"] == "QZSP"            # the $520 ETF trades the most dollars
     assert [t["ticker"] for t in C.suggest("QZ", root=root)] == ["QZSP"]
     with pytest.raises(ValueError):
         C.matrix(["ACME"], "2025-03-01", "2025-01-01", root)
     with pytest.raises(ValueError):
         C.matrix(["ACME"], "2020-01-01", "2025-01-01", root)
+
+
+def test_service_error_messages_are_unwrapped():
+    assert C._msg(RuntimeError("{'detail': 'News store unavailable'}")) == "News store unavailable"
+    assert C._msg(RuntimeError("plain")) == "plain"

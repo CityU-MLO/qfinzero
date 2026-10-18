@@ -33,6 +33,7 @@ LEVELS = (
 OPTION_STORES = {"option_day", "option_minute", "option_quote_minute"}
 SESSIONS = ("overnight", "pre", "regular", "post")
 MAX_DAYS = 800
+CACHE_VERSION = 2   # bump when a summary gains fields
 MAX_TICKERS = 60
 
 # ET minute of day -> session (holiday early closes are not distinguished here)
@@ -88,9 +89,11 @@ def _summarize(store: str, files: list[Path]) -> dict[str, dict]:
                 e["volume"] += int(v or 0)
                 e["sessions"][s] = int(n)
             return out
-        vol = "sum(volume)" if store == "stock_daily" else "NULL"
-        rows = con.execute(f"SELECT ticker, count(*), {vol} FROM {src} GROUP BY 1").fetchall()
-        return {t: {"rows": int(n), **({"volume": int(v)} if v is not None else {})} for t, n, v in rows}
+        if store == "stock_daily":
+            rows = con.execute(f"SELECT ticker, count(*), sum(volume), sum(close * volume) FROM {src} GROUP BY 1").fetchall()
+            return {t: {"rows": int(n), "volume": int(v or 0), "dollar_volume": float(dv or 0)} for t, n, v, dv in rows}
+        rows = con.execute(f"SELECT ticker, count(*) FROM {src} GROUP BY 1").fetchall()
+        return {t: {"rows": int(n)} for t, n in rows}
     finally:
         con.close()
 
@@ -103,7 +106,7 @@ def day_summary(store: str, d: str, root: Optional[Path] = None) -> dict[str, di
     if not files:
         return {}
     stats = [f.stat() for f in files]
-    fingerprint = [max(s.st_mtime_ns for s in stats), sum(s.st_size for s in stats), len(stats)]
+    fingerprint = [CACHE_VERSION, max(s.st_mtime_ns for s in stats), sum(s.st_size for s in stats), len(stats)]
     cache = _cache_file(store, d, root)
     try:
         cached = json.loads(cache.read_text())
@@ -181,15 +184,16 @@ def matrix(tickers: list[str], start: str, end: str, root: Optional[Path] = None
 
 
 def suggest(prefix: str = "", limit: int = 20, root: Optional[Path] = None) -> list[dict]:
-    """Most-traded tickers on the latest daily partition, optionally by prefix."""
+    """Tickers with the largest dollar volume on the latest daily partition, optionally by prefix."""
     root = root or _storage()
     ds = _dates("stock_daily", "0000", "9999", root)
     if not ds:
         return []
     s = day_summary("stock_daily", ds[-1], root)
     p = prefix.strip().upper()
-    rows = sorted(((t, v.get("volume", 0)) for t, v in s.items() if t.startswith(p)), key=lambda x: -x[1])
-    return [{"ticker": t, "volume": v} for t, v in rows[:limit]]
+    rows = sorted(((t, v.get("dollar_volume", v.get("volume", 0)), v.get("volume", 0)) for t, v in s.items()
+                   if t.startswith(p)), key=lambda x: -x[1])
+    return [{"ticker": t, "dollar_volume": dv, "volume": v} for t, dv, v in rows[:limit]]
 
 
 def cell(ticker: str, d: str, root: Optional[Path] = None) -> dict[str, Any]:
@@ -283,6 +287,13 @@ def _esp():
     return ESPClient(ESP_URL, timeout=30)
 
 
+def _msg(e: Exception) -> str:
+    """A service error without its JSON wrapping ("{'detail': 'x'}" -> "x")."""
+    import re as _re
+    m = _re.search(r"""['"](?:detail|message|error)['"]\s*:\s*['"]([^'"]+)['"]""", str(e))
+    return m.group(1) if m else str(e)
+
+
 def _paged(fetch, limit: int = 2000) -> list[dict]:
     out, cursor = [], None
     while len(out) < limit:
@@ -319,7 +330,7 @@ def events(tickers: list[str], start: str, end: str) -> dict[str, Any]:
             for row in r.get("counts", []):
                 out["news"].setdefault(row["ticker"], {})[row["date"]] = row["count"]
         except Exception as e:  # noqa: BLE001
-            out["notes"].append(f"news: {e}")
+            out["notes"].append(f"news: {_msg(e)}")
         try:
             evs = _paged(lambda c: esp.earnings_calendar(start_date=start, end_date=end, tickers=tickers,
                                                          limit=500, cursor=c))
@@ -332,7 +343,7 @@ def events(tickers: list[str], start: str, end: str) -> dict[str, Any]:
                             "status": ev.get("status"), "actual_eps": p.get("actual_eps"),
                             "estimated_eps": p.get("estimated_eps")})
         except Exception as e:  # noqa: BLE001
-            out["notes"].append(f"earnings: {e}")
+            out["notes"].append(f"earnings: {_msg(e)}")
         try:
             evs = _paged(lambda c: esp.econ_calendar(start_date=start, end_date=end, limit=500, cursor=c))
             out["macro"] = [{"date": _et_date(ev["time_utc"]), "time_utc": ev["time_utc"], "title": ev["title"],
@@ -340,7 +351,7 @@ def events(tickers: list[str], start: str, end: str) -> dict[str, Any]:
                              "consensus": (ev.get("payload") or {}).get("consensus")}
                             for ev in evs if ev.get("importance") in ("high", "medium")]
         except Exception as e:  # noqa: BLE001
-            out["notes"].append(f"macro: {e}")
+            out["notes"].append(f"macro: {_msg(e)}")
     return out
 
 
@@ -363,5 +374,5 @@ def day_events(ticker: str, d: str) -> dict[str, Any]:
                             "publisher": (n.get("payload") or {}).get("publisher"),
                             "url": (n.get("payload") or {}).get("article_url")} for n in r.get("events", [])]
     except Exception as e:  # noqa: BLE001
-        out["notes"].append(f"news: {e}")
+        out["notes"].append(f"news: {_msg(e)}")
     return out

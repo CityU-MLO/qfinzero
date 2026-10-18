@@ -43,7 +43,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY qfinzero/ qfinzero/
 COPY clients/ clients/
-RUN pip install ".[server,pipeline]" && pip uninstall -y qfinzero && rm -rf qfinzero clients
+RUN pip install ".[server,pipeline,databento,massive]" && pip uninstall -y qfinzero && rm -rf qfinzero clients
 COPY --chown=qfz . .
 RUN pip install --no-deps -e .
 COPY --chown=qfz --from=upq /upq-service infra/upq/target/release/upq-service

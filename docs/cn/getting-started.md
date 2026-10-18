@@ -47,7 +47,7 @@ QFZ_DATA_ROOT=./qfz-sample QFZ_ADMIN_PASSWORD='设置一个足够长的密码' q
   点 *开盘* 后时钟逐分钟推进，可在下单面板下市价或限价单。ACME 在当天收盘后发布财报，
   次日早盘会出现跳空。
 - **新闻** 和 **日历**：搜索 `ACME`，或打开 2025 年 3 月的财报日历。
-- **数据覆盖**：按代码和日期查看有哪些数据，新闻、财报和宏观数据显示在同一时间轴上；点击单元格查看当天详情。
+- **数据可用性**：按代码和日期查看有哪些数据，新闻、财报和宏观数据显示在同一时间轴上；点击单元格查看当天详情。
 - **对话**：先在 *设置*（齿轮图标）中添加模型分组：选择 OpenAI、Claude 或 Gemini · Antigravity，
   填写 base URL 和密钥，再获取模型列表。也可以直接导入 Claude Code 的 `settings.json`、
   `export ANTHROPIC_*` 环境变量或 Codex 的 `config.toml`。对话 agent 使用的 MCP 工具与外部 agent 相同。
@@ -89,6 +89,7 @@ qfz-bench oracle --hub http://127.0.0.1:19777
 
 ## 5. 使用自己的数据
 
-用 `qfz-data` 把供应商文件转换到一个数据根目录，再让 `QFZ_DATA_ROOT` 指向它启动 hub。
+打开 **数据导入**（管理员）可导入服务器上已有的 Databento 或 massive 文件，或用你的密钥下载，见
+[数据导入工具](data-setup.md)。命令行中 `qfz-data` 可完成同样的工作，`QFZ_DATA_ROOT` 用于指定 hub 的数据根目录。
 [数据适配器](data-adapters.md) 介绍 massive、Tushare 和 Databento；[配置](configuration.md)
 列出所有设置；[部署与运维](operations.md) 介绍如何为团队运行 QFinZero。

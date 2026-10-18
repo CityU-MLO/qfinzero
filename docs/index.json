@@ -19,6 +19,7 @@
         { "slug": "broker-terminal", "title": { "en": "Broker terminal", "zh": "交易终端" }, "en": "docs/en/pmb/broker-terminal.md", "zh": "docs/cn/pmb/broker-terminal.md" },
         { "slug": "benchmark", "title": { "en": "Agent benchmark", "zh": "Agent 基准测试" }, "en": "docs/en/bench.md", "zh": "docs/cn/bench.md" },
         { "slug": "sample-data", "title": { "en": "Sample dataset", "zh": "样本数据集" }, "en": "docs/en/sample-data.md", "zh": "docs/cn/sample-data.md" },
+        { "slug": "data-setup", "title": { "en": "Data setup utility", "zh": "数据导入工具" }, "en": "docs/en/data-setup.md", "zh": "docs/cn/data-setup.md" },
         { "slug": "data-adapters", "title": { "en": "Data adapters", "zh": "数据适配器" }, "en": "docs/en/data-adapters.md", "zh": "docs/cn/data-adapters.md" }
       ]
     },

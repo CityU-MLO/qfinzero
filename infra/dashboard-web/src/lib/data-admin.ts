@@ -83,6 +83,16 @@ export const dataAdmin = {
   applySchedule: (dry_run = false) => j<{ ok: boolean; installed: boolean; crontab?: string; error?: string }>("data/schedule/apply", { method: "POST", body: JSON.stringify({ dry_run }) }),
   clearSchedule: () => j<{ ok: boolean; error?: string }>("data/schedule/clear", { method: "POST", body: "{}" }),
   explore: () => j<ExploreOverview>("data/explore"),
+  // data setup utility
+  setupStatus: () => j<SetupStatus>("setup/status"),
+  browse: (path?: string | null) => j<BrowseResult>(`setup/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  inspect: (vendor: Vendor, paths: string[]) => j<InspectResult>("setup/inspect", { method: "POST", body: JSON.stringify({ vendor, paths }) }),
+  importLocal: (vendor: Vendor, paths: string[], convert = true, jobs = 4) =>
+    j<Job>("setup/import", { method: "POST", body: JSON.stringify({ vendor, paths, convert, jobs }) }),
+  quote: (vendor: Vendor, params: Record<string, unknown>) =>
+    j<DownloadQuote>("setup/download", { method: "POST", body: JSON.stringify({ vendor, params, dry_run: true }) }),
+  download: (vendor: Vendor, params: Record<string, unknown>, convert = true) =>
+    j<Job>("setup/download", { method: "POST", body: JSON.stringify({ vendor, params, dry_run: false, convert }) }),
   symbols: (store: string, limit = 200) => j<SymbolsResult>(`data/explore/symbols?store=${store}&limit=${limit}`),
 };
 
@@ -125,3 +135,47 @@ export function streamJobLogs(
   es.onerror = () => es.close();
   return () => es.close();
 }
+
+// ── data setup utility ─────────────────────────────────────────────────────
+
+export type Vendor = "databento" | "massive";
+
+export type SetupStatus = {
+  storage_root: string;
+  libraries: Record<Vendor, string>;
+  roots: string[];
+  credentials: Record<Vendor, boolean>;
+  massive_endpoint?: string;
+  massive_indices: string[];
+  today: string;
+};
+
+export type BrowseEntry = { name: string; path: string; dir: boolean; size?: number | null; mtime?: number; hint?: string | null };
+export type BrowseResult = { path: string | null; parent: string | null; roots: string[]; entries: BrowseEntry[]; truncated?: boolean };
+
+export type InspectResult = {
+  vendor: Vendor;
+  files: number;
+  bytes?: number;
+  ignored?: number;
+  described?: number;
+  convertible_files?: number;
+  start?: string;
+  end?: string;
+  first_error?: string;
+  groups: {
+    index?: string; asset?: string | null; resolution?: string; dataset?: string; schema?: string; role?: string;
+    files: number; csv?: number; bytes?: number; convertible?: boolean; start?: string | null; end?: string | null; errors?: number;
+  }[];
+};
+
+export type DownloadQuote = {
+  ok: boolean;
+  error?: string;
+  lines?: string[];
+  files?: number;
+  missing?: number;
+  bytes?: number;
+  cost_usd?: number;
+  [k: string]: unknown;
+};
