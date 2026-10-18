@@ -59,6 +59,11 @@ Added:
   manual compaction, a context meter, stopping an answer (kept as interrupted),
   answers that survive closing the page, Markdown export, and a run inspector
   with the tool-call record, a flow graph and a timeline.
+- Data availability on a continuous calendar with stock and futures groups
+  (futures as `/ROOT`), expandable layers (stock data, options, news, company
+  events), a macro lane, a draggable overview of the whole history and an
+  asset panel; broker accounts with futures margin settings and a session
+  calendar that marks the days with data.
 - Model groups for Chat: OpenAI, Claude and Gemini via Antigravity endpoints,
   model lists fetched from `/models`, import of Claude Code settings, export
   lines or Codex `config.toml`, and JSON import / export.

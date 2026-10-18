@@ -92,3 +92,15 @@ def test_days_and_day_summary_for_date_pickers(root):
     d = C.day(str(MINUTE_WINDOW[3]), top=3, root=root)
     assert d["levels"]["minute"]["tickers"] >= 3 and len(d["levels"]["minute"]["top"]) == 3
     assert d["levels"]["futures_minute"] is None
+
+
+def test_asset_detail_and_kinds(root):
+    a = C.asset("acme", str(DAYS[0]), str(DAYS[-1]), root)
+    assert a["kind"] == "stock" and a["levels"]["daily"]["days"] == len(DAYS)
+    assert a["levels"]["daily"]["first"] == str(DAYS[0]) and a["levels"]["futures_daily"] is None
+    assert len(a["series"]) == len(DAYS) and a["series"][0]["close"] > 0
+    m = C.matrix(["ACME", "/ACME"], str(DAYS[0]), str(DAYS[1]), root)
+    assert m["kinds"] == {"ACME": "stock", "/ACME": "future"}
+    assert m["cells"]["/ACME"] == {} and m["cells"]["ACME"]          # a slash reads the futures stores only
+    cell = C.cell("ACME", str(DAYS[1]), root)
+    assert cell["kind"] == "stock" and cell["daily_bar"]["close"] > 0

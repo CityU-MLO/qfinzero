@@ -34,6 +34,18 @@ LEVELS = (
     ("futures_quotes", "future_quote_minute"),
 )
 OPTION_STORES = {"option_day", "option_minute", "option_quote_minute"}
+FUTURE_LEVELS = {"futures_daily", "futures_minute", "futures_quotes"}
+STOCK_LEVELS = {lv for lv, _ in LEVELS} - FUTURE_LEVELS
+# A future is written with a leading slash (/CL, /ZNZ6): futures roots clash with
+# stock tickers (CL is also Colgate-Palmolive), so the slash picks the store.
+FUTURE_PREFIX = "/"
+
+
+def split_ticker(t: str) -> tuple[str, bool]:
+    """``(store ticker, is_future)`` for a map ticker."""
+    t = t.strip().upper()
+    return (t[1:], True) if t.startswith(FUTURE_PREFIX) else (t, False)
+
 SESSIONS = ("overnight", "pre", "regular", "post")
 MAX_DAYS = 800
 CACHE_VERSION = 2   # bump when a summary gains fields
@@ -185,18 +197,22 @@ def matrix(tickers: list[str], start: str, end: str, root: Optional[Path] = None
     if (d1 - d0).days > MAX_DAYS:
         raise ValueError(f"range longer than {MAX_DAYS} days")
     jobs = [(level, store, d) for level, store in LEVELS for d in _dates(store, start, end, root)]
-    want = set(tickers)
+    split = {t: split_ticker(t) for t in tickers}
 
     def run(job):
         level, store, d = job
         s = day_summary(store, d, root)
-        return level, d, {t: s[t] for t in want if t in s}
+        fut = level in FUTURE_LEVELS
+        return level, d, {t: s[name] for t, (name, f) in split.items() if f == fut and name in s}
 
     with _lock, ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(run, jobs))
     days = sorted({d for _, _, d in jobs})
     cells: dict[str, dict[str, dict]] = {t: {} for t in tickers}
+    seen: dict[str, set] = {t: set() for t in tickers}
     for level, d, found in results:
+        for t in found:
+            seen[t].add(level)
         for t, info in found.items():
             c = cells[t].setdefault(d, {})
             c[level] = info["rows"]
@@ -204,17 +220,66 @@ def matrix(tickers: list[str], start: str, end: str, root: Optional[Path] = None
                 c["sessions"] = info["sessions"]
             if level == "options_eod":
                 c["contracts"] = info.get("contracts", 0)
-    return {"tickers": tickers, "days": days, "levels": [lv for lv, _ in LEVELS], "cells": cells}
+    kinds = {t: "future" if split[t][1] else "stock" for t in tickers}
+    return {"tickers": tickers, "days": days, "levels": [lv for lv, _ in LEVELS], "cells": cells, "kinds": kinds}
+
+
+def suggest_futures(limit: int = 8, root: Optional[Path] = None) -> list[str]:
+    """Futures on the last 30 futures daily partitions, the most frequent first."""
+    root = root or _storage()
+    seen: dict[str, int] = {}
+    for d in _dates("future_daily", "0000", "9999", root)[-30:]:
+        for t in day_summary("future_daily", d, root):
+            seen[t] = seen.get(t, 0) + 1
+    return [FUTURE_PREFIX + t for t, _ in sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))][:limit]
+
+
+def asset(ticker: str, start: str, end: str, root: Optional[Path] = None) -> dict[str, Any]:
+    """One ticker over a range: per level the first and last day and how many
+    days have data, the daily closes, and for futures the other series of
+    the product."""
+    root = root or _storage()
+    t, is_future = split_ticker(ticker)
+    levels: dict[str, Any] = {}
+    for level, store in LEVELS:
+        if (level in FUTURE_LEVELS) != is_future:
+            levels[level] = None
+            continue
+        hit = [d for d in _dates(store, start, end, root) if t in day_summary(store, d, root)]
+        levels[level] = {"first": hit[0], "last": hit[-1], "days": len(hit)} if hit else None
+    store, price = ("future_daily", "settle") if is_future else ("stock_daily", "close")
+    base = root / store
+    series: list[dict] = []
+    if base.is_dir():
+        glob = _lit(base / "trade_date=*" / "*.parquet")
+        rows = _query(f"SELECT CAST(trade_date AS VARCHAR), {price}, volume FROM read_parquet('{glob}', "
+                      f"hive_partitioning=false, union_by_name=true) WHERE ticker = ? AND trade_date BETWEEN ? AND ? "
+                      f"ORDER BY 1", [t, date.fromisoformat(start), date.fromisoformat(end)])
+        series = [{"date": d, "close": float(c) if c is not None else None, "volume": int(v or 0)} for d, c, v in rows]
+    related: list[str] = []
+    if is_future:
+        ds = _dates("future_daily", start, end, root)
+        if ds:
+            glob = _lit(root / "future_daily" / "trade_date=*" / "*.parquet")
+            related = [r[0] for r in _query(
+                f"SELECT DISTINCT ticker FROM read_parquet('{glob}', hive_partitioning=false, union_by_name=true) "
+                f"WHERE root = (SELECT any_value(root) FROM read_parquet('{glob}', hive_partitioning=false, "
+                f"union_by_name=true) WHERE ticker = ?) ORDER BY 1", [t])]
+    return {"ticker": ticker.strip().upper(), "kind": "future" if is_future else "stock", "start": start, "end": end,
+            "levels": levels, "series": series, "related": [FUTURE_PREFIX + r for r in related if r != t]}
 
 
 def suggest(prefix: str = "", limit: int = 20, root: Optional[Path] = None) -> list[dict]:
     """Tickers with the largest dollar volume on the latest daily partition, optionally by prefix."""
     root = root or _storage()
+    p = prefix.strip().upper()
+    if p.startswith(FUTURE_PREFIX):
+        return [{"ticker": f, "dollar_volume": 0, "volume": 0}
+                for f in suggest_futures(100, root) if f.startswith(p)][:limit]
     ds = _dates("stock_daily", "0000", "9999", root)
     if not ds:
         return []
     s = day_summary("stock_daily", ds[-1], root)
-    p = prefix.strip().upper()
     rows = sorted(((t, v.get("dollar_volume", v.get("volume", 0)), v.get("volume", 0)) for t, v in s.items()
                    if t.startswith(p)), key=lambda x: -x[1])
     return [{"ticker": t, "dollar_volume": dv, "volume": v} for t, dv, v in rows[:limit]]
@@ -223,16 +288,16 @@ def suggest(prefix: str = "", limit: int = 20, root: Optional[Path] = None) -> l
 def cell(ticker: str, d: str, root: Optional[Path] = None) -> dict[str, Any]:
     """Everything stored for one ticker on one day."""
     root = root or _storage()
-    t = ticker.strip().upper()
-    out: dict[str, Any] = {"ticker": t, "date": d, "levels": {}}
+    t, is_future = split_ticker(ticker)
+    out: dict[str, Any] = {"ticker": ticker.strip().upper(), "date": d, "levels": {}}
     for level, store in LEVELS:
-        info = day_summary(store, d, root).get(t)
-        out["levels"][level] = info
-    out["daily_bar"] = _daily_bar(t, d, root)
-    out["minute_span"] = _span("stock_minute", "ticker", t, d, root)
-    out["quote_span"] = _span("stock_quote_minute", "ticker", t, d, root)
-    out["option_expiries"] = _expiries(t, d, root)
-    out["corporate_actions"] = _corporate_actions(t, d, root)
+        out["levels"][level] = day_summary(store, d, root).get(t) if (level in FUTURE_LEVELS) == is_future else None
+    out["kind"] = "future" if is_future else "stock"
+    out["daily_bar"] = _daily_bar(t, d, root, "future_daily" if is_future else "stock_daily")
+    out["minute_span"] = _span("future_minute" if is_future else "stock_minute", "ticker", t, d, root)
+    out["quote_span"] = _span("future_quote_minute" if is_future else "stock_quote_minute", "ticker", t, d, root)
+    out["option_expiries"] = [] if is_future else _expiries(t, d, root)
+    out["corporate_actions"] = [] if is_future else _corporate_actions(t, d, root)
     return out
 
 
@@ -255,13 +320,14 @@ def _files(store: str, d: str, root: Path) -> Optional[str]:
     return "read_parquet([" + ",".join(f"'{_lit(f)}'" for f in files) + "], union_by_name=true)"
 
 
-def _daily_bar(t: str, d: str, root: Path) -> Optional[dict]:
-    src = _files("stock_daily", d, root)
-    rows = _query(f"SELECT open, high, low, close, volume FROM {src} WHERE ticker = ?", [t]) if src else []
+def _daily_bar(t: str, d: str, root: Path, store: str = "stock_daily") -> Optional[dict]:
+    src = _files(store, d, root)
+    settle = "settle" if store == "future_daily" else "NULL"
+    rows = _query(f"SELECT open, high, low, close, volume, {settle} FROM {src} WHERE ticker = ?", [t]) if src else []
     if not rows:
         return None
-    o, h, lo, c, v = rows[0]
-    return {"open": o, "high": h, "low": lo, "close": c, "volume": int(v)}
+    o, h, lo, c, v, s = rows[0]
+    return {"open": o, "high": h, "low": lo, "close": c, "volume": int(v), **({"settle": s} if s is not None else {})}
 
 
 def _span(store: str, col: str, t: str, d: str, root: Path) -> Optional[dict]:
@@ -340,7 +406,7 @@ def events(tickers: list[str], start: str, end: str) -> dict[str, Any]:
 
     Each part degrades to empty (with a note) when ESP or that store is unavailable.
     """
-    tickers = [t.strip().upper() for t in tickers if t.strip()][:MAX_TICKERS]
+    tickers = [t.strip().upper() for t in tickers if t.strip() and not t.strip().startswith(FUTURE_PREFIX)][:MAX_TICKERS]
     out: dict[str, Any] = {"news": {t: {} for t in tickers}, "earnings": {t: [] for t in tickers},
                            "macro": [], "notes": []}
     try:
@@ -390,6 +456,8 @@ def day_events(ticker: str, d: str) -> dict[str, Any]:
     ev = events([t], d, d)
     out: dict[str, Any] = {"earnings": ev["earnings"].get(t, []), "macro": ev["macro"], "news": [],
                            "notes": ev["notes"]}
+    if t.startswith(FUTURE_PREFIX):        # no ticker news for futures
+        return out
     try:
         with _esp() as esp:
             r = esp.search_news(tickers=[t], start_utc=lo.astimezone(timezone.utc).isoformat(),

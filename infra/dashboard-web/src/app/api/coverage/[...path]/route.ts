@@ -7,7 +7,7 @@ import { identityHeaders } from "@/lib/identity";
 // /api/data-admin (admins only) every signed-in user may read it.
 export const dynamic = "force-dynamic";
 
-const ALLOWED = new Set(["extent", "matrix", "cell", "suggest", "days", "day"]);
+const ALLOWED = new Set(["extent", "matrix", "cell", "suggest", "days", "day", "asset"]);
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;

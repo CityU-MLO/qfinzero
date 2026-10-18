@@ -56,8 +56,14 @@ The sample is a fictional market: 20 tickers on the real NYSE calendar for
   earnings after that day's close, so its price gaps the next morning.
 - **News** and **Calendar**: search `ACME`, or open the earnings calendar for
   March 2025.
-- **Data availability**: which data exists per ticker and day, with news, earnings and
-  macro releases on the same axis; click a cell for the details of that day.
+- **Data availability**: which data exists per ticker and day on a continuous
+  calendar (days without data stay empty, weekends are blank). Stocks and
+  futures are two groups; write a future with a slash (`/CL`, `/ZN`), since roots
+  clash with stock tickers. Expand a stock (▸) for its layers: stock data,
+  options, news and company events; macro releases have their own lane. Drag
+  the window in the overview below the map to move through the history, click
+  a cell for that day and a ticker for the asset (levels, closes or settles,
+  other series of a future).
 - **Chat**: first add a model group under *Settings* (gear icon): choose
   OpenAI, Claude or Gemini · Antigravity, enter the base URL and key, and fetch
   the models. A Claude Code `settings.json`, `export ANTHROPIC_*` lines or a

@@ -277,7 +277,7 @@ def coverage_extent() -> dict:
     from qfinzero.admin import coverage
     start, end = coverage.default_range()
     return {"stores": coverage.extent(), "default": {"start": start, "end": end},
-            "suggested": coverage.suggest(limit=12)}
+            "suggested": coverage.suggest(limit=12), "suggested_futures": coverage.suggest_futures()}
 
 
 @app.get("/coverage/matrix")
@@ -300,6 +300,12 @@ def coverage_cell(ticker: str = Query(...), date: str = Query(...)) -> dict:
     out = coverage.cell(ticker, date)
     out["events"] = coverage.day_events(ticker, date)
     return out
+
+
+@app.get("/coverage/asset")
+def coverage_asset(ticker: str = Query(...), start: str = Query(...), end: str = Query(...)) -> dict:
+    from qfinzero.admin import coverage
+    return coverage.asset(ticker, start, end)
 
 
 @app.get("/coverage/days")
