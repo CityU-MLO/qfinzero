@@ -134,9 +134,9 @@ class ESPClient:
             body["now_utc"] = now_utc
         return self._post("/esp/events/query", body)
 
-    def get_event(self, event_id: str) -> dict:
-        """Get a single event by its event_id."""
-        return self._get(f"/esp/events/{event_id}")
+    def get_event(self, event_id: str, now_utc: str = None) -> dict:
+        """Get a single event by its event_id, as known at ``now_utc`` (default: now)."""
+        return self._get(f"/esp/events/{event_id}", {"now_utc": now_utc} if now_utc else None)
 
     def stream(
         self,
@@ -274,14 +274,14 @@ class ESPClient:
 
     # ── News ──────────────────────────────────────────────────────
 
-    def news_body(self, news_id: str) -> dict:
+    def news_body(self, news_id: str, now_utc: str = None) -> dict:
         """Fetch full news article body by ID.
 
         Returns:
             dict with news_id, title, description, article_url, published_utc,
             tickers, author, keywords, image_url, publisher, insights
         """
-        return self._get(f"/esp/news/{news_id}/body")
+        return self._get(f"/esp/news/{news_id}/body", {"now_utc": now_utc} if now_utc else None)
 
     def search_news(
         self,
@@ -292,6 +292,7 @@ class ESPClient:
         publisher: str = None,
         limit: int = 50,
         cursor: str = None,
+        now_utc: str = None,
     ) -> dict:
         """Search news with keyword and publisher filtering.
 
@@ -303,11 +304,14 @@ class ESPClient:
             publisher: Case-insensitive substring search in publisher name
             limit: Max events per page (1-500)
             cursor: Pagination cursor from previous response
+            now_utc: Replay time; articles published later are hidden
 
         Returns:
             dict with server_time_utc, events, next_cursor
         """
         body = {"limit": limit}
+        if now_utc:
+            body["now_utc"] = now_utc
         if tickers:
             body["tickers"] = tickers
         if start_utc:

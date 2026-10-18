@@ -1,13 +1,21 @@
 """
 Data source connectors for ESP.
 
-Three async connectors that normalise raw rows into the canonical Event schema:
-  - MongoNewsSource  (motor / MongoDB)
+Async connectors that normalise raw rows into the canonical Event schema:
+  - MongoNewsSource   (motor / MongoDB)
+  - SQLiteNewsSource  (aiosqlite; same interface, used by the synthetic sample
+                       and for deployments without MongoDB)
   - SQLiteEarningsSource  (aiosqlite)
   - SQLiteEconEventsSource (aiosqlite)
+
+Point in time: earnings and macro results (actual EPS, actual prints) are
+returned only when the event's time is not after the query's ``now_utc``;
+before that the event is SCHEDULED with its actuals blanked.
 """
 
+import json
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -16,6 +24,7 @@ from typing import Any, Optional
 import html as html_mod
 
 from models import Event, EventType, EventStatus, Importance
+from qfinzero.esp_schema import NEWS_SCHEMA  # noqa: F401  (documented on SQLiteNewsSource)
 
 logger = logging.getLogger("esp.data_sources")
 
@@ -67,6 +76,18 @@ def _parse_utc(s: str) -> datetime:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _known_at(event_utc: datetime, now_utc: Optional[datetime]) -> bool:
+    """Whether an event at ``event_utc`` has happened by ``now_utc`` (None = now)."""
+    return now_utc is None or event_utc <= now_utc
+
+
+def _news_end(end_utc: datetime, now_utc: Optional[datetime]) -> datetime:
+    """News published after ``now_utc`` does not exist yet: cap the window end."""
+    if now_utc is None:
+        return end_utc
+    return min(end_utc, now_utc + timedelta(microseconds=1))
 
 
 def _clean_html(s: str) -> str:
@@ -186,7 +207,50 @@ def _cursor_where_sql(cursor: Optional[tuple[str, str]], time_col: str, id_col: 
 # MongoNewsSource
 # =====================================================================
 
+def news_doc_to_event(doc: dict, now_utc: datetime) -> Event:
+    """A news document (Mongo shape) -> Event."""
+    pub_utc = doc.get("published_utc")
+    if isinstance(pub_utc, datetime):
+        if pub_utc.tzinfo is None:
+            pub_utc = pub_utc.replace(tzinfo=timezone.utc)
+    else:
+        pub_utc = _parse_utc(str(pub_utc)) if pub_utc else _utc_now()
+
+    age_hours = (now_utc - pub_utc).total_seconds() / 3600
+    event_type = EventType.BREAKING_NEWS if age_hours < 4 else EventType.DAILY_NEWS
+
+    publisher = doc.get("publisher")
+    pub_name = publisher.get("name") if isinstance(publisher, dict) else None
+
+    return Event(
+        event_id=f"news_{doc['_id']}",
+        event_type=event_type,
+        title=doc.get("title") or "",
+        time_utc=pub_utc.isoformat(),
+        importance=Importance.MEDIUM,
+        status=EventStatus.OCCURRED,
+        tickers=doc.get("tickers") or [],
+        country="US",
+        snippet=(doc.get("description") or "")[:200],
+        payload={
+            "article_url": doc.get("article_url"),
+            "author": doc.get("author"),
+            "publisher": pub_name,
+            "keywords": doc.get("keywords") or [],
+        },
+        source=doc.get("source") or "polygon_news",
+        source_id=str(doc["_id"]),
+    )
+
+
+def _rate(total: int, unique: int) -> dict:
+    return {"total": total, "unique": unique,
+            "duplicate_rate": round((total - unique) / total, 4) if total > 0 else 0.0}
+
+
 class MongoNewsSource:
+    kind = "mongo"
+
     def __init__(self, mongo_uri: str, db_name: str, coll_name: str):
         self._uri = mongo_uri
         self._db_name = db_name
@@ -234,6 +298,7 @@ class MongoNewsSource:
     ) -> list[Event]:
         if not self.available:
             return []
+        end_utc = _news_end(end_utc, now_utc)
 
         query: dict[str, Any] = {
             "published_utc": {"$gte": start_utc, "$lt": end_utc},
@@ -273,6 +338,7 @@ class MongoNewsSource:
     ) -> list[Event]:
         if not self.available:
             return []
+        end_utc = _news_end(end_utc, now_utc)
 
         query: dict[str, Any] = {
             "published_utc": {"$gte": start_utc, "$lt": end_utc},
@@ -308,40 +374,226 @@ class MongoNewsSource:
         return await self._coll.find_one({"_id": news_id})
 
     def _to_event(self, doc: dict, now_utc: datetime) -> Event:
-        pub_utc = doc.get("published_utc")
-        if isinstance(pub_utc, datetime):
-            if pub_utc.tzinfo is None:
-                pub_utc = pub_utc.replace(tzinfo=timezone.utc)
-        else:
-            pub_utc = _parse_utc(str(pub_utc)) if pub_utc else _utc_now()
+        return news_doc_to_event(doc, now_utc)
 
-        age_hours = (now_utc - pub_utc).total_seconds() / 3600
-        event_type = EventType.BREAKING_NEWS if age_hours < 4 else EventType.DAILY_NEWS
+    async def info(self) -> dict:
+        """Latest timestamp, record count and distinct tickers (health page)."""
+        out = {"latest_timestamp": None, "record_count": 0, "unique_keys": 0}
+        if not self.available:
+            return out
+        latest = await self._coll.find_one(sort=[("published_utc", -1)])
+        if latest and latest.get("published_utc"):
+            pub = latest["published_utc"]
+            out["latest_timestamp"] = pub.isoformat() if hasattr(pub, "isoformat") else str(pub)
+        out["record_count"] = await self._coll.count_documents({})
+        out["unique_keys"] = len(await self._coll.distinct("tickers"))
+        return out
 
-        publisher = doc.get("publisher")
-        pub_name = None
-        if isinstance(publisher, dict):
-            pub_name = publisher.get("name")
+    async def stats(self, since: datetime) -> dict:
+        coll = self._coll
+        match = {"$match": {"published_utc": {"$gte": since}}}
+        total_count = await coll.count_documents({"published_utc": {"$gte": since}})
+        first = await coll.find_one({"published_utc": {"$gte": since}}, sort=[("published_utc", 1)])
+        last = await coll.find_one({"published_utc": {"$gte": since}}, sort=[("published_utc", -1)])
+        daily = [{"date": d["_id"], "count": d["count"]} async for d in coll.aggregate([
+            match, {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$published_utc"}},
+                               "count": {"$sum": 1}}}, {"$sort": {"_id": 1}}])]
+        tickers = [{"ticker": d["_id"], "count": d["count"]} async for d in coll.aggregate([
+            match, {"$unwind": "$tickers"}, {"$group": {"_id": "$tickers", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}, {"$limit": 20}])]
+        pubs = [{"publisher": d["_id"], "count": d["count"]} async for d in coll.aggregate([
+            match, {"$group": {"_id": "$publisher.name", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}}, {"$limit": 10}])]
 
-        return Event(
-            event_id=f"news_{doc['_id']}",
-            event_type=event_type,
-            title=doc.get("title") or "",
-            time_utc=pub_utc.isoformat(),
-            importance=Importance.MEDIUM,
-            status=EventStatus.OCCURRED,
-            tickers=doc.get("tickers") or [],
-            country="US",
-            snippet=(doc.get("description") or "")[:200],
-            payload={
-                "article_url": doc.get("article_url"),
-                "author": doc.get("author"),
-                "publisher": pub_name,
-                "keywords": doc.get("keywords") or [],
-            },
-            source="polygon_news",
-            source_id=str(doc["_id"]),
-        )
+        async def dup(field: str) -> dict:
+            async for d in coll.aggregate([
+                    match, {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
+                    {"$group": {"_id": None, "total": {"$sum": "$count"}, "unique": {"$sum": 1}}}]):
+                return _rate(d["total"], d["unique"])
+            return _rate(0, 0)
+
+        return {
+            "total_count": total_count,
+            "date_range": {"earliest": first["published_utc"].isoformat() if first else None,
+                           "latest": last["published_utc"].isoformat() if last else None},
+            "daily_counts": daily, "top_tickers": tickers, "top_publishers": pubs,
+            "duplicate_stats": {"by_url": await dup("article_url"), "by_title": await dup("title")},
+        }
+
+    async def count(self, start: datetime, end: datetime, tickers: Optional[list[str]]) -> int:
+        q: dict[str, Any] = {"published_utc": {"$gte": start, "$lt": end}}
+        if tickers:
+            q["tickers"] = {"$in": tickers}
+        return await self._coll.count_documents(q)
+
+    async def iter_docs(self, start: datetime, end: datetime, tickers: Optional[list[str]], limit: int):
+        q: dict[str, Any] = {"published_utc": {"$gte": start, "$lt": end}}
+        if tickers:
+            q["tickers"] = {"$in": tickers}
+        async for doc in self._coll.find(q).sort([("published_utc", 1)]).limit(limit):
+            yield doc
+
+
+# =====================================================================
+# SQLiteNewsSource
+# =====================================================================
+
+
+
+class SQLiteNewsSource:
+    """News from a SQLite file with :data:`NEWS_SCHEMA` (same interface as Mongo)."""
+
+    kind = "sqlite"
+
+    def __init__(self, db_path: str):
+        self._path = db_path
+        self._db: Optional[Any] = None
+
+    async def connect(self):
+        import aiosqlite
+        if not os.path.isfile(self._path):
+            logger.warning("news DB %s missing; news source unavailable", self._path)
+            return
+        self._db = await aiosqlite.connect(self._path)
+        self._db.row_factory = aiosqlite.Row
+        logger.info("News DB (sqlite) connected: %s", self._path)
+
+    async def close(self):
+        if self._db:
+            await self._db.close()
+
+    @property
+    def available(self) -> bool:
+        return self._db is not None
+
+    @staticmethod
+    def _iso(dt: datetime) -> str:
+        return dt.astimezone(timezone.utc).isoformat()
+
+    def _doc(self, row) -> dict:
+        r = dict(row)
+        return {
+            "_id": r["id"],
+            "published_utc": _parse_utc(r["published_utc"]),
+            "title": r.get("title") or "",
+            "description": r.get("description"),
+            "article_url": r.get("article_url"),
+            "author": r.get("author"),
+            "publisher": {"name": r.get("publisher")} if r.get("publisher") else None,
+            "tickers": json.loads(r.get("tickers") or "[]"),
+            "keywords": json.loads(r.get("keywords") or "[]"),
+            "image_url": r.get("image_url"),
+            "insights": json.loads(r["insights"]) if r.get("insights") else None,
+            "source": r.get("source"),
+        }
+
+    def _where(self, start, end, tickers, keyword=None, publisher=None, cursor=None):
+        sql = " FROM news WHERE published_utc >= ? AND published_utc < ?"
+        args: list[Any] = [self._iso(start), self._iso(end)]
+        if tickers:
+            ph = ",".join("?" for _ in tickers)
+            sql += f" AND id IN (SELECT news_id FROM news_tickers WHERE ticker IN ({ph}))"
+            args += [t.upper() for t in tickers]
+        if keyword:
+            sql += " AND title LIKE ? ESCAPE '\\'"
+            args.append("%" + keyword.replace("%", "\\%").replace("_", "\\_") + "%")
+        if publisher:
+            sql += " AND publisher LIKE ?"
+            args.append(f"%{publisher}%")
+        if cursor:
+            ct = self._iso(_parse_utc(cursor[0]))
+            cid = cursor[1].removeprefix("news_")
+            sql += " AND (published_utc > ? OR (published_utc = ? AND id > ?))"
+            args += [ct, ct, cid]
+        return sql, args
+
+    async def _events(self, sql: str, args: list, now_utc: datetime) -> list[Event]:
+        out = []
+        async with self._db.execute(sql, args) as cur:
+            async for row in cur:
+                out.append(news_doc_to_event(self._doc(row), now_utc))
+        return out
+
+    async def get_freshness(self) -> Optional[str]:
+        if not self.available:
+            return None
+        async with self._db.execute("SELECT MAX(published_utc) FROM news") as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc) -> list[Event]:
+        if not self.available:
+            return []
+        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, cursor=cursor)
+        return await self._events("SELECT *" + where + " ORDER BY published_utc, id LIMIT ?",
+                                  args + [limit], now_utc)
+
+    async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
+                          now_utc) -> list[Event]:
+        if not self.available:
+            return []
+        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, keyword, publisher, cursor)
+        return await self._events("SELECT *" + where + " ORDER BY published_utc, id LIMIT ?",
+                                  args + [limit], now_utc)
+
+    async def get_by_id(self, news_id: str) -> Optional[dict]:
+        if not self.available:
+            return None
+        async with self._db.execute("SELECT * FROM news WHERE id = ?", [news_id]) as cur:
+            row = await cur.fetchone()
+            return self._doc(row) if row else None
+
+    def _to_event(self, doc: dict, now_utc: datetime) -> Event:
+        return news_doc_to_event(doc, now_utc)
+
+    async def info(self) -> dict:
+        out = {"latest_timestamp": None, "record_count": 0, "unique_keys": 0}
+        if not self.available:
+            return out
+        async with self._db.execute("SELECT MAX(published_utc), COUNT(*) FROM news") as cur:
+            latest, n = await cur.fetchone()
+        async with self._db.execute("SELECT COUNT(DISTINCT ticker) FROM news_tickers") as cur:
+            (k,) = await cur.fetchone()
+        out.update(latest_timestamp=latest, record_count=n, unique_keys=k)
+        return out
+
+    async def stats(self, since: datetime) -> dict:
+        s = self._iso(since)
+
+        async def rows(sql: str, args=(s,)):
+            async with self._db.execute(sql, list(args)) as cur:
+                return await cur.fetchall()
+
+        (total, first, last), = await rows(
+            "SELECT COUNT(*), MIN(published_utc), MAX(published_utc) FROM news WHERE published_utc >= ?")
+        daily = await rows("SELECT substr(published_utc, 1, 10) d, COUNT(*) FROM news "
+                           "WHERE published_utc >= ? GROUP BY d ORDER BY d")
+        tickers = await rows("SELECT t.ticker, COUNT(*) c FROM news_tickers t JOIN news n ON n.id = t.news_id "
+                             "WHERE n.published_utc >= ? GROUP BY t.ticker ORDER BY c DESC LIMIT 20")
+        pubs = await rows("SELECT publisher, COUNT(*) c FROM news WHERE published_utc >= ? "
+                          "GROUP BY publisher ORDER BY c DESC LIMIT 10")
+        (u_url,), = await rows("SELECT COUNT(DISTINCT article_url) FROM news WHERE published_utc >= ?")
+        (u_title,), = await rows("SELECT COUNT(DISTINCT title) FROM news WHERE published_utc >= ?")
+        return {
+            "total_count": total,
+            "date_range": {"earliest": first, "latest": last},
+            "daily_counts": [{"date": d, "count": c} for d, c in daily],
+            "top_tickers": [{"ticker": t, "count": c} for t, c in tickers],
+            "top_publishers": [{"publisher": p, "count": c} for p, c in pubs],
+            "duplicate_stats": {"by_url": _rate(total, u_url), "by_title": _rate(total, u_title)},
+        }
+
+    async def count(self, start: datetime, end: datetime, tickers: Optional[list[str]]) -> int:
+        where, args = self._where(start, end, tickers)
+        async with self._db.execute("SELECT COUNT(*)" + where, args) as cur:
+            return (await cur.fetchone())[0]
+
+    async def iter_docs(self, start: datetime, end: datetime, tickers: Optional[list[str]], limit: int):
+        where, args = self._where(start, end, tickers)
+        async with self._db.execute("SELECT *" + where + " ORDER BY published_utc, id LIMIT ?",
+                                    args + [limit]) as cur:
+            async for row in cur:
+                yield self._doc(row)
 
 
 # =====================================================================
@@ -355,6 +607,9 @@ class SQLiteEarningsSource:
 
     async def connect(self):
         import aiosqlite
+        if not os.path.isfile(self._path):
+            logger.warning("Earnings DB %s missing; source unavailable", self._path)
+            return
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         logger.info("Earnings DB connected: %s", self._path)
@@ -363,7 +618,13 @@ class SQLiteEarningsSource:
         if self._db:
             await self._db.close()
 
+    @property
+    def available(self) -> bool:
+        return self._db is not None
+
     async def get_freshness(self) -> Optional[str]:
+        if not self.available:
+            return None
         async with self._db.execute("SELECT MAX(last_updated) FROM earnings") as cur:
             row = await cur.fetchone()
             return row[0] if row else None
@@ -375,7 +636,10 @@ class SQLiteEarningsSource:
         tickers: Optional[list[str]],
         limit: int,
         cursor: Optional[tuple[str, str]],
+        now_utc: Optional[datetime] = None,
     ) -> list[Event]:
+        if not self.available:
+            return []
         # Convert UTC window to EST date range for the query
         start_est = start_utc.astimezone(EST)
         end_est = end_utc.astimezone(EST)
@@ -398,7 +662,7 @@ class SQLiteEarningsSource:
         events = []
         async with self._db.execute(sql, params) as cur:
             async for row in cur:
-                ev = self._to_event(dict(row))
+                ev = self._to_event(dict(row), now_utc)
                 if ev is None:
                     continue
                 # Apply precise UTC filter
@@ -412,12 +676,14 @@ class SQLiteEarningsSource:
                 events.append(ev)
         return events
 
-    async def get_by_id(self, benzinga_id: str) -> Optional[Event]:
+    async def get_by_id(self, benzinga_id: str, now_utc: Optional[datetime] = None) -> Optional[Event]:
+        if not self.available:
+            return None
         sql = "SELECT * FROM earnings WHERE benzinga_id = ?"
         async with self._db.execute(sql, [benzinga_id]) as cur:
             row = await cur.fetchone()
             if row:
-                return self._to_event(dict(row))
+                return self._to_event(dict(row), now_utc)
         return None
 
     async def query_by_dates(
@@ -428,7 +694,10 @@ class SQLiteEarningsSource:
         min_importance: int,
         limit: int,
         cursor: Optional[tuple[str, str]],
+        now_utc: Optional[datetime] = None,
     ) -> list[Event]:
+        if not self.available:
+            return []
         sql = "SELECT * FROM earnings WHERE date >= ? AND date <= ? AND (importance >= ? OR importance IS NULL)"
         params: list[Any] = [start_date, end_date, min_importance]
 
@@ -451,12 +720,12 @@ class SQLiteEarningsSource:
         events = []
         async with self._db.execute(sql, params) as cur:
             async for row in cur:
-                ev = self._to_event(dict(row))
+                ev = self._to_event(dict(row), now_utc)
                 if ev:
                     events.append(ev)
         return events
 
-    def _to_event(self, row: dict) -> Optional[Event]:
+    def _to_event(self, row: dict, now_utc: Optional[datetime] = None) -> Optional[Event]:
         date_str = row.get("date")
         time_str = row.get("time")
         if not date_str:
@@ -473,9 +742,11 @@ class SQLiteEarningsSource:
         except (ValueError, TypeError):
             dt_utc = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
+        # A report without a time is treated as known only after its ET day ends.
+        known_from = dt_utc if time_str else dt_utc + timedelta(days=1)
         status_val = row.get("date_status")
-        status = EventStatus.OCCURRED if status_val == "confirmed" else EventStatus.SCHEDULED
-        occurred = status == EventStatus.OCCURRED
+        occurred = status_val == "confirmed" and _known_at(known_from, now_utc)
+        status = EventStatus.OCCURRED if occurred else EventStatus.SCHEDULED
 
         ticker = row.get("ticker") or ""
         fp = row.get("fiscal_period") or ""
@@ -508,6 +779,9 @@ class SQLiteEconEventsSource:
 
     async def connect(self):
         import aiosqlite
+        if not os.path.isfile(self._path):
+            logger.warning("Econ Events DB %s missing; source unavailable", self._path)
+            return
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         logger.info("Econ Events DB connected: %s", self._path)
@@ -516,7 +790,13 @@ class SQLiteEconEventsSource:
         if self._db:
             await self._db.close()
 
+    @property
+    def available(self) -> bool:
+        return self._db is not None
+
     async def get_freshness(self) -> Optional[str]:
+        if not self.available:
+            return None
         async with self._db.execute(
             "SELECT MAX(fetched_at) FROM econ_events WHERE country = 'United States'"
         ) as cur:
@@ -529,10 +809,12 @@ class SQLiteEconEventsSource:
         end_utc: datetime,
         limit: int,
         cursor: Optional[tuple[str, str]],
+        now_utc: Optional[datetime] = None,
     ) -> list[Event]:
+        if not self.available:
+            return []
         # gmt_time is already UTC. We query by date range (widen by 1 day for safety).
         start_date = start_utc.strftime("%Y-%m-%d")
-        from datetime import timedelta
         end_date = (end_utc + timedelta(days=1)).strftime("%Y-%m-%d")
 
         sql = (
@@ -546,7 +828,7 @@ class SQLiteEconEventsSource:
         events = []
         async with self._db.execute(sql, params) as cur:
             async for row in cur:
-                ev = self._to_event(dict(row))
+                ev = self._to_event(dict(row), now_utc)
                 if ev is None:
                     continue
                 ev_time = _parse_utc(ev.time_utc)
@@ -557,12 +839,14 @@ class SQLiteEconEventsSource:
                 events.append(ev)
         return events
 
-    async def get_by_id(self, event_id: str) -> Optional[Event]:
+    async def get_by_id(self, event_id: str, now_utc: Optional[datetime] = None) -> Optional[Event]:
+        if not self.available:
+            return None
         sql = "SELECT * FROM econ_events WHERE event_id = ?"
         async with self._db.execute(sql, [event_id]) as cur:
             row = await cur.fetchone()
             if row:
-                return self._to_event(dict(row))
+                return self._to_event(dict(row), now_utc)
         return None
 
     async def query_by_dates(
@@ -572,7 +856,10 @@ class SQLiteEconEventsSource:
         min_importance: Optional[Importance],
         limit: int,
         cursor: Optional[tuple[str, str]],
+        now_utc: Optional[datetime] = None,
     ) -> list[Event]:
+        if not self.available:
+            return []
         sql = (
             "SELECT * FROM econ_events "
             "WHERE country = 'United States' AND date >= ? AND date <= ?"
@@ -591,7 +878,7 @@ class SQLiteEconEventsSource:
         events = []
         async with self._db.execute(sql, params) as cur:
             async for row in cur:
-                ev = self._to_event(dict(row))
+                ev = self._to_event(dict(row), now_utc)
                 if ev is None:
                     continue
                 if min_importance:
@@ -601,7 +888,7 @@ class SQLiteEconEventsSource:
                 events.append(ev)
         return events
 
-    def _to_event(self, row: dict) -> Optional[Event]:
+    def _to_event(self, row: dict, now_utc: Optional[datetime] = None) -> Optional[Event]:
         date_str = row.get("date")
         if not date_str:
             return None
@@ -613,9 +900,10 @@ class SQLiteEconEventsSource:
         except (ValueError, TypeError):
             dt_utc = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
-        has_actual = bool(row.get("actual") and str(row["actual"]).strip())
-        status = EventStatus.OCCURRED if has_actual else EventStatus.SCHEDULED
-        occurred = status == EventStatus.OCCURRED
+        # Collectors store blanks as "&nbsp;" or " " before the release.
+        has_actual = bool(_clean_html(row.get("actual") or ""))
+        occurred = has_actual and _known_at(dt_utc, now_utc)
+        status = EventStatus.OCCURRED if occurred else EventStatus.SCHEDULED
 
         return Event(
             event_id=f"econ_{row['event_id']}",
@@ -645,8 +933,19 @@ class DataSourceManager:
         mongo_collection: str,
         earnings_db: str,
         econ_events_db: str,
+        news_backend: str = "auto",
+        news_db: Optional[str] = None,
     ):
-        self.news = MongoNewsSource(mongo_uri, mongo_db, mongo_collection)
+        """``news_backend``: ``mongo``, ``sqlite`` or ``auto`` (SQLite when
+        ``news_db`` exists, MongoDB otherwise)."""
+        use_sqlite = news_backend == "sqlite" or (
+            news_backend == "auto" and news_db is not None and os.path.isfile(news_db))
+        if use_sqlite:
+            if not news_db:
+                raise ValueError("news_backend=sqlite needs news_db")
+            self.news = SQLiteNewsSource(news_db)
+        else:
+            self.news = MongoNewsSource(mongo_uri, mongo_db, mongo_collection)
         self.earnings = SQLiteEarningsSource(earnings_db)
         self.econ = SQLiteEconEventsSource(econ_events_db)
 

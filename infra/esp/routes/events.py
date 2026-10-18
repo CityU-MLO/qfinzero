@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Request
 
 from models import EventQueryRequest, StreamRequest
@@ -13,9 +15,10 @@ async def query_events(req: EventQueryRequest, request: Request):
 
 
 @router.get("/esp/events/{event_id}")
-async def get_event(event_id: str, request: Request):
+async def get_event(event_id: str, request: Request, now_utc: Optional[str] = None):
+    """``now_utc`` (ISO) returns the event as known at that time."""
     svc = request.app.state.event_service
-    event = await svc.get_event_by_id(event_id)
+    event = await svc.get_event_by_id(event_id, now_utc)
     if event is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "event not found"})
     return event.model_dump()

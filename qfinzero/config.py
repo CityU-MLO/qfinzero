@@ -86,6 +86,8 @@ DATA_DIR = os.getenv("DATA_DIR", QFZ_DATA_ROOT)
 
 EARNINGS_DB = os.getenv("EARNINGS_DB", f"{QFZ_DATA_ROOT}/esp/benzinga_earnings.sqlite3")
 ECON_EVENTS_DB = os.getenv("ECON_EVENTS_DB", f"{QFZ_DATA_ROOT}/esp/nasdaq_econ_events.sqlite3")
+# SQLite news store (used instead of MongoDB when present, see ESP_NEWS_BACKEND)
+NEWS_DB = os.getenv("NEWS_DB", f"{QFZ_DATA_ROOT}/esp/news.sqlite3")
 
 # ── Data pipeline (raw sources + UPQ storage) ───────────────────
 # Raw vendor data is read IN PLACE (shared with other systems; never copied).

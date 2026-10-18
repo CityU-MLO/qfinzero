@@ -45,6 +45,7 @@ server = [
 qfz-data = "qfinzero.pipeline.cli:main"
 qfz-research = "qfinzero.research.cli:main"
 qfz-auth = "qfinzero.auth.cli:main"
+qfz-sample = "qfinzero.sample.cli:main"
 qfz-server = "qfinzero.server.__main__:main"
 
 [project.urls]
@@ -59,6 +60,7 @@ packages = [
     "qfinzero.pipeline",
     "qfinzero.pipeline.sources",
     "qfinzero.research",
+    "qfinzero.sample",
     "qfinzero.update",
     "qfinzero.update.loaders",
     "qfinzero.server",

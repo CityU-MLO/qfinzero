@@ -36,9 +36,16 @@ def _parse_now(now_utc: str | None) -> datetime:
 
 
 @router.get("/esp/news/{news_id}/body")
-async def news_body(news_id: str, request: Request):
+async def news_body(news_id: str, request: Request, now_utc: str | None = None):
+    """``now_utc`` (ISO): articles published after it are reported as missing."""
     ds = request.app.state.data_sources
     doc = await ds.news.get_by_id(news_id)
+    if doc is not None and now_utc:
+        pub = doc.get("published_utc")
+        if isinstance(pub, datetime):
+            pub = pub if pub.tzinfo else pub.replace(tzinfo=timezone.utc)
+            if pub > _parse_now(now_utc):
+                doc = None
     if doc is None:
         raise HTTPException(
             status_code=404,

@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI):
         mongo_collection=settings.mongo_collection,
         earnings_db=earnings_path,
         econ_events_db=econ_path,
+        news_backend=settings.news_backend,
+        news_db=str(REPO_ROOT / settings.news_db),
     )
     await ds.connect()
 
@@ -64,7 +66,10 @@ async def lifespan(app: FastAPI):
     app.state.event_service = event_svc
 
     logger.info("ESP started on %s:%s", settings.host, settings.port)
-    logger.info("MongoDB: %s/%s.%s", settings.mongo_uri, settings.mongo_db, settings.mongo_collection)
+    if ds.news.kind == "mongo":
+        logger.info("News: MongoDB %s/%s.%s", settings.mongo_uri, settings.mongo_db, settings.mongo_collection)
+    else:
+        logger.info("News: SQLite %s", settings.news_db)
     logger.info("Earnings DB: %s", earnings_path)
     logger.info("Econ Events DB: %s", econ_path)
 

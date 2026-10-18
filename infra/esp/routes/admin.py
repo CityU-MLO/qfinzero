@@ -30,7 +30,7 @@ async def sanity_check(request: Request):
         "count": 0,
         "samples": [],
     }
-    if ds.news.available:
+    if ds.news.available and ds.news.kind == "mongo":
         try:
             coll = ds.news._coll
             future_count = await coll.count_documents({"published_utc": {"$gt": now}})
@@ -58,7 +58,7 @@ async def sanity_check(request: Request):
         "count": 0,
         "samples": [],
     }
-    if ds.news.available:
+    if ds.news.available and ds.news.kind == "mongo":
         try:
             coll = ds.news._coll
             since = now - timedelta(days=30)
@@ -100,7 +100,7 @@ async def sanity_check(request: Request):
         "count": 0,
         "samples": [],
     }
-    if ds.news.available:
+    if ds.news.available and ds.news.kind == "mongo":
         try:
             coll = ds.news._coll
             invalid_query = {"$or": [

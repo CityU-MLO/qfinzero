@@ -106,13 +106,13 @@ class EventService:
 
         if "earnings" in sources:
             tasks.append(
-                self._ds.earnings.query_window(start, end, req.tickers, fetch_limit * 2, cursor)
+                self._ds.earnings.query_window(start, end, req.tickers, fetch_limit * 2, cursor, now)
             )
             task_names.append("earnings")
 
         if "econ" in sources:
             tasks.append(
-                self._ds.econ.query_window(start, end, fetch_limit * 2, cursor)
+                self._ds.econ.query_window(start, end, fetch_limit * 2, cursor, now)
             )
             task_names.append("econ")
 
@@ -166,17 +166,22 @@ class EventService:
 
     # ── Single event by ID ───────────────────────────────────────
 
-    async def get_event_by_id(self, event_id: str) -> Optional[Event]:
+    async def get_event_by_id(self, event_id: str, now_utc: Optional[str] = None) -> Optional[Event]:
+        """One event as known at ``now_utc`` (default: now). News published
+        after ``now_utc`` does not exist yet and returns None."""
+        now = _parse_now(now_utc)
         if event_id.startswith("earn_"):
-            return await self._ds.earnings.get_by_id(event_id.removeprefix("earn_"))
+            return await self._ds.earnings.get_by_id(event_id.removeprefix("earn_"), now)
         elif event_id.startswith("econ_"):
-            return await self._ds.econ.get_by_id(event_id.removeprefix("econ_"))
+            return await self._ds.econ.get_by_id(event_id.removeprefix("econ_"), now)
         elif event_id.startswith("news_"):
             raw_id = event_id.removeprefix("news_")
             doc = await self._ds.news.get_by_id(raw_id)
             if doc:
-                now = datetime.now(timezone.utc)
-                return self._ds.news._to_event(doc, now)
+                ev = self._ds.news._to_event(doc, now)
+                if now_utc and _parse_now(ev.time_utc) > now:
+                    return None
+                return ev
         return None
 
     # ── Stream (incremental polling) ─────────────────────────────
@@ -205,10 +210,10 @@ class EventService:
         task_names = []
 
         if "earnings" in sources:
-            tasks.append(self._ds.earnings.query_window(start, now, req.tickers, fetch_limit * 2, cursor))
+            tasks.append(self._ds.earnings.query_window(start, now, req.tickers, fetch_limit * 2, cursor, now))
             task_names.append("earnings")
         if "econ" in sources:
-            tasks.append(self._ds.econ.query_window(start, now, fetch_limit * 2, cursor))
+            tasks.append(self._ds.econ.query_window(start, now, fetch_limit * 2, cursor, now))
             task_names.append("econ")
         if "news" in sources:
             tasks.append(self._ds.news.query_window(start, now, req.tickers, fetch_limit * 2, cursor, now))
@@ -250,8 +255,8 @@ class EventService:
         end = now + timedelta(minutes=req.horizon_minutes)
 
         tasks = [
-            self._ds.earnings.query_window(now, end, req.tickers, req.limit * 3, None),
-            self._ds.econ.query_window(now, end, req.limit * 3, None),
+            self._ds.earnings.query_window(now, end, req.tickers, req.limit * 3, None, now),
+            self._ds.econ.query_window(now, end, req.limit * 3, None, now),
         ]
         if self._ds.news.available:
             tasks.append(self._ds.news.query_window(now, end, req.tickers, req.limit * 3, None, now))
@@ -306,7 +311,7 @@ class EventService:
         fetch_limit = req.limit + 1
 
         events = await self._ds.econ.query_by_dates(
-            start_date, end_date, req.min_importance, fetch_limit, cursor,
+            start_date, end_date, req.min_importance, fetch_limit, cursor, now,
         )
 
         has_more = len(events) > req.limit
@@ -333,7 +338,7 @@ class EventService:
         fetch_limit = req.limit + 1
 
         events = await self._ds.earnings.query_by_dates(
-            start_date, end_date, req.tickers, req.min_importance, fetch_limit, cursor,
+            start_date, end_date, req.tickers, req.min_importance, fetch_limit, cursor, now,
         )
 
         has_more = len(events) > req.limit
@@ -363,8 +368,8 @@ class EventService:
 
         # Fetch all events in the window
         tasks = [
-            self._ds.earnings.query_window(start, end, req.tickers, 500, None),
-            self._ds.econ.query_window(start, end, 500, None),
+            self._ds.earnings.query_window(start, end, req.tickers, 500, None, now),
+            self._ds.econ.query_window(start, end, 500, None, now),
         ]
         if self._ds.news.available:
             tasks.append(self._ds.news.query_window(start, end, req.tickers, 500, None, now))

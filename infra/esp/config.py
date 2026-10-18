@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 
-from qfinzero.config import EARNINGS_DB as _EARNINGS_DB, ECON_EVENTS_DB as _ECON_EVENTS_DB
+from qfinzero.config import EARNINGS_DB as _EARNINGS_DB, ECON_EVENTS_DB as _ECON_EVENTS_DB, NEWS_DB as _NEWS_DB
 from qfinzero.env import load_root_env_defaults
 
 
@@ -10,6 +10,11 @@ load_root_env_defaults()
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 19330
+
+    # News backend: "auto" uses news_db (SQLite) when the file exists and
+    # MongoDB otherwise; "mongo" / "sqlite" force one.
+    news_backend: str = "auto"
+    news_db: str = _NEWS_DB
 
     # MongoDB
     mongo_uri: str = "mongodb://localhost:27018"

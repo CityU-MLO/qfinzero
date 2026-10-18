@@ -601,17 +601,27 @@ def esp_query_events(
 
 
 @mcp.tool()
-def esp_get_event(event_id: str) -> str:
+def esp_get_event(
+    event_id: str,
+    now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
     """Fetch a single event by its ID, including full payload.
 
     Args:
         event_id: The unique event identifier (from esp_query_events results)
+        now_utc: Replay time (ISO); results not yet released at that time are blanked
+        session_id: Optional PMB session to time-lock this lookup to
 
     Returns:
         JSON event object with full payload (earnings data, economic release values, etc.)
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
-        return json.dumps(client.get_event(event_id))
+        return json.dumps(client.get_event(event_id, now_utc=now_utc))
 
 
 @mcp.tool()
@@ -787,18 +797,28 @@ def esp_next_triggers(
 
 
 @mcp.tool()
-def esp_news_body(news_id: str) -> str:
+def esp_news_body(
+    news_id: str,
+    now_utc: Optional[str] = None,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
     """Fetch the full body of a news article.
 
     Args:
         news_id: The news article ID (found in event payload from esp_query_events)
+        now_utc: Replay time (ISO); articles published later are reported as not found
+        session_id: Optional PMB session to time-lock this lookup to
 
     Returns:
         JSON with: news_id, title, description, article_url, published_utc,
                    tickers, author, keywords, image_url, publisher, insights
     """
+    as_of = _lock(ctx, session_id)
+    if as_of:
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
-        return json.dumps(client.news_body(news_id))
+        return json.dumps(client.news_body(news_id, now_utc=now_utc))
 
 
 @mcp.tool()
@@ -830,8 +850,10 @@ def esp_search_news(
         JSON with: server_time_utc, events[], next_cursor
     """
     as_of = _lock(ctx, session_id)
+    now_utc = None
     if as_of:
         end_utc = timelock.clamp_end(end_utc, as_of)
+        now_utc = as_of
     with ESPClient(ESP_URL) as client:
         return json.dumps(
             client.search_news(
@@ -842,6 +864,7 @@ def esp_search_news(
                 publisher=publisher,
                 limit=limit,
                 cursor=cursor,
+                now_utc=now_utc,
             )
         )
 

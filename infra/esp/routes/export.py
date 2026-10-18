@@ -75,20 +75,14 @@ async def export_news(
 ):
     ds = request.app.state.data_sources
     if not ds.news.available:
-        raise HTTPException(status_code=503, detail="MongoDB unavailable")
+        raise HTTPException(status_code=503, detail="News store unavailable")
 
-    coll = ds.news._coll
     now = datetime.now(timezone.utc)
-
     start_dt = _parse_dt(start) or (now - timedelta(days=7))
     end_dt = _parse_dt(end) or now
+    ticker_list = [t.strip().upper() for t in tickers.split(",")] if tickers else None
 
-    query = {"published_utc": {"$gte": start_dt, "$lt": end_dt}}
-    if tickers:
-        ticker_list = [t.strip().upper() for t in tickers.split(",")]
-        query["tickers"] = {"$in": ticker_list}
-
-    count = await coll.count_documents(query)
+    count = await ds.news.count(start_dt, end_dt, ticker_list)
     if count > EXPORT_LIMIT:
         raise HTTPException(
             status_code=400,
@@ -96,8 +90,7 @@ async def export_news(
         )
 
     async def _news_rows():
-        cursor = coll.find(query).sort([("published_utc", 1)]).limit(EXPORT_LIMIT)
-        async for doc in cursor:
+        async for doc in ds.news.iter_docs(start_dt, end_dt, ticker_list, EXPORT_LIMIT):
             pub = doc.get("published_utc")
             pub_iso = pub.isoformat() if hasattr(pub, "isoformat") else str(pub) if pub else None
             publisher = doc.get("publisher")
