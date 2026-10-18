@@ -88,6 +88,7 @@ class UPQClient:
         fields: str = None,
         limit: int = None,
         as_of: str = None,
+        adjust: str = None,
     ) -> list[dict]:
         """Query stock minute bars.
 
@@ -97,6 +98,7 @@ class UPQClient:
             end: ISO datetime, e.g. "2025-01-06T16:00:00"
             fields: Comma-separated fields to return (default: all)
             limit: Max rows (1-100000, default 10000)
+            adjust: "none" (default, as traded), "split" or "total" (splits and dividends)
 
         Returns:
             List of dicts with ticker, window_start, open, high, low, close, volume, transactions.
@@ -113,6 +115,8 @@ class UPQClient:
             params["limit"] = limit
         if as_of:
             params["as_of"] = as_of
+        if adjust:
+            params["adjust"] = adjust
         return self._get("/stock", params)
 
     def stock_daily(
@@ -123,6 +127,7 @@ class UPQClient:
         fields: str = None,
         indicators: str = None,
         as_of: str = None,
+        adjust: str = None,
     ) -> list[dict]:
         """Query stock daily bars with optional technical indicators.
 
@@ -133,6 +138,7 @@ class UPQClient:
             fields: Comma-separated fields to return (default: all)
             indicators: Comma-separated indicators, e.g. "ma_5,ema_12,macd"
                         Supported: ma_N (SMA), ema_N (EMA), macd (MACD 12/26/9).
+            adjust: "none" (default, as traded), "split" or "total" (splits and dividends)
 
         Returns:
             List of dicts with ticker, date, OHLCV fields, plus indicator columns when requested.
@@ -148,6 +154,8 @@ class UPQClient:
             params["indicators"] = indicators
         if as_of:
             params["as_of"] = as_of
+        if adjust:
+            params["adjust"] = adjust
         return self._get("/stock/daily", params)
 
     # ── Options ───────────────────────────────────────────────────

@@ -17,11 +17,8 @@ ET = ZoneInfo("America/New_York")
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory):
-    from qfinzero.sample.build import build
-    root = tmp_path_factory.mktemp("sample")
-    manifest = build(root)
-    return root, manifest
+def built(sample_root):
+    return sample_root, json.loads((sample_root / "sample_manifest.json").read_text())
 
 
 def q(sql: str):
@@ -67,9 +64,7 @@ def test_parts_match_storage_schema(built, store):
 
 
 def test_manifest_counts(built):
-    root, manifest = built
-    m = json.loads((root / "sample_manifest.json").read_text())
-    assert m == manifest
+    _, m = built
     assert m["rows"]["stock_daily"] == len(DAYS) * len(STOCKS)
     assert m["rows"]["earnings"] == len(EARNINGS)
     assert m["rows"]["news"] > 100

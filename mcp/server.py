@@ -156,6 +156,7 @@ def upq_stock_daily(
     end: str,
     fields: Optional[str] = None,
     indicators: Optional[str] = None,
+    adjust: Literal["none", "split", "total"] = "none",
     session_id: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
@@ -170,6 +171,8 @@ def upq_stock_daily(
         indicators: Comma-separated technical indicators, e.g. "ma_20,ema_12,macd"
                     Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average),
                     macd (MACD 12/26/9 — returns macd, macd_signal, macd_histogram columns).
+        adjust: "none" = as traded (default); "split" = split-adjusted;
+                "total" = split- and dividend-adjusted (for returns over long windows)
         session_id: Optional PMB session to time-lock this query to (data after
             the session's current bar is hidden, enforced server-side).
 
@@ -181,6 +184,7 @@ def upq_stock_daily(
         return json.dumps(client.stock_daily(
             tickers=tickers, start=start, end=end,
             fields=fields, indicators=indicators, as_of=as_of,
+            adjust=None if adjust == "none" else adjust,
         ))
 
 
@@ -191,6 +195,7 @@ def upq_stock_minute(
     end: str,
     fields: Optional[str] = None,
     limit: int = 10000,
+    adjust: Literal["none", "split", "total"] = "none",
     session_id: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
@@ -203,6 +208,7 @@ def upq_stock_minute(
         fields: Comma-separated fields, e.g. "ticker,window_start,close,volume"
                 Available: ticker, window_start, open, high, low, close, volume, transactions
         limit: Max rows to return (default 10000, max 100000)
+        adjust: "none" = as traded (default); "split" or "total" as in upq_stock_daily
         session_id: Optional PMB session to time-lock this query to (data after
             the session's current bar is hidden, enforced server-side).
 
@@ -213,7 +219,8 @@ def upq_stock_minute(
     as_of = _lock(ctx, session_id)
     with UPQClient(UPQ_URL) as client:
         return json.dumps(client.stock_minute(
-            tickers=tickers, start=start, end=end, fields=fields, limit=limit, as_of=as_of))
+            tickers=tickers, start=start, end=end, fields=fields, limit=limit, as_of=as_of,
+            adjust=None if adjust == "none" else adjust))
 
 
 @mcp.tool()
@@ -1318,7 +1325,8 @@ def pmb_create_session(
                   e.g. "2024-01-02T09:30:00" for minute, "2024-01-02" for daily
         end_ts: Session end datetime, same format as start_ts
         stock_universe: Stock symbols to include, e.g. ["AAPL", "NVDA", "SPY"]
-        option_universe: Underlying symbols to include options for, e.g. ["SPY"]
+        option_universe: Option contracts to include, e.g. ["O:SPY250117C00500000"]
+                         (use upq_make_opra or a chain query to get symbols)
 
     Returns:
         JSON with: session_id, account_id, clock (frequency, current_ts, end_ts, status)
