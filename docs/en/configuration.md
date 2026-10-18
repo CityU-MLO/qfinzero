@@ -111,6 +111,7 @@ persist on the server.
 | `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | detected by the Chat settings page |
 | `LLM_PROXY` | HTTP proxy for outbound model calls only (falls back to `HTTPS_PROXY`/`HTTP_PROXY`) |
 | `PLAYGROUND_TIMEOUT_S` | model request time-out of the chat backend, default 120 |
+| `PLAYGROUND_DB` | chat history database, default `$QFZ_STATE_DIR/playground.sqlite3` |
 | `MASSIVE_REST_API_KEY`, `POLYGON_S3_ACCESS_KEY_ID`, `POLYGON_S3_SECRET_ACCESS_KEY` | massive (Polygon) REST and flat files |
 | `DATABENTO_API_KEY` | Databento historical API (`qfz-data acquire databento`) |
 | `TUSHARE_TOKEN` | Tushare |

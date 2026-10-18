@@ -93,7 +93,8 @@ async def list_models(api: str, base_url: str, api_key: str, proxy: Optional[str
 def chat_model_kwargs(api: str, model: str, base_url: str, api_key: str) -> dict[str, Any]:
     """Arguments for ``langchain.chat_models.init_chat_model``."""
     if protocol(api) == "openai":
-        return dict(model=model, model_provider="openai", base_url=base_url, api_key=api_key,
-                    streaming=True)
+        # keyless local servers (vLLM, Ollama, ...): the OpenAI client insists on a key
+        return dict(model=model, model_provider="openai", base_url=base_url, api_key=api_key or "not-needed",
+                    streaming=True, stream_usage=True)
     return dict(model=model, model_provider="anthropic", base_url=anthropic_root(base_url),
                 api_key=api_key, streaming=True, max_tokens=8192)

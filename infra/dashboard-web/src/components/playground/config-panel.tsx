@@ -19,7 +19,11 @@ export interface PlaygroundConfig {
   apiKey: string;
   asOfDate: string;
   proxy?: string; // optional LLM egress proxy; empty = use server default (LLM_PROXY)
+  contextTokens?: number; // context window the conversation is fitted into
+  autoCompact?: boolean;  // summarise older turns when the context is nearly full
 }
+
+export const CONTEXT_CHOICES = [32_000, 64_000, 128_000, 200_000, 400_000, 1_000_000];
 
 const STORAGE_KEY = "playground_config";
 export const ET_ZONE = "America/New_York";
@@ -32,6 +36,8 @@ export const DEFAULT_CONFIG: PlaygroundConfig = {
   // Default: today at 09:00 ET stored as UTC ISO string
   asOfDate: getDefaultAsOfDate(),
   proxy: "",
+  contextTokens: 128_000,
+  autoCompact: true,
 };
 
 /** Returns today at 09:00 US/Eastern as a UTC ISO string "YYYY-MM-DDTHH:MM:SSZ" */
@@ -73,6 +79,35 @@ export function saveConfig(config: PlaygroundConfig) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 }
 
+/** Keep the chat config on the model groups of the Settings page: the model
+ * picked there is the default, and credentials always come from its group.
+ * Used by the layout, so it applies while the settings drawer is closed. */
+export function useModelGroupSync(config: PlaygroundConfig, onChange: (c: PlaygroundConfig) => void) {
+  const [groups, setGroups] = useState<ModelSettings | null>(null);
+  useEffect(() => {
+    const reload = () => setGroups(loadSettings());
+    reload();
+    const onStorage = (e: StorageEvent) => e.key === GROUPS_KEY && reload();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(CHANGE_EVENT, reload);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(CHANGE_EVENT, reload);
+    };
+  }, []);
+  useEffect(() => {
+    if (!groups) return;
+    const current = groups.groups.find((g) => g.baseUrl === config.baseUrl && g.api === config.api &&
+      g.models.some((m) => m.id === config.model));
+    const r = current ? resolve(groups, current.id, config.model) : resolve(groups);
+    if (r && (r.model !== config.model || r.baseUrl !== config.baseUrl || r.apiKey !== config.apiKey ||
+              r.api !== config.api || (groups.proxy ?? "") !== (config.proxy ?? ""))) {
+      onChange({ ...config, api: r.api, model: r.model, baseUrl: r.baseUrl, apiKey: r.apiKey, proxy: groups.proxy });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, config.model, config.baseUrl]);
+}
+
 interface ConfigPanelProps {
   config: PlaygroundConfig;
   onChange: (config: PlaygroundConfig) => void;
@@ -96,19 +131,6 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
       window.removeEventListener(CHANGE_EVENT, reload);
     };
   }, []);
-
-  // the model picked on the Settings page is the default; credentials always come from its group
-  useEffect(() => {
-    if (!groups) return;
-    const current = groups.groups.find((g) => g.baseUrl === config.baseUrl && g.api === config.api &&
-      g.models.some((m) => m.id === config.model));
-    const r = current ? resolve(groups, current.id, config.model) : resolve(groups);
-    if (r && (r.model !== config.model || r.baseUrl !== config.baseUrl || r.apiKey !== config.apiKey ||
-              r.api !== config.api || (groups.proxy ?? "") !== (config.proxy ?? ""))) {
-      onChange({ ...config, api: r.api, model: r.model, baseUrl: r.baseUrl, apiKey: r.apiKey, proxy: groups.proxy });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups]);
 
   const currentValue = useMemo(() => {
     const g = groups?.groups.find((x) => x.baseUrl === config.baseUrl && x.api === config.api && x.models.some((m) => m.id === config.model));
@@ -137,7 +159,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
   const hasKey = Boolean(config.apiKey);
 
   return (
-    <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-card rounded-l-2xl">
+    <aside className="flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l bg-card p-5">
       <div>
         <h2 className="text-xs font-semibold text-muted-foreground mb-3">
           {t("LLM Config", "LLM 配置")}
@@ -212,7 +234,33 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
             disabled={disabled}
             className="text-sm h-8"
           />
+          <span className="text-[11px] text-muted-foreground">
+            {t("Tools see no data after this time.", "工具看不到这个时间之后的数据。")}
+          </span>
         </div>
+        <div className="mt-3 flex flex-col gap-1">
+          <Label htmlFor="ctx" className="text-xs">{t("Context window", "上下文窗口")}</Label>
+          <select id="ctx" value={config.contextTokens ?? 128_000} disabled={disabled}
+            onChange={(e) => { setSaved(false); onChange({ ...config, contextTokens: Number(e.target.value) }); }}
+            className="h-8 rounded-md border bg-card px-2 text-sm disabled:opacity-50">
+            {CONTEXT_CHOICES.map((n) => <option key={n} value={n}>{n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}k`} tokens</option>)}
+          </select>
+          <span className="text-[11px] text-muted-foreground">
+            {t("Set it to your model's window. Old tool results are shortened first.",
+              "设为模型的上下文长度。较早的工具结果会先被截短。")}
+          </span>
+        </div>
+        <label className="mt-3 flex items-start gap-2 text-xs">
+          <input type="checkbox" className="mt-0.5" checked={config.autoCompact ?? true} disabled={disabled}
+            onChange={(e) => { setSaved(false); onChange({ ...config, autoCompact: e.target.checked }); }} />
+          <span>
+            {t("Auto-compact", "自动压缩")}
+            <span className="block text-[11px] text-muted-foreground">
+              {t("At 80% of the window, summarise older turns (they stay in the history and exports).",
+                "达到窗口的 80% 时总结较早的对话（原文仍保留在历史和导出中）。")}
+            </span>
+          </span>
+        </label>
       </div>
     </aside>
   );

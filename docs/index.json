@@ -14,6 +14,7 @@
       "id": "guides",
       "title": { "en": "Guides", "zh": "指南" },
       "pages": [
+        { "slug": "chat", "title": { "en": "Chat", "zh": "对话" }, "en": "docs/en/chat.md", "zh": "docs/cn/chat.md" },
         { "slug": "agent-market-data", "title": { "en": "Market data for agents", "zh": "Agent 行情工具" }, "en": "docs/en/upq/agent-guide.md", "zh": "docs/cn/upq/agent-guide.md" },
         { "slug": "agent-trading", "title": { "en": "Trading for agents", "zh": "Agent 交易工具" }, "en": "docs/en/pmb/agent-guide.md", "zh": "docs/cn/pmb/agent-guide.md" },
         { "slug": "broker-terminal", "title": { "en": "Broker terminal", "zh": "交易终端" }, "en": "docs/en/pmb/broker-terminal.md", "zh": "docs/cn/pmb/broker-terminal.md" },

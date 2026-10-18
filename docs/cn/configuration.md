@@ -108,6 +108,7 @@ ESP 读取带 `ESP_` 前缀的设置。
 | `ANTHROPIC_API_KEY`、`DEEPSEEK_API_KEY`、`GEMINI_API_KEY` | 对话设置页会自动识别 |
 | `LLM_PROXY` | 只用于访问模型服务的 HTTP 代理（未设置时回退到 `HTTPS_PROXY`/`HTTP_PROXY`） |
 | `PLAYGROUND_TIMEOUT_S` | 对话后端请求模型的超时时间，默认 120 |
+| `PLAYGROUND_DB` | 对话历史数据库，默认 `$QFZ_STATE_DIR/playground.sqlite3` |
 | `MASSIVE_REST_API_KEY`、`POLYGON_S3_ACCESS_KEY_ID`、`POLYGON_S3_SECRET_ACCESS_KEY` | massive（Polygon）REST 与 flat files |
 | `DATABENTO_API_KEY` | Databento 历史 API（`qfz-data acquire databento`） |
 | `TUSHARE_TOKEN` | Tushare |

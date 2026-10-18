@@ -54,6 +54,11 @@ Added:
   and maintenance margin, daily variation margin, margin calls met at initial
   margin and liquidation of unmet calls (`pmb_trade_future`, `universe.futures`,
   `add_futures`); futures in the broker terminal and the availability map.
+- Chat conversations stored per user (new, rename, delete, search), the context
+  rebuilt from the history each turn with tool-result trimming and automatic or
+  manual compaction, a context meter, stopping an answer (kept as interrupted),
+  answers that survive closing the page, Markdown export, and a run inspector
+  with the tool-call record, a flow graph and a timeline.
 - Model groups for Chat: OpenAI, Claude and Gemini via Antigravity endpoints,
   model lists fetched from `/models`, import of Claude Code settings, export
   lines or Codex `config.toml`, and JSON import / export.
