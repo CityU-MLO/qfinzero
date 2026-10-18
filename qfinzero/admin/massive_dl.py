@@ -30,6 +30,10 @@ INDICES = {
     "us_stocks_sip/minute_aggs_v1": ("stock", "minute"),
     "us_options_opra/day_aggs_v1": ("option", "daily"),
     "us_options_opra/minute_aggs_v1": ("option", "minute"),
+    # NBBO, tick by tick: very large (OPRA is hundreds of GB a day); converted
+    # to the quote stores at the chosen sampling interval.
+    "us_options_opra/quotes_v1": ("option", "quotes"),
+    "us_stocks_sip/quotes_v1": ("stock", "quotes"),
 }
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})\.csv\.gz$")
 

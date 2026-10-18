@@ -99,7 +99,8 @@ def _databento_storage(p: PipelinePaths) -> dict:
     if dates:
         out.update(processed=len(dates), start=min(dates), end=max(dates))
     for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
-                  "stock_quote_minute", "option_quote_minute"):
+                  "stock_quote_minute", "option_quote_minute",
+                  "future_daily", "future_minute", "future_quote_minute"):
         d = p.store(store)
         if d.is_dir():
             out["parts"] += sum(1 for _ in d.glob(f"trade_date=*/{databento.PART_NAME}"))
@@ -109,7 +110,8 @@ def _databento_storage(p: PipelinePaths) -> dict:
 def scan_storage(p: PipelinePaths) -> dict:
     out: dict = {"root": str(p.storage)}
     for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
-                  "stock_quote_minute", "option_quote_minute"):
+                  "stock_quote_minute", "option_quote_minute",
+                  "future_daily", "future_minute", "future_quote_minute"):
         d = p.store(store)
         parts = sorted(
             x.name[len("trade_date="):]

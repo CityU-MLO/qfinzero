@@ -106,6 +106,11 @@ def test_import_databento_links_selections(env, tmp_path):
     inside.mkdir()
     datasetup.import_local("databento", [str(inside)], convert=False)
     assert len(list((env["lib_d"] / "imports").iterdir())) == 1    # already in the library
+    f = env["src"] / "2026-08-03.dbn.zst"
+    f.write_bytes(b"")
+    datasetup.import_local("databento", [str(f)], convert=False)
+    names = [p.name for p in (env["lib_d"] / "imports").iterdir()]
+    assert any(n.endswith("-2026-08-03.dbn.zst") for n in names)     # suffix kept for the converter
 
 
 class FakeS3:
@@ -137,10 +142,69 @@ def test_massive_download_plans_then_fetches(env):
     again = massive_dl.download(params, access_key="", secret_key="", endpoint="", root=env["lib_m"], s3=s3)
     assert again["missing"] == 0
     with pytest.raises(ValueError):
-        massive_dl.plan(s3, "us_stocks_sip/quotes_v1", date(2025, 1, 1), date(2025, 1, 2), env["lib_m"])
+        massive_dl.plan(s3, "us_stocks_sip/trades_v1", date(2025, 1, 1), date(2025, 1, 2), env["lib_m"])
 
 
 def test_download_requires_credentials(env):
     assert datasetup.download("databento", {})["ok"] is False
     r = datasetup.download("massive", {"index": "us_stocks_sip/day_aggs_v1", "start": "2025-01-01", "end": "2025-01-31"})
     assert r["ok"] is False and "key" in r["error"]
+
+
+def _quote_rows(d: str, contract: str):
+    base = int(datetime.fromisoformat(f"{d}T14:30:00").replace(tzinfo=timezone.utc).timestamp() * 1e9)
+    minute = 60_000_000_000
+    # three quotes in the first minute (last one wins), then one per minute for 30 minutes
+    rows = [(contract, base + 1_000, 1.00, 1.10, 5, 6), (contract, base + 2_000, 1.01, 1.11, 5, 6),
+            (contract, base + 59_000_000_000, 1.02, 1.12, 7, 8)]
+    rows += [(contract, base + k * minute + 1, 1.0 + k / 100, 1.1 + k / 100, 1, 1) for k in range(1, 31)]
+    return rows
+
+
+def test_import_massive_quotes_flat_rest_and_snapshot_at_15_minutes(env):
+    import json as _json
+    q = env["src"] / "us_options_opra"
+    c1, c2 = "O:SPY260618C00747000", "O:AAPL260618C00300000"
+    cols = ["ticker", "sip_timestamp", "bid_price", "ask_price", "bid_size", "ask_size"]
+    flat = q / "quotes_v1" / "2026" / "06" / "2026-06-18.parquet"
+    flat.parent.mkdir(parents=True)
+    r = _quote_rows("2026-06-18", c1)
+    pq.write_table(pa.table({c: [x[i] for x in r] for i, c in enumerate(cols)}), flat)
+    rest = q / "quotes_sample" / "O_AAPL260618C00300000__2026-06-17.jsonl.gz"
+    rest.parent.mkdir(parents=True)
+    with gzip.open(rest, "wt") as f:
+        for _, ts, b, a, bs, as_ in _quote_rows("2026-06-17", c2):
+            f.write(_json.dumps({"sip_timestamp": ts, "bid_price": b, "ask_price": a, "bid_size": bs, "ask_size": as_,
+                                 "bid_exchange": 1, "ask_exchange": 1, "sequence_number": 1}) + "\n")
+    snap = q / "quotes_30min_snapshot" / "sample_2026-06-16.parquet"
+    snap.parent.mkdir(parents=True)
+    mark = int(datetime.fromisoformat("2026-06-16T15:00:00").replace(tzinfo=timezone.utc).timestamp() * 1e9)
+    pq.write_table(pa.table({"ticker": [c1, c1], "mark_ns": [mark, mark + 1_800_000_000_000],
+                             "bid_price": [2.0, 2.5], "ask_price": [2.1, 2.6], "bid_size": [1, 2], "ask_size": [3, 4]}), snap)
+
+    info = datasetup.inspect("massive", [str(q)])
+    (g,) = info["groups"]
+    assert g["index"] == "us_options_opra/quotes_v1" and g["kinds"] == {"flat": 1, "rest": 1, "snapshot": 1}
+    lines: list[str] = []
+    res = datasetup.import_local("massive", [str(q)], on_line=lines.append, quote_intervals={"option": 15})
+    assert res["ok"], "\n".join(lines)
+    store = env["store"] / "option_quote_minute"
+    rows = duckdb.sql(f"SELECT contract, trade_date, window_start, bid_price FROM read_parquet('{store}/*/*.parquet', "
+                      "hive_partitioning=false) ORDER BY 2, 1, 3").fetchall()
+    by_day: dict = {}
+    for contract, d, ws, bid in rows:
+        by_day.setdefault((str(d), contract), []).append((ws, bid))
+    # 31 minutes of quotes at 15-minute sampling -> buckets 14:30, 14:45, 15:00
+    assert len(by_day[("2026-06-18", c1)]) == 3
+    assert by_day[("2026-06-18", c1)][0][1] == pytest.approx(1.14)      # last minute of the first bucket
+    assert len(by_day[("2026-06-17", c2)]) == 3
+    # snapshots: the 15:00 mark is the book of the 14:59 minute
+    snaps = by_day[("2026-06-16", c1)]
+    assert [b for _, b in snaps] == [2.0, 2.5]
+    assert datetime.fromtimestamp(snaps[0][0] / 1e9, tz=timezone.utc).strftime("%H:%M") == "14:59"
+    assert datasetup.status()["quote_intervals"]["option"] == 15            # persisted for later updates
+
+
+def test_quote_interval_is_validated(env):
+    with pytest.raises(ValueError):
+        datasetup.set_quote_intervals({"option": 7})

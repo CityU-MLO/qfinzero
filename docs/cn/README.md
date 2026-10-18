@@ -145,7 +145,7 @@ qfz-data validate                     # row-count / schema checks on storage
 
 `OCEA.MEMOIR`（Blue Ocean）提供美东 20:00–04:00 的夜盘分钟线。
 
-`OPRA.*` 数据集写入 `option_minute` / `option_day`，OSI 合约代码改写为 UPQ 格式（`SPY   250117C00500000` → `O:SPY250117C00500000`）。美股数据集（`XNAS.ITCH`、`EQUS.*`、`DBEQ.*` 等）写入 `stock_minute` / `stock_daily`；期货数据集跳过。分钟线按 `ts_event` 切分；交易日和日线按美东时间，日线开高低收取 09:30–16:00 常规时段，成交量取全天。MBO 里只有 `T` 记录计为成交（`F` 是同一笔成交的被动方回报）。
+`OPRA.*` 数据集写入 `option_minute` / `option_day`，OSI 合约代码改写为 UPQ 格式（`SPY   250117C00500000` → `O:SPY250117C00500000`）。美股数据集（`XNAS.ITCH`、`EQUS.*`、`DBEQ.*` 等）写入 `stock_minute` / `stock_daily`；期货交易所数据集（`GLBX.MDP3`、ICE、Nodal）按 CME 交易时段写入 `future_minute` / `future_daily` / `future_quote_minute`。分钟线按 `ts_event` 切分；交易日和日线按美东时间，日线开高低收取 09:30–16:00 常规时段，成交量取全天。MBO 里只有 `T` 记录计为成交（`F` 是同一笔成交的被动方回报）。
 
 Databento 在每个 `trade_date=` 分区里写 `part-databento-0000.parquet`，与 massive 的分片并存，并且只**补齐** massive 当天没有的代码，两家数据不会重复计量。单一交易所的数据（如 `XNAS.ITCH`）只包含该交易所的成交量；同一代码有多个来源时，优先全市场合并数据（`EQUS.*`、`OPRA.*`）。每个原始文件抽取出的K线缓存在 `$STORAGE_ROOT/_staging/databento`，重跑只读取新增或改动过的文件。
 

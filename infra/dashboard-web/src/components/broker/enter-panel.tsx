@@ -26,8 +26,9 @@ export function EnterPanel({
   const t = useT();
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [accountId, setAccountId] = useState(presetAccountId ?? "");
-  const [date, setDate] = useState("2024-03-22");
-  const [symbols, setSymbols] = useState("AAPL,MSFT,NVDA,TSLA");
+  const [date, setDate] = useState("");
+  const [minuteRange, setMinuteRange] = useState<{ start: string; end: string } | null>(null);
+  const [symbols, setSymbols] = useState("SPY,QQQ,NVDA,AAPL");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -47,6 +48,15 @@ export function EnterPanel({
 
   useEffect(() => {
     refresh();
+    // default to the latest day with minute bars, so the session has data
+    fetch("/api/coverage/extent")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { stores?: { minute?: { start: string; end: string } | null; daily?: { end: string } | null } } | null) => {
+        const m = d?.stores?.minute;
+        if (m) setMinuteRange({ start: m.start, end: m.end });
+        setDate((cur) => cur || m?.end || d?.stores?.daily?.end || new Date().toISOString().slice(0, 10));
+      })
+      .catch(() => setDate((cur) => cur || new Date().toISOString().slice(0, 10)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -124,13 +134,19 @@ export function EnterPanel({
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            min="2017-01-01"
-            max="2025-12-31"
             className={inputCls}
           />
           <span className="text-xs text-muted-foreground">
             {t("The market opens on this date; you control the clock from there.", "市场在这一天开盘，之后的时钟由你控制。")}
+            {minuteRange && (
+              <> {t(`Minute data: ${minuteRange.start} → ${minuteRange.end}.`, `分钟数据范围：${minuteRange.start} → ${minuteRange.end}。`)}</>
+            )}
           </span>
+          {minuteRange && date && (date < minuteRange.start || date > minuteRange.end) && (
+            <span className="text-xs text-warning">
+              {t("No minute bars on this date: the session will have nothing to trade.", "这一天没有分钟数据，会话中将无法交易。")}
+            </span>
+          )}
         </label>
 
         <label className="flex flex-col gap-1.5">

@@ -32,6 +32,8 @@ VENDORS = ("databento", "massive")
 MAX_ENTRIES = 3000
 MAX_DESCRIBE = 400
 _DATED = re.compile(r"(\d{4}-\d{2}-\d{2})\.(parquet|csv\.gz)$")
+_ANY_DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+QUOTE_DIRS = ("quotes_v1", "quotes_sample", "quotes_30min_snapshot")
 
 
 # ── roots and the file browser ────────────────────────────────────────────
@@ -116,10 +118,35 @@ def browse(path: Optional[str] = None, show_hidden: bool = False) -> dict[str, A
 # ── massive ───────────────────────────────────────────────────────────────
 
 def _massive_index(path: Path) -> Optional[str]:
+    """Library index of a massive file; every quote flavour maps to ``quotes_v1``."""
     parts = path.parts
     for i in range(len(parts) - 1):
-        if parts[i] in ("us_stocks_sip", "us_options_opra") and parts[i + 1] in ("day_aggs_v1", "minute_aggs_v1"):
-            return f"{parts[i]}/{parts[i + 1]}"
+        if parts[i] in ("us_stocks_sip", "us_options_opra"):
+            if parts[i + 1] in ("day_aggs_v1", "minute_aggs_v1"):
+                return f"{parts[i]}/{parts[i + 1]}"
+            if parts[i + 1] in QUOTE_DIRS:
+                return f"{parts[i]}/quotes_v1"
+    return None
+
+
+def _quote_kind(f: Path) -> Optional[str]:
+    """flat (one file a day), rest (one contract a day, jsonl.gz) or snapshot (mark_ns parquet)."""
+    name = f.name
+    if name.endswith(".jsonl.gz") or name.endswith(".jsonl"):
+        return "rest"
+    if name.endswith(".csv.gz"):
+        return "flat" if _DATED.search(name) else None
+    if name.endswith(".parquet"):
+        try:
+            import pyarrow.parquet as pq
+            cols = set(pq.read_schema(f).names)
+        except Exception:  # noqa: BLE001
+            return None
+        if "mark_ns" in cols:
+            return "snapshot"
+        if "sip_timestamp" in cols and _ANY_DATE.search(name):
+            return "flat"
+        return None
     return None
 
 
@@ -138,13 +165,72 @@ def _massive_files(paths: list[Path]) -> tuple[dict[str, list[tuple[str, Path]]]
     groups: dict[str, list[tuple[str, Path]]] = {}
     ignored = 0
     for f in _walk(paths):
-        m = _DATED.search(f.name)
         idx = _massive_index(f)
-        if not m or not idx:
+        if not idx:
+            ignored += 1
+            continue
+        if idx.endswith("quotes_v1"):
+            dates = _ANY_DATE.findall(f.name)
+            if not dates or _quote_kind(f) is None:
+                ignored += 1
+                continue
+            groups.setdefault(idx, []).append((dates[-1], f))
+            continue
+        m = _DATED.search(f.name)
+        if not m:
             ignored += 1
             continue
         groups.setdefault(idx, []).append((m.group(1), f))
     return groups, ignored
+
+
+def _normalise_quote(f: Path, kind: str, d: str, lib: Path, idx: str) -> list[Path]:
+    """Write a quote file into ``lib/idx`` as parquet with ticker, sip_timestamp,
+    bid/ask price and size. Returns the files written (or linked)."""
+    from .massive_dl import csv_to_parquet
+    day_dir = lib / idx / d[:4] / d[5:7]
+    if kind == "flat":
+        dst = day_dir / f"{d}.parquet"
+        if f.name.endswith(".csv.gz"):
+            if not dst.exists():
+                csv_to_parquet(f, dst)
+        else:
+            _link(f, dst)
+        return [dst]
+    from qfinzero.pipeline.engine import connect
+    con = connect()
+    try:
+        if kind == "rest":
+            m = re.match(r"^(O_[A-Z0-9]+|[A-Z.]+)__", f.name)
+            ticker = (m.group(1).replace("O_", "O:", 1) if m else f.name.split("__")[0])
+            dst = day_dir / d / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', ticker)}.parquet"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            con.execute(
+                f"COPY (SELECT '{ticker}' AS ticker, CAST(sip_timestamp AS BIGINT) AS sip_timestamp, bid_price, "
+                f"ask_price, CAST(bid_size AS BIGINT) AS bid_size, CAST(ask_size AS BIGINT) AS ask_size "
+                f"FROM read_json_auto('{_lit_path(f)}')) TO '{_lit_path(dst)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+            return [dst]
+        # snapshot: one row per (contract, mark); the mark is the end of the
+        # minute before it, so the book lands in that minute
+        out = []
+        et = "timezone('America/New_York', to_timestamp((mark_ns - 1) // 1000000000))"
+        days = [r[0] for r in con.execute(
+            f"SELECT DISTINCT strftime(CAST({et} AS DATE), '%Y-%m-%d') FROM read_parquet('{_lit_path(f)}')").fetchall()]
+        for day in days:
+            dst = lib / idx / day[:4] / day[5:7] / day / f"snapshot-{f.stem}.parquet"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            con.execute(
+                f"COPY (SELECT ticker, mark_ns - 1 AS sip_timestamp, bid_price, ask_price, bid_size, ask_size "
+                f"FROM read_parquet('{_lit_path(f)}') WHERE strftime(CAST({et} AS DATE), '%Y-%m-%d') = '{day}') "
+                f"TO '{_lit_path(dst)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+            out.append(dst)
+        return out
+    finally:
+        con.close()
+
+
+def _lit_path(p: Path) -> str:
+    return str(p).replace("'", "''")
 
 
 # ── inspect ───────────────────────────────────────────────────────────────
@@ -161,10 +247,17 @@ def inspect(vendor: str, paths: list[str]) -> dict[str, Any]:
         for idx, files in sorted(groups.items()):
             dates = sorted(d for d, _ in files)
             asset, res = INDICES[idx]
-            out.append({"index": idx, "asset": asset, "resolution": res, "files": len(files),
-                        "csv": sum(1 for _, f in files if f.name.endswith(".csv.gz")),
-                        "bytes": sum(f.stat().st_size for _, f in files),
-                        "start": dates[0], "end": dates[-1]})
+            g = {"index": idx, "asset": asset, "resolution": res, "files": len(files),
+                 "csv": sum(1 for _, f in files if f.name.endswith(".csv.gz")),
+                 "bytes": sum(f.stat().st_size for _, f in files),
+                 "start": dates[0], "end": dates[-1]}
+            if res == "quotes":
+                kinds: dict[str, int] = {}
+                for _, f in files:
+                    k = _quote_kind(f) or "?"
+                    kinds[k] = kinds.get(k, 0) + 1
+                g["kinds"] = kinds
+            out.append(g)
         return {"vendor": vendor, "groups": out, "ignored": ignored,
                 "files": sum(g["files"] for g in out)}
     from qfinzero.pipeline.engine import connect
@@ -202,9 +295,23 @@ def _link(src: Path, dst: Path) -> bool:
     return True
 
 
+def set_quote_intervals(intervals: Optional[dict[str, int]]) -> dict[str, int]:
+    """Persist the BBO sampling per asset (later updates keep it) and return the result."""
+    from qfinzero.pipeline.convert import default_quote_intervals
+    from qfinzero.pipeline.sources.databento import check_interval
+    if intervals:
+        clean = {f"{a}_interval_min": check_interval(v) for a, v in intervals.items() if a in ("stock", "option", "future") and v}
+        if clean:
+            config_store.update({"quotes": clean})
+    return default_quote_intervals()
+
+
 def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = None,
-                 convert: bool = True, jobs: int = 4) -> dict[str, Any]:
+                 convert: bool = True, jobs: int = 4,
+                 quote_intervals: Optional[dict[str, int]] = None) -> dict[str, Any]:
     say = on_line or (lambda _l: None)
+    iv = set_quote_intervals(quote_intervals)
+    say(f"[import] BBO sampling: stocks every {iv['stock']} min, options every {iv['option']} min")
     sel = [_allowed(Path(p)) for p in paths]
     lib = library(vendor)
     lib.mkdir(parents=True, exist_ok=True)
@@ -217,6 +324,16 @@ def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = N
         if ignored:
             say(f"  {ignored} files are not massive day/minute aggregates and are skipped")
         for idx, files in sorted(groups.items()):
+            asset, res = INDICES[idx]
+            if res == "quotes":
+                written = 0
+                for d, f in files:
+                    written += len(_normalise_quote(f, _quote_kind(f), d, lib, idx))
+                dates = sorted(d for d, _ in files)
+                say(f"  {idx}: {len(files)} quote file(s) {dates[0]}..{dates[-1]} -> {written} library file(s)")
+                plans.append({"vendor": "massive", "asset": asset, "resolution": "quotes",
+                              "start": dates[0], "end": dates[-1]})
+                continue
             linked = transferred = kept = 0
             for d, f in files:
                 dst = lib / idx / d[:4] / d[5:7] / f"{d}.parquet"
@@ -233,7 +350,6 @@ def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = N
                 else:
                     kept += 1
             dates = sorted(d for d, _ in files)
-            asset, res = INDICES[idx]
             say(f"  {idx}: {len(files)} days {dates[0]}..{dates[-1]}  linked={linked} "
                 f"csv->parquet={transferred} already={kept}")
             plans.append({"vendor": "massive", "asset": asset, "resolution": res,
@@ -245,7 +361,8 @@ def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = N
                 continue
             tag = hashlib.sha1(str(p).encode()).hexdigest()[:8]
             name = re.sub(r"[^A-Za-z0-9._-]+", "_", p.name)[:60] or "import"
-            if _link(p, lib / "imports" / f"{name}-{tag}"):
+            # tag first: the converter recognises files by their suffix (.dbn.zst)
+            if _link(p, lib / "imports" / f"{tag}-{name}"):
                 n += 1
         say(f"  linked {n} new selection(s) under {lib / 'imports'}")
         plans.append({"vendor": "databento"})
@@ -262,9 +379,13 @@ def run_convert(plan: dict[str, Any], *, on_line: Optional[OnLine] = None, jobs:
     """``qfz-data convert`` for one plan, in a subprocess, streaming its log."""
     from .acquire import run_stream
     d = config_store.dirs()
+    from qfinzero.pipeline.convert import default_quote_intervals
+    iv = default_quote_intervals()
     cmd = [sys.executable, "-m", "qfinzero.pipeline.cli",
            "--massive", d.get("raw_massive", ""), "--databento", d.get("raw_databento", ""),
-           "--storage", d.get("storage_root", ""), "convert", "--vendor", plan["vendor"], "--market", "us"]
+           "--storage", d.get("storage_root", ""), "convert", "--vendor", plan["vendor"], "--market", "us",
+           "--stock-quote-interval", str(iv["stock"]), "--option-quote-interval", str(iv["option"]),
+           "--future-quote-interval", str(iv["future"])]
     if plan["vendor"] == "massive":
         cmd += ["--asset", plan["asset"], "--resolution", plan["resolution"],
                 "--start", plan["start"], "--end", plan["end"]]
@@ -279,9 +400,12 @@ def run_convert(plan: dict[str, Any], *, on_line: Optional[OnLine] = None, jobs:
 # ── downloads ─────────────────────────────────────────────────────────────
 
 def download(vendor: str, params: dict[str, Any], *, dry_run: bool = True, convert: bool = True,
-             on_line: Optional[OnLine] = None, jobs: int = 4) -> dict[str, Any]:
+             on_line: Optional[OnLine] = None, jobs: int = 4,
+             quote_intervals: Optional[dict[str, int]] = None) -> dict[str, Any]:
     """Quote (``dry_run``) or download, then convert what arrived."""
     say = on_line or (lambda _l: None)
+    if not dry_run:
+        set_quote_intervals(quote_intervals)
     lib = library(vendor)
     if vendor == "databento":
         from . import databento_dl
@@ -320,5 +444,11 @@ def status() -> dict[str, Any]:
             "massive": bool(s3.get("access_key_id") and s3.get("secret_access_key")),
         },
         "massive_endpoint": s3.get("endpoint"),
+        "quote_intervals": _intervals(),
         "today": date.today().isoformat(),
     }
+
+
+def _intervals() -> dict[str, int]:
+    from qfinzero.pipeline.convert import default_quote_intervals
+    return default_quote_intervals()

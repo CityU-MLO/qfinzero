@@ -85,27 +85,40 @@ def _do_convert(args) -> int:
         def want_asset(a):
             return do_all or a in want
 
+        from .convert import default_quote_intervals
+        dflt = default_quote_intervals()
+        intervals = {"stock": args.stock_quote_interval or args.quote_interval or dflt["stock"],
+                     "option": args.option_quote_interval or args.quote_interval or dflt["option"],
+                     "future": args.future_quote_interval or args.quote_interval or dflt["future"]}
+
         if market in (None, "us") and "massive" in vendors:
             if want_asset("stock"):
                 if args.resolution in (None, "daily"):
                     results.append(cv.convert_us_stock_daily(args.start, args.end, args.force))
                 if args.resolution in (None, "minute"):
                     results.append(cv.convert_us_stock_minute(args.start, args.end, args.force))
+                if args.resolution in (None, "quotes"):
+                    results.append(cv.convert_us_quotes("stock", args.start, args.end, args.force,
+                                                        intervals["stock"]))
             if want_asset("option"):
                 if args.resolution in (None, "daily"):
                     results.append(cv.convert_us_option_day(args.start, args.end, args.force))
                 if args.resolution in (None, "minute"):
                     results.append(cv.convert_us_option_minute(args.start, args.end, args.force))
+                if args.resolution in (None, "quotes"):
+                    results.append(cv.convert_us_quotes("option", args.start, args.end, args.force,
+                                                        intervals["option"]))
             if want_asset("rates"):
                 results.append(cv.convert_rates(args.force))
         if market in (None, "us") and "databento" in vendors:
             # Databento fills tickers massive did not write, so it runs after it.
             # ``--vendor databento`` alone means "all Databento assets".
-            assets = tuple(a for a in ("stock", "option")
+            assets = tuple(a for a in ("stock", "option", "future")
                            if want_asset(a) or (args.asset is None and args.vendor))
             if assets:
                 results.append(cv.convert_databento(
-                    args.start, args.end, args.force, jobs=args.jobs, assets=assets))
+                    args.start, args.end, args.force, jobs=args.jobs, assets=assets,
+                    quote_interval=intervals))
         if market in (None, "cn") and "tushare" in vendors:
             if want_asset("stock"):
                 results.append(cv.convert_cn_stock_daily(args.start, args.end, args.force))
@@ -310,8 +323,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("convert", help="convert raw data into UPQ storage")
     c.add_argument("--market", choices=["us", "cn"], default=None)
-    c.add_argument("--asset", choices=["stock", "option", "rates", "corp"], default=None)
-    c.add_argument("--resolution", choices=["daily", "minute"], default=None)
+    c.add_argument("--asset", choices=["stock", "option", "future", "rates", "corp"], default=None)
+    c.add_argument("--resolution", choices=["daily", "minute", "quotes"], default=None)
+    c.add_argument("--quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None,
+                   help="keep one NBBO per N minutes in the quote stores (default 1)")
+    c.add_argument("--stock-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
+    c.add_argument("--option-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
+    c.add_argument("--future-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
     c.add_argument("--start", help="YYYY-MM-DD inclusive")
     c.add_argument("--end", help="YYYY-MM-DD inclusive")
     c.add_argument("--all", action="store_true", help="convert all assets for the market(s)")

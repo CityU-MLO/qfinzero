@@ -87,12 +87,12 @@ export const dataAdmin = {
   setupStatus: () => j<SetupStatus>("setup/status"),
   browse: (path?: string | null) => j<BrowseResult>(`setup/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   inspect: (vendor: Vendor, paths: string[]) => j<InspectResult>("setup/inspect", { method: "POST", body: JSON.stringify({ vendor, paths }) }),
-  importLocal: (vendor: Vendor, paths: string[], convert = true, jobs = 4) =>
-    j<Job>("setup/import", { method: "POST", body: JSON.stringify({ vendor, paths, convert, jobs }) }),
+  importLocal: (vendor: Vendor, paths: string[], convert = true, jobs = 4, quote_intervals?: QuoteIntervals) =>
+    j<Job>("setup/import", { method: "POST", body: JSON.stringify({ vendor, paths, convert, jobs, quote_intervals }) }),
   quote: (vendor: Vendor, params: Record<string, unknown>) =>
     j<DownloadQuote>("setup/download", { method: "POST", body: JSON.stringify({ vendor, params, dry_run: true }) }),
-  download: (vendor: Vendor, params: Record<string, unknown>, convert = true) =>
-    j<Job>("setup/download", { method: "POST", body: JSON.stringify({ vendor, params, dry_run: false, convert }) }),
+  download: (vendor: Vendor, params: Record<string, unknown>, convert = true, quote_intervals?: QuoteIntervals) =>
+    j<Job>("setup/download", { method: "POST", body: JSON.stringify({ vendor, params, dry_run: false, convert, quote_intervals }) }),
   symbols: (store: string, limit = 200) => j<SymbolsResult>(`data/explore/symbols?store=${store}&limit=${limit}`),
 };
 
@@ -139,6 +139,8 @@ export function streamJobLogs(
 // ── data setup utility ─────────────────────────────────────────────────────
 
 export type Vendor = "databento" | "massive";
+export type QuoteIntervals = { stock: number; option: number; future: number };
+export const QUOTE_INTERVALS = [1, 5, 15, 30, 60] as const;
 
 export type SetupStatus = {
   storage_root: string;
@@ -147,6 +149,7 @@ export type SetupStatus = {
   credentials: Record<Vendor, boolean>;
   massive_endpoint?: string;
   massive_indices: string[];
+  quote_intervals: QuoteIntervals;
   today: string;
 };
 

@@ -24,6 +24,27 @@ from .paths import PipelinePaths, resolve
 from .sources import databento, massive, tushare
 
 
+def default_quote_intervals() -> dict[str, int]:
+    """Quote sampling per asset: ``QFZ_{STOCK,OPTION,FUTURE}_QUOTE_INTERVAL`` or
+    the data setup setting (``quotes.<asset>_interval_min``), else 1 minute.
+    Persisted so scheduled updates keep the interval a store was built with."""
+    out = {"stock": 1, "option": 1, "future": 1}
+    try:
+        from qfinzero.admin import config_store
+        q = config_store.load().get("quotes", {}) or {}
+        for a in out:
+            if q.get(f"{a}_interval_min"):
+                out[a] = int(q[f"{a}_interval_min"])
+    except Exception:  # noqa: BLE001 — config optional
+        pass
+    import os
+    for a in out:
+        v = os.environ.get(f"QFZ_{a.upper()}_QUOTE_INTERVAL")
+        if v:
+            out[a] = int(v)
+    return {a: databento.check_interval(v) for a, v in out.items()}
+
+
 @dataclass
 class ConvertResult:
     store: str
@@ -90,6 +111,32 @@ class Converter:
         return self._convert_dated("option_minute", self.p.massive_option_minute,
                                    massive.option_minute_sql, start, end, force)
 
+    def convert_us_quotes(self, asset: str, start=None, end=None, force=False,
+                          interval: int | None = None) -> ConvertResult:
+        """massive NBBO (``quotes_v1``) -> the stock / option quote store, sampled
+        every ``interval`` minutes (1 = every minute)."""
+        store = "option_quote_minute" if asset == "option" else "stock_quote_minute"
+        res = ConvertResult(store)
+        interval = databento.check_interval(interval or default_quote_intervals()[asset])
+        root = self.p.massive / massive.QUOTE_INDEX[asset]
+        for d, files in massive.list_quote_files(root, start, end).items():
+            fp = databento.fingerprint(files) + f"|q{interval}m"
+            mkey = f"massive:{store}/{d}"
+            if not force and self.manifest.fp_current(mkey, fp):
+                res.skipped += 1
+                continue
+            out = self.p.partition(store, d) / "part-0000.parquet"
+            rows = copy_to_parquet(self.con, massive.quote_sql(store, files, d, interval), out)
+            self.manifest.put(mkey, {"fp": fp, "rows": rows, "inputs": len(files), "trade_date": d,
+                                     "store": store, "interval_min": interval})
+            if databento.refilter_part(self.con, out.parent) is not None:
+                res.notes.append(f"{d}: databento quotes re-filtered")
+            res.partitions += 1
+            res.rows += rows
+        if interval != 1:
+            res.notes.append(f"sampled every {interval} min")
+        return res
+
     # ── CN A-shares (regroup per-symbol files into per-date partitions) ──
 
     def convert_cn_stock_daily(self, start=None, end=None, force=False) -> ConvertResult:
@@ -122,7 +169,7 @@ class Converter:
     # ── Databento (DBN / parquet, any layout) ───────────────────────────
 
     def convert_databento(self, start=None, end=None, force=False, jobs=None,
-                          assets=("stock", "option")) -> ConvertResult:
+                          assets=("stock", "option", "future"), quote_interval=None) -> ConvertResult:
         """Databento files -> ``part-databento-0000.parquet`` in the four bar stores.
 
         Stage 1 extracts each new/changed raw file into cached staging bars
@@ -212,11 +259,14 @@ class Converter:
         for (kind, asset, d), stg in sorted(by_date.items(), key=lambda kv: (kv[0][2], kv[0][0], kv[0][1])):
             stores = (databento.STORES_FOR_ASSET if kind == "bars"
                       else databento.QUOTE_STORES_FOR_ASSET)[asset]
-            sql_fn = databento.assembly_sql if kind == "bars" else databento.quote_sql
+            iv = databento.check_interval((quote_interval or default_quote_intervals()).get(asset, 1)) \
+                if kind == "quotes" else 1
+            sql_fn = (databento.assembly_sql if kind == "bars"
+                      else (lambda st, sg, dd, sb, _iv=iv: databento.quote_sql(st, sg, dd, sb, interval=_iv)))
             for store in stores:
                 part_dir = self.p.partition(store, d)
                 sibs = databento.sibling_parts(part_dir)
-                fp = databento.fingerprint([*stg, *sibs])
+                fp = databento.fingerprint([*stg, *sibs]) + (f"|q{iv}m" if iv != 1 else "")
                 mkey = f"databento:{store}/{d}"
                 assembled.add(mkey)
                 if not force and self.manifest.fp_current(mkey, fp):
@@ -229,7 +279,8 @@ class Converter:
                 else:
                     written += 1
                 self.manifest.put(mkey, {"fp": fp, "rows": rows, "inputs": len(stg),
-                                         "trade_date": d, "store": store})
+                                         "trade_date": d, "store": store,
+                                         **({"interval_min": iv} if kind == "quotes" else {})})
                 res.partitions += 1
                 res.rows += rows
         res.notes.append(f"files: {len(staged) - n_cached} extracted, {n_cached} cached")

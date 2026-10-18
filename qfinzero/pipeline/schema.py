@@ -81,6 +81,48 @@ OPTION_QUOTE_MINUTE = {
     "trade_date": "DATE",
 }
 
+# Futures. ``ticker`` is the contract (``ZNZ6``) or, for front-month continuous
+# data, the root (``ZN``); ``root`` is always the product. ``trade_date`` is the
+# CME session (18:00 ET the evening before to 17:00 ET).
+FUTURE_MINUTE = {
+    "ticker": "VARCHAR",
+    "root": "VARCHAR",
+    "window_start": "BIGINT",
+    "open": "DOUBLE",
+    "high": "DOUBLE",
+    "low": "DOUBLE",
+    "close": "DOUBLE",
+    "volume": "BIGINT",
+    "transactions": "BIGINT",
+    "trade_date": "DATE",
+}
+
+# ``settle`` is the price daily variation margin marks to (last trade of the
+# session until exchange settlement prices are loaded).
+FUTURE_DAILY = {
+    "ticker": "VARCHAR",
+    "root": "VARCHAR",
+    "trade_date": "DATE",
+    "open": "DOUBLE",
+    "high": "DOUBLE",
+    "low": "DOUBLE",
+    "close": "DOUBLE",
+    "settle": "DOUBLE",
+    "volume": "BIGINT",
+    "transactions": "BIGINT",
+}
+
+FUTURE_QUOTE_MINUTE = {
+    "ticker": "VARCHAR",
+    "root": "VARCHAR",
+    "window_start": "BIGINT",
+    "bid_price": "DOUBLE",
+    "ask_price": "DOUBLE",
+    "bid_size": "BIGINT",
+    "ask_size": "BIGINT",
+    "trade_date": "DATE",
+}
+
 RATES = {
     "date": "DATE",
     "yield_1_month": "DOUBLE",

@@ -984,6 +984,19 @@ class DataSourceManager:
         await self.earnings.close()
         await self.econ.close()
 
+    async def keep_connected(self, interval: float = 30.0):
+        """Reconnect sources that were down at start or dropped (e.g. MongoDB
+        restarted). Runs until cancelled."""
+        import asyncio
+        while True:
+            await asyncio.sleep(interval)
+            for src in (self.news, self.earnings, self.econ):
+                if not src.available:
+                    try:
+                        await src.connect()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("reconnect failed for %s: %s", type(src).__name__, e)
+
     async def get_freshness(self) -> dict:
         return {
             "news": await self.news.get_freshness(),

@@ -52,6 +52,35 @@ What import does:
 - Re-importing the same selection links nothing new, and the conversion skips
   partitions whose inputs did not change.
 
+## Quotes (BBO) and the sampling interval
+
+Both vendors can fill the minute quote stores that PMB fills orders against
+and that option-chain snapshots read their bid and ask from:
+
+- Databento: `cbbo-1m`, `cbbo-1s`, `bbo-*`, `cmbp-1` (stocks and OPRA), and
+  `mbp-1` / `mbp-10` from a futures venue.
+- massive: `us_options_opra/quotes_v1` and `us_stocks_sip/quotes_v1` flat
+  files (tick by tick, very large), the REST quotes samples (`*.jsonl.gz`) and
+  30-minute snapshot parquet files. Inspect shows how many files of each kind
+  it found.
+
+*BBO sampling* sets, per asset class (stocks, options, futures), whether every
+minute's book is kept or only the last one of each 5, 15, 30 or 60 minutes.
+15 minutes keeps a full-market OPRA day small enough for a laptop; the broker
+and the chain snapshot carry the last book forward in between. The setting is
+saved and later conversions and scheduled updates use it; changing it rebuilds
+the quote partitions that are converted next.
+
+## Futures
+
+Databento files from CME Globex (`GLBX.MDP3`) and the ICE and Nodal venues
+convert into `future_minute`, `future_daily` and `future_quote_minute`. Import
+an `mbo`, `trades`, `ohlcv-1m` or `mbp-1` folder like any other Databento
+data. Continuous symbols (`CL.v.0`) become the product root (`CL`); outright
+contracts keep their symbol. Trade dates follow the CME session (18:00 ET the
+evening before to 17:00 ET). *Data availability* has the three futures levels,
+and the broker trades them with exchange-style margin (see the PMB guide).
+
 ## Downloading
 
 1. Choose the vendor and the **Download** tab.
@@ -65,7 +94,7 @@ What import does:
    - Databento: dataset (for example `EQUS.MINI`, `XNAS.ITCH`, `OPRA.PILLAR`,
      `OCEA.MEMOIR`), schema, symbols (`SPY,QQQ`, or `SPY.OPT` with symbol type
      *parent* for a whole option chain), dates and a cost ceiling in USD.
-   - massive: one of the four aggregate datasets and the dates.
+   - massive: one of the aggregate or quotes datasets and the dates.
 4. **Get quote** / **Plan** shows what would be fetched: the Databento cost and
    billable size (the quote is free), or the number of missing massive days and
    their size. Files already on disk are excluded.
@@ -86,7 +115,7 @@ Data checks for the event stores are linked from there.
 
 - Databento downloads need `pip install -e ".[databento]"`; massive downloads
   need `pip install -e ".[massive]"` (boto3). The Docker image includes both.
-- massive trades and quotes flat files are not converted (no adapter yet);
-  only day and minute aggregates are offered.
+- massive trades flat files are not converted (no adapter yet). Quotes flat
+  files are tens to hundreds of GB a day for OPRA; plan before downloading.
 - Jobs run on the server; leaving the page does not stop them, and their logs
   stay under *Jobs*.

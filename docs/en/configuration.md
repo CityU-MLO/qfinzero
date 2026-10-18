@@ -42,6 +42,7 @@ A service already listening on its port is adopted rather than started again.
 | `RAW_MASSIVE_DIR`, `RAW_TUSHARE_DIR`, `RAW_DATABENTO_DIR` | `/data/massive_data`, `/data/tushare_data`, `/data/databento` | vendor files, read in place by `qfz-data` |
 | `QFZ_DATABENTO_JOBS` | `1` | default parallelism of `qfz-data convert --vendor databento` |
 | `QFZ_BROWSE_ROOTS` | the raw directories, `QFZ_DATA_ROOT`, `/data` | `:`-separated directories the data setup file browser may show |
+| `QFZ_STOCK_QUOTE_INTERVAL`, `QFZ_OPTION_QUOTE_INTERVAL`, `QFZ_FUTURE_QUOTE_INTERVAL` | the *BBO sampling* setting, else `1` | minutes between kept books in the quote stores: 1, 5, 15, 30 or 60 |
 
 Leave the derived paths unset unless a store lives outside the data root.
 

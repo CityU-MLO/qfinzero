@@ -40,6 +40,7 @@ QFinZero 通过环境变量配置。每个进程按以下优先级读取：
 | `RAW_MASSIVE_DIR`、`RAW_TUSHARE_DIR`、`RAW_DATABENTO_DIR` | `/data/massive_data`、`/data/tushare_data`、`/data/databento` | 供应商原始文件，由 `qfz-data` 原地读取 |
 | `QFZ_DATABENTO_JOBS` | `1` | `qfz-data convert --vendor databento` 的默认并行度 |
 | `QFZ_BROWSE_ROOTS` | 各原始目录、`QFZ_DATA_ROOT`、`/data` | 数据导入工具的文件浏览器可显示的目录，以 `:` 分隔 |
+| `QFZ_STOCK_QUOTE_INTERVAL`、`QFZ_OPTION_QUOTE_INTERVAL`、`QFZ_FUTURE_QUOTE_INTERVAL` | *BBO 采样* 设置，否则为 `1` | 报价存储中保留盘口的间隔分钟数：1、5、15、30 或 60 |
 
 除非某个存储不在数据根目录下，否则不要设置这些派生路径。
 

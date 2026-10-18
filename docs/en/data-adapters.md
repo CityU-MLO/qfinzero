@@ -23,6 +23,11 @@ Everything an adapter must produce lives under `STORAGE_ROOT`
 | `stock_minute` | `trade_date=YYYY-MM-DD/` | `ticker, window_start, open, high, low, close, volume, transactions, trade_date` |
 | `option_day` | `trade_date=YYYY-MM-DD/` | `ticker, contract, underlying, expiry, strike, right, window_start, open, high, low, close, volume, transactions, trade_date` |
 | `option_minute` | `trade_date=YYYY-MM-DD/` | same as `option_day` |
+| `stock_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
+| `option_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, contract, underlying, expiry, strike, right, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
+| `future_daily` | `trade_date=YYYY-MM-DD/` | `ticker, root, trade_date, open, high, low, close, settle, volume, transactions` |
+| `future_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, open, high, low, close, volume, transactions, trade_date` |
+| `future_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
 
 The types are fixed in [`qfinzero/pipeline/schema.py`](../../qfinzero/pipeline/schema.py):
 `VARCHAR` for text, `DATE` for dates, `DOUBLE` for prices and strikes, and
@@ -32,7 +37,8 @@ Conventions every adapter follows:
 
 - `window_start` is the bar start in nanoseconds since the Unix epoch, UTC.
   On `option_day` it is 00:00 US/Eastern of the trade date.
-- `trade_date` is the US/Eastern calendar date for US markets.
+- `trade_date` is the US/Eastern calendar date for US markets. For futures it
+  is the CME session: 18:00 ET the evening before to 17:00 ET.
 - Prices are raw, as traded. Splits and dividends live in
   `corporate_actions/` and UPQ applies them on read.
 - Option tickers use `O:{ROOT}{YYMMDD}{C|P}{strike×1000, 8 digits}`, for example
@@ -63,8 +69,8 @@ glob. Two consequences follow:
 5. Add the raw directory, credentials and scan/acquire entries in
    `qfinzero/admin/` if the vendor has an API.
 
-Nothing under `infra/upq` changes. A new **kind** of data does need engine work:
-quotes, order books or futures have no store or endpoint today.
+Nothing under `infra/upq` changes. A new **kind** of data does need engine work
+(a store and endpoints); order books, for example, have none today.
 
 ## The Databento adapter
 
@@ -90,7 +96,8 @@ takes about two minutes, and later scans take about one second.
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily | `ohlcv-1d` uses the UTC day Databento reports |
 | `trades`, `tbbo`, `tcbbo` | minute + daily | every record is a trade |
 | `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily | only records with `action == 'T'` |
-| `cmbp-1`, `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute` | last top of book in each minute (see below) |
+| `cmbp-1`, `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute`, `future_quote_minute` | last top of book in each minute (see below) |
+| `mbp-1`, `mbp-10` of a futures venue | `future_quote_minute` | the exchange's own book is the BBO |
 | definition, statistics, status, imbalance | none | reference data |
 
 In MBO, a `T` record is the execution and an `F` record is the passive side of
@@ -106,7 +113,13 @@ executions also arrive as `T`.
 - US equity datasets (`XNAS.ITCH`, `EQUS.*`, `DBEQ.*`, `XNYS.PILLAR`, `ARCX.PILLAR`, …)
   become `stock_minute` and `stock_daily`. A space in a symbol becomes a dot
   (`BRK B` → `BRK.B`).
-- Other datasets, such as futures, are skipped.
+- Futures venues (`GLBX.MDP3` for CME Globex, `IFUS.*`, `IFEU.*`, `IFLL.*`,
+  `NDEX.*`) become `future_minute`, `future_daily` and `future_quote_minute`.
+  An outright keeps its symbol (`ZNZ6`); a front-month continuous symbol
+  (`ZN.v.0`, `ZN.c.0`, `ZN.n.0`) becomes the root (`ZN`), and `ZN.v.1` stays as
+  it is. Calendar spreads (`ZNZ6-ZNH7`) and user-defined spreads are dropped.
+  `root` is the product (`ESZ26` → `ES`, `M2KU6` → `M2K`).
+- Other datasets are skipped.
 - Parquet exports carry no dataset, so a dataset name in the path is used when
   present (for example `…/XNAS.ITCH/…`). Otherwise OSI-shaped symbols are treated
   as options.
@@ -121,6 +134,13 @@ executions also arrive as `T`.
   session traded. Volume and transactions cover the whole day. This matches the
   massive day aggregates. Option daily bars use every trade.
 - Fixed-point prices are divided by 1e9, so `56650000000` becomes exactly `56.65`.
+- Futures sessions run from 18:00 ET to 17:00 ET the next day, so a bar from
+  18:00 ET on belongs to the next trade date. A daily bar covers the whole
+  session; `settle` is its last trade (exchange settlement prices from the
+  `statistics` schema are not converted yet). Databento cuts files on UTC days,
+  so a lone file also holds the first two hours of the next session: those
+  minutes are kept, but that session gets a daily bar only when its 12:00–17:00
+  ET part is present for the product.
 
 ### Quotes
 
@@ -134,6 +154,18 @@ update are not written; readers carry the last row forward. When several
 sources quote a name, the order is consolidated feeds, then `cmbp-1` (every
 update), then 1-second samples, then 1-minute samples. `cmbp-1` files yield
 both trade bars and quotes.
+
+**Sampling interval.** Each quote store can keep one book per 1, 5, 15, 30 or
+60 minutes instead of every minute: the last book of each bucket (buckets are
+aligned on ET clock time, so 15 minutes gives 09:30, 09:45, …). A coarser
+interval makes a full-market OPRA day much smaller; readers carry the last row
+forward either way. Set it per asset class in *Data setup* (*BBO sampling*),
+with `qfz-data convert --quote-interval N` (or `--stock-quote-interval`,
+`--option-quote-interval`, `--future-quote-interval`), or with
+`QFZ_STOCK_QUOTE_INTERVAL`, `QFZ_OPTION_QUOTE_INTERVAL` and
+`QFZ_FUTURE_QUOTE_INTERVAL`. The choice is saved in the data configuration
+(`quotes.<asset>_interval_min`) so scheduled updates keep it, and changing it
+rebuilds the affected partitions.
 
 ### Overnight
 
@@ -208,4 +240,4 @@ schemas and one file per range for OHLCV.
 - Vendors can disagree. On one OPRA day the Databento trade count was about 5%
   higher than massive's own trade file. The `tcbbo` and `cmbp-1` adapters agree
   with each other exactly, and on another day both vendors matched exactly.
-- Book depth beyond the top level and futures are not converted, because UPQ has no store for them.
+- Book depth beyond the top level is not converted, because UPQ has no store for it.

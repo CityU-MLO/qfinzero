@@ -236,9 +236,11 @@ def setup_import(body: dict = Body(...)) -> dict:
     except PermissionError as e:
         _setup_error(e)
     convert, jobs = bool(body.get("convert", True)), int(body.get("jobs", 4))
+    intervals = body.get("quote_intervals") or None
 
     def _task(job):
-        return datasetup.import_local(vendor, paths, on_line=job.log, convert=convert, jobs=jobs)
+        return datasetup.import_local(vendor, paths, on_line=job.log, convert=convert, jobs=jobs,
+                                      quote_intervals=intervals)
 
     return registry.submit("import", f"import {vendor} ({len(paths)} selection(s))", _task).snapshot()
 
@@ -260,9 +262,11 @@ def setup_download(body: dict = Body(...)) -> dict:
             return {"ok": False, "error": f"{type(e).__name__}: {e}", "lines": lines}
         return {**res, "lines": lines}
     convert, jobs = bool(body.get("convert", True)), int(body.get("jobs", 4))
+    intervals = body.get("quote_intervals") or None
 
     def _task(job):
-        return datasetup.download(vendor, params, dry_run=False, convert=convert, on_line=job.log, jobs=jobs)
+        return datasetup.download(vendor, params, dry_run=False, convert=convert, on_line=job.log, jobs=jobs,
+                                  quote_intervals=intervals)
 
     return registry.submit("download", f"download {vendor}", _task).snapshot()
 

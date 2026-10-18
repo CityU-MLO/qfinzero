@@ -13,6 +13,7 @@ Start:
 
 import sys
 import os
+import asyncio
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
         news_db=str(REPO_ROOT / settings.news_db),
     )
     await ds.connect()
+    reconnect = asyncio.create_task(ds.keep_connected())
 
     event_svc = EventService(ds)
 
@@ -75,6 +77,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    reconnect.cancel()
     await ds.close()
     logger.info("ESP stopped")
 

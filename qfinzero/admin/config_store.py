@@ -79,6 +79,8 @@ def _defaults() -> dict[str, Any]:
             "rest_api_key": os.environ.get("MASSIVE_REST_API_KEY", os.environ.get("POLYGON_API_KEY", "")),
             "rest_base_url": os.environ.get("MASSIVE_REST_BASE_URL", "https://api.polygon.io"),
         },
+        # Quote stores: keep one NBBO per N minutes (1, 5, 15, 30, 60).
+        "quotes": {"stock_interval_min": 1, "option_interval_min": 1, "future_interval_min": 1},
         "tushare": {"token": os.environ.get("TUSHARE_TOKEN", "")},
         # Databento historical API (DBN downloads; US equities + OPRA options).
         "databento": {"api_key": os.environ.get("DATABENTO_API_KEY", "")},

@@ -136,3 +136,71 @@ def rates_sql(treasury_jsonl: Path) -> str:
         FROM read_json_auto('{_lit(treasury_jsonl)}')
         ORDER BY date
     """
+
+
+# ── quotes (NBBO) ─────────────────────────────────────────────────────────
+#
+# Raw quotes live under {us_options_opra,us_stocks_sip}/quotes_v1/ as parquet
+# with at least: ticker, sip_timestamp (ns), bid_price, ask_price, bid_size,
+# ask_size. One file per day (the flat file) or several per day (one per
+# contract, e.g. REST samples); the date is taken from the path. The data
+# setup utility normalises csv.gz flat files, REST jsonl.gz samples and
+# snapshot parquet (mark_ns) into this layout.
+
+QUOTE_INDEX = {"option": "us_options_opra/quotes_v1", "stock": "us_stocks_sip/quotes_v1"}
+_ANY_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def list_quote_files(root: Path, start: str | None, end: str | None) -> dict[str, list[Path]]:
+    """Parquet quote files under ``root`` grouped by trade date (from the path)."""
+    out: dict[str, list[Path]] = {}
+    if not root.is_dir():
+        return out
+    for p in root.rglob("*.parquet"):
+        m = _ANY_DATE_RE.findall(str(p.relative_to(root)))
+        if not m:
+            continue
+        d = m[-1]
+        if (start and d < start) or (end and d > end):
+            continue
+        out.setdefault(d, []).append(p)
+    return {d: sorted(v) for d, v in sorted(out.items())}
+
+
+def quote_sql(store: str, files: list[Path], trade_date: str, interval: int = 1) -> str:
+    """Last NBBO of each minute (or of each ``interval``-minute bucket) per ticker.
+
+    ``window_start`` is the minute the quote falls in, so a row is the book at
+    the end of that minute, like the Databento quote stores.
+    """
+    from .databento import NS_PER_MIN, check_interval, sample_sql
+    src = "read_parquet([" + ",".join(f"'{_lit(f)}'" for f in files) + "], union_by_name=true)"
+    et = "timezone('America/New_York', to_timestamp(window_start // 1000000000))"
+    base = f"""
+        WITH t AS (
+            SELECT CAST(ticker AS VARCHAR) AS ticker, CAST(sip_timestamp AS BIGINT) AS ts,
+                   CAST(bid_price AS DOUBLE) AS bid, CAST(ask_price AS DOUBLE) AS ask,
+                   CAST(bid_size AS BIGINT) AS bsz, CAST(ask_size AS BIGINT) AS asz
+            FROM {src} WHERE sip_timestamp IS NOT NULL
+        ),
+        m1 AS (
+            SELECT ticker, ts // {NS_PER_MIN} * {NS_PER_MIN} AS window_start,
+                   arg_max(bid, ts) AS bid_price, arg_max(ask, ts) AS ask_price,
+                   arg_max(bsz, ts) AS bid_size, arg_max(asz, ts) AS ask_size
+            FROM t GROUP BY 1, 2
+        ),
+        m2 AS (SELECT * FROM m1 WHERE CAST({et} AS DATE) = DATE '{trade_date}'),
+        q AS ({sample_sql("m2", check_interval(interval))})"""
+    if store == "stock_quote_minute":
+        return base + f"""
+        SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size, DATE '{trade_date}' AS trade_date
+        FROM q ORDER BY ticker, window_start"""
+    return base + f"""
+        SELECT ticker, ticker AS contract,
+               regexp_extract(ticker, '{_OPRA_RE}', 1) AS underlying,
+               strptime('20' || regexp_extract(ticker, '{_OPRA_RE}', 2), '%Y%m%d')::DATE AS expiry,
+               CAST(regexp_extract(ticker, '{_OPRA_RE}', 4) AS DOUBLE) / 1000.0 AS strike,
+               regexp_extract(ticker, '{_OPRA_RE}', 3) AS "right",
+               window_start, bid_price, ask_price, bid_size, ask_size, DATE '{trade_date}' AS trade_date
+        FROM q WHERE regexp_matches(ticker, '{_OPRA_RE}')
+        ORDER BY contract, window_start"""

@@ -318,9 +318,9 @@ def test_osi_ticker_normalisation():
 def test_scan_databento_states():
     from qfinzero.admin import scan
     assert scan.scan_databento(api_key="")["ok"] is False
-    ok = scan.scan_databento(api_key="db-x", lister=lambda k: ["OPRA.PILLAR", "GLBX.MDP3"])
+    ok = scan.scan_databento(api_key="db-x", lister=lambda k: ["OPRA.PILLAR", "GLBX.MDP3", "XEUR.EOBI"])
     assert ok["ok"] and {d["name"]: d["converted"] for d in ok["datasets"]} == {
-        "GLBX.MDP3": False, "OPRA.PILLAR": True}
+        "GLBX.MDP3": True, "OPRA.PILLAR": True, "XEUR.EOBI": False}
     bad = scan.scan_databento(api_key="db-x", lister=lambda k: (_ for _ in ()).throw(RuntimeError("401")))
     assert bad["ok"] is False and "401" in bad["error"]
 
@@ -517,3 +517,90 @@ def test_cmbp1_yields_bars_and_last_quote_per_minute(tmp_path):
     assert _q(con, f"SELECT close, volume FROM read_parquet('{bars}')") == [(2.1, 6)]
     assert _q(con, f"SELECT window_start, bid_price, ask_price FROM read_parquet('{quotes}')") \
         == [(T0930, 2.1, 2.2)]
+
+
+def test_quote_sampling_keeps_the_last_book_per_bucket():
+    import duckdb as _duckdb
+
+    from qfinzero.pipeline.sources import databento as _db
+    m = _db.NS_PER_MIN
+    base = 1_781_791_200_000_000_000          # 14:00 UTC, a 15-minute boundary
+    _duckdb.sql("CREATE OR REPLACE TEMP TABLE qq AS SELECT 'X' AS ticker, "
+                f"{base} + i * {m} AS window_start, i AS bid FROM range(40) t(i)")
+    got = _duckdb.sql(_db.sample_sql("qq", 15) + " ORDER BY window_start").fetchall()
+    assert [r[2] for r in got] == [14, 29, 39]
+    assert len(_duckdb.sql(_db.sample_sql("qq", 1)).fetchall()) == 40
+    with pytest.raises(ValueError):
+        _db.check_interval(7)
+
+
+@needs_dbn
+def test_glbx_mbo_becomes_future_stores_by_cme_session(tmp_path):
+    from qfinzero.pipeline import schema
+    paths = _paths(tmp_path)
+    m = 60 * S
+    eve = DAY_START + (23 * 60 + 30) * m             # 23:30 UTC = 18:30 ET: next session
+    recs = [
+        _mbo(42, T0930, 110.5, 3, "T"),
+        _mbo(42, T0930 + 20 * S, 110.75, 2, "T"),
+        _mbo(42, T0930 + 20 * S, 110.75, 2, "F"),
+        _mbo(42, DAY_START + 21 * 3600 * S + 30 * m, 110.25, 4, "T"),   # 16:30 ET, same session
+        _mbo(42, eve, 111.0, 1, "T"),
+        _mbo(43, T0930, 110.0, 5, "T"),
+        _mbo(44, T0930, 0.25, 9, "T"),                                    # calendar spread
+    ]
+    _write_dbn(paths.databento / "GLBX.MDP3" / "mbo" / "2025-01-02.dbn.zst", "GLBX.MDP3", "mbo",
+               {"ZN.v.0": 42, "ZNH5": 43, "ZNH5-ZNM5": 44}, recs, compress=True)
+    res = _convert(paths)
+    assert res.rows > 0, res.notes
+    con = duckdb.connect()
+    bars = _q(con, f"SELECT ticker, root, window_start, open, close, volume "
+                   f"FROM read_parquet('{_store(paths, 'future_minute')}') ORDER BY 1, 3")
+    assert bars == [("ZN", "ZN", T0930, 110.5, 110.75, 5),
+                    ("ZN", "ZN", DAY_START + 21 * 3600 * S + 30 * m, 110.25, 110.25, 4),
+                    ("ZNH5", "ZN", T0930, 110.0, 110.0, 5)]
+    nxt = _q(con, f"SELECT ticker, volume FROM read_parquet('{_store(paths, 'future_minute', '2025-01-03')}')")
+    assert nxt == [("ZN", 1)]
+    # only the evening of the 2025-01-03 session is in the file: no daily bar for it
+    assert not _store(paths, "future_daily", "2025-01-03").exists()
+    day = _q(con, f"SELECT ticker, root, open, high, low, close, settle, volume "
+                  f"FROM read_parquet('{_store(paths, 'future_daily')}') ORDER BY 1")
+    assert day == [("ZN", "ZN", 110.5, 110.75, 110.25, 110.25, 110.25, 9),
+                   ("ZNH5", "ZN", 110.0, 110.0, 110.0, 110.0, 110.0, 5)]
+    for store, want in (("future_daily", schema.FUTURE_DAILY), ("future_minute", schema.FUTURE_MINUTE)):
+        got = [(r[0], r[1]) for r in _q(con, f"DESCRIBE SELECT * FROM read_parquet('{_store(paths, store)}')")]
+        assert got == [(c, _DUCK[t]) for c, t in want.items()], store
+    assert not _store(paths, "stock_minute").exists()
+
+
+def test_future_root_and_asset_mapping():
+    con = duckdb.connect()
+    roots = _q(con, f"SELECT ticker, {dbsrc.FUTURE_ROOT_SQL} FROM (VALUES ('ZN'), ('ZNZ6'), ('ESZ26'), "
+                    "('MNQ'), ('6EH7'), ('M2KU6'), ('CL.v.1')) t(ticker) ORDER BY 1")
+    assert dict(roots) == {"ZN": "ZN", "ZNZ6": "ZN", "ESZ26": "ES", "MNQ": "MNQ", "6EH7": "6E",
+                           "M2KU6": "M2K", "CL.v.1": "CL"}
+    assert dbsrc.asset_for_dataset("GLBX.MDP3") == "future"
+    assert dbsrc.asset_for_dataset("XNAS.ITCH") == "stock"
+
+
+@needs_dbn
+def test_glbx_mbp1_becomes_future_quotes(tmp_path):
+    import databento_dbn as d
+    paths = _paths(tmp_path)
+
+    def rec(ts, bid, ask, action=d.Action.ADD, price=None, size=0):
+        lv = d.BidAskPair(bid_px=int(bid * PX), ask_px=int(ask * PX), bid_sz=12, ask_sz=9)
+        p = int(price * PX) if price is not None else dbsrc.UNDEF_PRICE
+        return d.MBP1Msg(1, 42, ts, p, size, action, d.Side.NONE, 0, ts, levels=lv)
+
+    recs = [rec(T0930 + 5 * S, 110.5, 110.515625),
+            rec(T0930 + 30 * S, 110.515625, 110.53125, d.Action.TRADE, price=110.53125, size=4),
+            rec(T0930 + 61 * S, 110.53125, 110.546875)]
+    _write_dbn(paths.databento / "GLBX.MDP3" / "mbp-1" / "ZN.dbn", "GLBX.MDP3", "mbp-1", {"ZN.v.0": 42}, recs)
+    _convert(paths, quote_interval={"future": 1})
+    con = duckdb.connect()
+    quotes = _store(paths, "future_quote_minute")
+    assert _q(con, f"SELECT ticker, root, window_start, bid_price, ask_price, bid_size FROM read_parquet('{quotes}') "
+                   "ORDER BY window_start") == [("ZN", "ZN", T0930, 110.515625, 110.53125, 12),
+                                                ("ZN", "ZN", T0930 + 60 * S, 110.53125, 110.546875, 12)]
+    assert _q(con, f"SELECT close, volume FROM read_parquet('{_store(paths, 'future_minute')}')") == [(110.53125, 4)]

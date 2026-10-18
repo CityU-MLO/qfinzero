@@ -21,6 +21,11 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 | `stock_minute` | `trade_date=YYYY-MM-DD/` | `ticker, window_start, open, high, low, close, volume, transactions, trade_date` |
 | `option_day` | `trade_date=YYYY-MM-DD/` | `ticker, contract, underlying, expiry, strike, right, window_start, open, high, low, close, volume, transactions, trade_date` |
 | `option_minute` | `trade_date=YYYY-MM-DD/` | 与 `option_day` 相同 |
+| `stock_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
+| `option_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, contract, underlying, expiry, strike, right, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
+| `future_daily` | `trade_date=YYYY-MM-DD/` | `ticker, root, trade_date, open, high, low, close, settle, volume, transactions` |
+| `future_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, open, high, low, close, volume, transactions, trade_date` |
+| `future_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
 
 类型固定在 [`qfinzero/pipeline/schema.py`](../../qfinzero/pipeline/schema.py) 里：
 文本是 `VARCHAR`，日期是 `DATE`，价格和行权价是 `DOUBLE`，成交量、成交笔数和时间戳是 `BIGINT`。
@@ -29,7 +34,7 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 所有适配器遵守的约定：
 
 - `window_start` 是K线开始时间，单位为 UTC 纳秒。`option_day` 上取交易日的美东 00:00。
-- 美股的 `trade_date` 是美东日历日。
+- 美股的 `trade_date` 是美东日历日。期货的 `trade_date` 是 CME 交易时段：前一天美东 18:00 到当天 17:00。
 - 价格为原始成交价。拆股和分红放在 `corporate_actions/`，由 UPQ 在读取时复权。
 - 期权代码格式为 `O:{ROOT}{YYMMDD}{C|P}{行权价×1000，8 位}`，例如 `O:SPY250117C00500000`。
 - 每家供应商在分区里写自己的文件：massive 是 `part-0000.parquet`，tushare 是
@@ -48,7 +53,7 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 4. 在 `qfinzero/update/sources.py` 注册更新源。
 5. 如果供应商有 API，在 `qfinzero/admin/` 加原始目录、凭证、scan 和 acquire。
 
-`infra/upq` 下无需改动。只有新**种类**的数据才需要改引擎：报价、订单簿、期货目前都没有对应的存储和接口。
+`infra/upq` 下无需改动。只有新**种类**的数据才需要改引擎（新增存储和接口），例如订单簿目前就没有。
 
 ## Databento 适配器
 
@@ -70,7 +75,8 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 | `ohlcv-1h`、`ohlcv-1d`、`ohlcv-eod` | 日线 | `ohlcv-1d` 用 Databento 给出的 UTC 日 |
 | `trades`、`tbbo`、`tcbbo` | 分钟线 + 日线 | 每条记录都是成交 |
 | `mbp-1`、`mbp-10`、`cmbp-1`、`mbo` | 分钟线 + 日线 | 只取 `action == 'T'` 的记录 |
-| `cmbp-1`、`cbbo-1s`、`cbbo-1m`、`bbo-1s`、`bbo-1m` | `option_quote_minute`、`stock_quote_minute` | 每分钟最后的最优买卖价（见下文） |
+| `cmbp-1`、`cbbo-1s`、`cbbo-1m`、`bbo-1s`、`bbo-1m` | `option_quote_minute`、`stock_quote_minute`、`future_quote_minute` | 每分钟最后的最优买卖价（见下文） |
+| 期货交易所的 `mbp-1`、`mbp-10` | `future_quote_minute` | 交易所自身的盘口就是最优买卖价 |
 | definition、statistics、status、imbalance | 无 | 参考数据 |
 
 MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者都算会让成交量翻倍。隐藏单的成交也以 `T` 出现。
@@ -81,7 +87,11 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
   改写为 `O:SPY250117C00500000`。标的、到期日、行权价和方向用与 massive 适配器相同的正则解析。
 - 美股数据集（`XNAS.ITCH`、`EQUS.*`、`DBEQ.*`、`XNYS.PILLAR`、`ARCX.PILLAR` 等）写入
   `stock_minute` 和 `stock_daily`。代码中的空格改为点（`BRK B` → `BRK.B`）。
-- 其他数据集（如期货）跳过。
+- 期货交易所数据集（CME Globex 的 `GLBX.MDP3`，以及 `IFUS.*`、`IFEU.*`、`IFLL.*`、`NDEX.*`）写入
+  `future_minute`、`future_daily` 和 `future_quote_minute`。单一合约保留原代码（`ZNZ6`）；主力连续代码
+  （`ZN.v.0`、`ZN.c.0`、`ZN.n.0`）改为品种代码（`ZN`），`ZN.v.1` 保持不变。跨期价差（`ZNZ6-ZNH7`）和自定义价差丢弃。
+  `root` 是品种（`ESZ26` → `ES`，`M2KU6` → `M2K`）。
+- 其他数据集跳过。
 - parquet 导出文件不带数据集名，路径里有数据集名时用它（如 `…/XNAS.ITCH/…`），否则 OSI 形式的代码当作期权。
 - instrument id 按日期从文件自带的 symbology 映射到代码，因为 OPRA 会复用 id。
 
@@ -91,6 +101,10 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
 - 交易日按美东时间。
 - 股票日线的开高低收取 09:30–16:00（该时段有成交时），成交量和成交笔数取全天，与 massive 日线一致。期权日线用全部成交。
 - 定点价格除以 1e9，所以 `56650000000` 精确等于 `56.65`。
+- 期货交易时段从美东 18:00 到次日 17:00，所以 18:00 之后的 bar 属于下一个交易日。日线覆盖整个时段；
+  `settle` 是时段的最后成交价（交易所 `statistics` schema 中的结算价暂不转换）。Databento 按 UTC 日切文件，
+  单独一个文件还会带上下一个时段的前两小时：这些分钟线会保留，但只有该品种 12:00–17:00 的部分也存在时，
+  那个时段才会生成日线。
 
 ### 报价
 
@@ -103,6 +117,12 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
 - 没有更新的分钟不写入，读取时沿用上一行。
 - 同一代码有多个来源时，优先顺序为：全市场合并数据、`cmbp-1`（每次更新）、1 秒抽样、1 分钟抽样。
 - `cmbp-1` 文件同时产出成交 K 线和报价。
+
+**采样间隔。** 每个报价存储可以每 1、5、15、30 或 60 分钟只保留一条盘口，而不是每分钟一条：保留每个区间的最后一条
+（区间按美东钟点对齐，15 分钟即 09:30、09:45……）。间隔越大，全市场 OPRA 一天的数据越小；无论哪种间隔，读取时都沿用上一行。
+在 *数据导入*（*BBO 采样*）中按资产类别设置，或用 `qfz-data convert --quote-interval N`（以及 `--stock-quote-interval`、
+`--option-quote-interval`、`--future-quote-interval`），或用环境变量 `QFZ_STOCK_QUOTE_INTERVAL`、`QFZ_OPTION_QUOTE_INTERVAL`、
+`QFZ_FUTURE_QUOTE_INTERVAL`。设置保存在数据配置（`quotes.<asset>_interval_min`）中，计划更新会沿用；修改后受影响的分区会重建。
 
 ### 夜盘
 
@@ -153,4 +173,4 @@ qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
 - 单一交易所的数据只含该交易所的成交量。`XNAS.ITCH` 的 SPY 成交量约为全市场的 17%，全市场成交量请用 `EQUS.*`。
 - 供应商之间可能不一致。某个 OPRA 交易日，Databento 的成交笔数比 massive 自己的逐笔文件多约 5%。
   `tcbbo` 与 `cmbp-1` 两个适配器结果完全一致，另一个交易日两家供应商也完全一致。
-- 一档以外的盘口深度和期货不转换，因为 UPQ 没有对应的存储。
+- 一档以外的盘口深度不转换，因为 UPQ 没有对应的存储。

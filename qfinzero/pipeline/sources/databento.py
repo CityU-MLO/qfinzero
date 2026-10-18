@@ -19,15 +19,19 @@ schema                                 becomes
 ``cmbp-1``                             minute bars + daily
 =====================================  =======================================
 
-Quote-only schemas (``bbo-*``, ``cbbo-*``) and reference schemas (definition,
-statistics, status, imbalance) are indexed but not converted: UPQ has no quote
-store. In MBO data only ``T`` records are counted; ``F`` fills are the passive
+Quote schemas (``bbo-*``, ``cbbo-*``, ``cmbp-1``, and ``mbp-1`` / ``mbp-10`` of a
+futures venue) fill the minute quote stores; reference schemas (definition,
+statistics, status, imbalance) are indexed but not converted. In MBO data only ``T`` records are counted; ``F`` fills are the passive
 side of the same execution and would double count.
 
 Asset class: ``OPRA.*`` datasets (or OSI-style symbols in parquet) become
-options; US equity datasets become stocks; anything else (futures, ...) is
-skipped. Option symbols are rewritten from OSI (``SPY   250117C00500000``) to the
-UPQ/massive form (``O:SPY250117C00500000``).
+options; US equity datasets become stocks; futures venues (``GLBX.MDP3`` = CME
+Globex, ICE, Nodal) become futures; anything else is skipped. Option symbols
+are rewritten from OSI (``SPY   250117C00500000``) to the UPQ/massive form
+(``O:SPY250117C00500000``). Futures keep the contract symbol (``ZNZ6``); a
+front-month continuous symbol (``ZN.v.0``, ``ZN.c.0``, ``ZN.n.0``) becomes the
+root (``ZN``). A futures trade date is the CME session: 18:00 ET the evening
+before to 17:00 ET, so bars from 18:00 ET on belong to the next date.
 
 Conversion is two-stage so re-runs are incremental:
 
@@ -64,7 +68,7 @@ PART_NAME = "part-databento-0000.parquet"
 INDEX_FILE = "databento_index.json"   # under <storage>/_state/
 INDEX_VERSION = 2   # 2: OCEA recognised as a US equity venue
 # Bump when extraction output changes so cached staging bars are rebuilt.
-EXTRACT_VERSION = 3   # 3: quote staging (<key>.q.parquet)
+EXTRACT_VERSION = 4   # 3: quote staging (<key>.q.parquet); 4: futures
 
 UNDEF_PRICE = 9223372036854775807     # i64::MAX, Databento's "no price"
 UNDEF_TS = 18446744073709551615       # u64::MAX, Databento's "no timestamp"
@@ -87,6 +91,8 @@ QUOTE_SCHEMAS = {"bbo-1s", "bbo-1m", "cbbo-1s", "cbbo-1m"}
 # Schemas whose records carry a top-of-book (bid/ask) -> quote stores, with a
 # preference rank: full-resolution consolidated updates beat sampled quotes.
 QUOTE_CAPABLE = {"cmbp-1": 4, "cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
+# A futures exchange is the only venue, so its own top of book is the BBO.
+FUTURE_BOOK_SCHEMAS = {"mbp-1", "mbp-10"}
 # Sampled schemas stamp ts_recv at the *end* of their interval.
 SAMPLED_QUOTES = {"cbbo-1s", "bbo-1s", "cbbo-1m", "bbo-1m"}
 
@@ -99,8 +105,8 @@ RTYPE_SCHEMA = {
     0xC1: "cbbo-1m", 0xC2: "tcbbo", 0xC3: "bbo-1s", 0xC4: "bbo-1m",
 }
 
-# US equity datasets (venue or consolidated). Everything else that is not
-# OPRA is skipped (futures / non-US venues have no UPQ store).
+# US equity datasets (venue or consolidated). Datasets that are neither these,
+# OPRA nor a futures venue (non-US equities, ...) are skipped.
 EQUITY_DATASET_PREFIXES = (
     "XNAS", "XNYS", "XBOS", "XPSX", "XCHI", "XCIS", "XASE", "ARCX", "IEXG",
     "BATS", "BATY", "EDGA", "EDGX", "MEMX", "EPRL", "DBEQ", "EQUS", "XNDQ",
@@ -108,6 +114,10 @@ EQUITY_DATASET_PREFIXES = (
     "OCEA",     # Blue Ocean ATS: the 20:00-04:00 ET overnight session
 )
 CONSOLIDATED_PREFIXES = ("EQUS", "DBEQ", "OPRA")
+# Futures venues: CME Globex (CME, CBOT, NYMEX, COMEX), ICE US / Europe, Nodal.
+FUTURES_DATASET_PREFIXES = ("GLBX", "IFUS", "IFEU", "IFLL", "NDEX")
+# A futures session opens at 18:00 ET: shift by 6 h to get its trade date.
+FUTURE_SESSION_SHIFT_NS = 6 * 3_600_000_000_000
 
 # OSI option symbol: 6-char padded root, YYMMDD, C/P, strike * 1000 (8 digits).
 OSI_RE = r"^[A-Z0-9 .]{6}[0-9]{6}[CP][0-9]{8}$"
@@ -129,12 +139,14 @@ def dataset_rank(dataset: str | None) -> int:
 
 
 def asset_for_dataset(dataset: str | None) -> Optional[str]:
-    """``option`` / ``stock`` / ``None`` (unsupported) for a Databento dataset."""
+    """``option`` / ``stock`` / ``future`` / ``None`` (unsupported) for a dataset."""
     if not dataset:
         return None
     ds = dataset.upper()
     if ds.startswith("OPRA"):
         return "option"
+    if ds.startswith(FUTURES_DATASET_PREFIXES):
+        return "future"
     if ds.startswith(EQUITY_DATASET_PREFIXES):
         return "stock"
     return None
@@ -195,7 +207,8 @@ class FileInfo:
 
     @property
     def has_quotes(self) -> bool:
-        return self.schema in QUOTE_CAPABLE
+        return self.schema in QUOTE_CAPABLE or (
+            self.asset == "future" and self.schema in FUTURE_BOOK_SCHEMAS)
 
     @property
     def convertible(self) -> bool:
@@ -426,8 +439,21 @@ def _ticker_sql(sym_col: str, asset_col: str) -> str:
             CASE WHEN regexp_matches({sym_col}, '{OSI_RE}')
                  THEN 'O:' || replace(trim(substr({sym_col}, 1, 6)), ' ', '') || substr({sym_col}, 7)
             END
+        WHEN {asset_col} = 'future' THEN
+            CASE WHEN regexp_matches(trim({sym_col}), '^[A-Z0-9]+\\.[cnv]\\.0$')
+                     THEN split_part(trim({sym_col}), '.', 1)
+                 -- outrights only: calendar spreads (ZNZ6-ZNH7) and UDS (UD:...) are dropped
+                 WHEN regexp_matches(trim({sym_col}), '^[A-Z0-9]+(\\.[cnv]\\.[0-9]+)?$')
+                     THEN trim({sym_col})
+            END
         ELSE nullif(replace(trim({sym_col}), ' ', '.'), '')
     END"""
+
+
+def _et_shifted(ns_col: str) -> str:
+    """ET wall time of a futures timestamp shifted into its session's date."""
+    return (f"timezone('{_ET}', to_timestamp(({ns_col} + {FUTURE_SESSION_SHIFT_NS}) "
+            f"// 1000000000))")
 
 
 def _bars_to_staging_sql(src: str, kind_col: str, drank: int, src_id: str) -> str:
@@ -439,6 +465,7 @@ def _bars_to_staging_sql(src: str, kind_col: str, drank: int, src_id: str) -> st
                {kind_col} AS kind,
                CASE WHEN {kind_col} IN ('d', 'e')
                     THEN DATE '1970-01-01' + CAST(ws // {NS_PER_DAY} AS INTEGER)
+                    WHEN asset = 'future' THEN CAST({_et_shifted('ws')} AS DATE)
                     ELSE CAST({et} AS DATE) END AS trade_date,
                CAST(ws AS BIGINT) AS window_start,
                CASE WHEN {kind_col} = 'm'
@@ -716,7 +743,9 @@ def _write_quote_staging(con, src: str, info: FileInfo, out: Path) -> tuple[int,
     out.parent.mkdir(parents=True, exist_ok=True)
     con.execute(f"""CREATE OR REPLACE TEMP TABLE _qstg AS
         SELECT asset, {_ticker_sql('sym', 'asset')} AS ticker,
-               CAST({et} AS DATE) AS trade_date, CAST(ws AS BIGINT) AS window_start,
+               CASE WHEN asset = 'future' THEN CAST({_et_shifted('ws')} AS DATE)
+                    ELSE CAST({et} AS DATE) END AS trade_date,
+               CAST(ws AS BIGINT) AS window_start,
                CAST(bid AS DOUBLE) AS bid_price, CAST(ask AS DOUBLE) AS ask_price,
                CAST(bsz AS BIGINT) AS bid_size, CAST(asz AS BIGINT) AS ask_size,
                CAST(last_ts AS BIGINT) AS last_ts, {int(drank)} AS drank, {int(srank)} AS srank,
@@ -818,10 +847,32 @@ def _extract_parquet_quotes(info: FileInfo, out: Path, con) -> tuple[int, list[s
     return result
 
 
-def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+QUOTE_INTERVALS = (1, 5, 15, 30, 60)
+
+
+def check_interval(minutes: int) -> int:
+    m = int(minutes)
+    if m not in QUOTE_INTERVALS:
+        raise ValueError(f"quote interval must be one of {QUOTE_INTERVALS} minutes")
+    return m
+
+
+def sample_sql(src: str, minutes: int) -> str:
+    """Keep the last minute row of each ``minutes`` bucket (ET-aligned: the UTC
+    offset is a whole number of hours). ``minutes == 1`` keeps every row."""
+    if minutes == 1:
+        return f"SELECT * FROM {src}"
+    bucket = minutes * NS_PER_MIN
+    return (f"SELECT * FROM {src} QUALIFY row_number() OVER ("
+            f"PARTITION BY ticker, window_start // {bucket} ORDER BY window_start DESC) = 1")
+
+
+def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path],
+              interval: int = 1) -> str:
     """Quote store: one source per ticker (consolidated, then finer sampling,
-    then more samples), one row per (ticker, minute) keeping the latest book."""
-    asset = "stock" if store == "stock_quote_minute" else "option"
+    then more samples), one row per (ticker, minute) keeping the latest book;
+    ``interval`` > 1 keeps only the last book of each N-minute bucket."""
+    asset = STORE_ASSET[store]
     base = f"""
         WITH src AS (
             SELECT * FROM read_parquet({_staging_list(staging)})
@@ -833,14 +884,20 @@ def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
                 PARTITION BY ticker ORDER BY max(drank) DESC, max(srank) DESC, count(*) DESC, src) AS rn
             FROM src GROUP BY ticker, src
         ),
-        q AS (
+        q1 AS (
             SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
             QUALIFY row_number() OVER (PARTITION BY ticker, window_start ORDER BY last_ts DESC) = 1
-        )"""
+        ),
+        q AS ({sample_sql("q1", check_interval(interval))})"""
     if asset == "stock":
         return base + f"""
         SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size,
                DATE '{trade_date}' AS trade_date
+        FROM q ORDER BY ticker, window_start"""
+    if asset == "future":
+        return base + f"""
+        SELECT ticker, {FUTURE_ROOT_SQL} AS root, window_start, bid_price, ask_price,
+               bid_size, ask_size, DATE '{trade_date}' AS trade_date
         FROM q ORDER BY ticker, window_start"""
     return base + f"""
         SELECT ticker, ticker AS contract,
@@ -857,6 +914,7 @@ def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
 QUOTE_STORES_FOR_ASSET = {
     "stock": ("stock_quote_minute",),
     "option": ("option_quote_minute",),
+    "future": ("future_quote_minute",),
 }
 
 
@@ -893,6 +951,9 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
 # ── assembly SQL: staging -> one UPQ partition ───────────────────────────
 
 _OPRA_RE = r"^O:([A-Z]+)[0-9]{0,2}([0-9]{6})([CP])([0-9]{8})$"   # == massive._OPRA_RE
+# Futures root: ``ZNZ6`` / ``ESZ26`` -> ``ZN`` / ``ES``; ``ZN`` and ``ZN.v.1`` -> ``ZN``.
+FUTURE_ROOT_SQL = ("regexp_extract(split_part(ticker, '.', 1), "
+                   "'^([A-Z0-9]+?)([FGHJKMNQUVXZ][0-9]{1,2})?$', 1)")
 
 
 # Overnight segment (20:00-04:00 ET). No other vendor covers it (massive stops
@@ -937,6 +998,69 @@ _DEDUPE_DAILY = """QUALIFY row_number() OVER (
 
 def _staging_list(files: list[Path]) -> str:
     return "[" + ", ".join(f"'{_lit(p)}'" for p in files) + "]"
+
+
+def future_minute_sql(staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+    """``future_minute``: the whole session (no overnight split), best source per ticker."""
+    return f"""
+        WITH src AS (
+            SELECT * FROM read_parquet({_staging_list(staging)})
+            WHERE asset = 'future' AND kind = 'm' AND trade_date = DATE '{trade_date}'
+              {_excluded(siblings)}
+        ),
+        rank AS (
+            SELECT ticker, src, row_number() OVER (
+                PARTITION BY ticker ORDER BY max(drank) DESC, sum(volume) DESC, src) AS rn
+            FROM src GROUP BY ticker, src
+        ),
+        bars AS (
+            SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
+            {_DEDUPE}
+        )
+        SELECT ticker, {FUTURE_ROOT_SQL} AS root, window_start, open, high, low, close,
+               volume, transactions, DATE '{trade_date}' AS trade_date
+        FROM bars ORDER BY ticker, window_start"""
+
+
+def future_daily_sql(staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+    """``future_daily``: one bar per session (18:00 ET the day before to 17:00 ET).
+
+    ``settle`` is the last trade of the session. The exchange's settlement price
+    (from the ``statistics`` schema) is not converted yet. Databento cuts files
+    on UTC days, so a lone file also holds the first hours of the next session;
+    a session built from minutes gets a daily bar only when its US day part
+    (12:00-17:00 ET) is present for that product (root) in that source.
+    """
+    return f"""
+        WITH raw AS (
+            SELECT * FROM read_parquet({_staging_list(staging)})
+            WHERE asset = 'future' AND trade_date = DATE '{trade_date}'
+              {_excluded(siblings)}
+        ),
+        src AS (SELECT * FROM raw {_DEDUPE_DAILY}),
+        cand0 AS (
+            SELECT ticker, src, kind, max(drank) AS drank,
+                   CASE kind WHEN 'e' THEN 4 WHEN 'm' THEN 3 WHEN 'd' THEN 2 ELSE 1 END AS krank,
+                   arg_min(open, window_start) AS open, max(high) AS high, min(low) AS low,
+                   arg_max(close, window_start) AS close,
+                   CAST(sum(volume) AS BIGINT) AS volume,
+                   CAST(sum(transactions) AS BIGINT) AS transactions,
+                   count(*) FILTER (WHERE et_min BETWEEN 720 AND 1019) AS day_rows
+            FROM src GROUP BY ticker, src, kind
+        ),
+        cand AS (
+            SELECT *, sum(day_rows) OVER (PARTITION BY src, kind, {FUTURE_ROOT_SQL}) AS day_part
+            FROM cand0
+        ),
+        bars AS (
+            SELECT * FROM (
+                SELECT *, row_number() OVER (
+                    PARTITION BY ticker ORDER BY drank DESC, krank DESC, volume DESC, src) AS rn
+                FROM cand WHERE krank <> 3 OR day_part > 0) WHERE rn = 1
+        )
+        SELECT ticker, {FUTURE_ROOT_SQL} AS root, DATE '{trade_date}' AS trade_date,
+               open, high, low, close, close AS settle, volume, transactions
+        FROM bars ORDER BY ticker"""
 
 
 def minute_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
@@ -1030,6 +1154,10 @@ def daily_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
 
 
 def assembly_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+    if store == "future_minute":
+        return future_minute_sql(staging, trade_date, siblings)
+    if store == "future_daily":
+        return future_daily_sql(staging, trade_date, siblings)
     if store in ("stock_minute", "option_minute"):
         return minute_sql(store, staging, trade_date, siblings)
     return daily_sql(store, staging, trade_date, siblings)
@@ -1038,7 +1166,10 @@ def assembly_sql(store: str, staging: list[Path], trade_date: str, siblings: lis
 STORES_FOR_ASSET = {
     "stock": ("stock_daily", "stock_minute"),
     "option": ("option_day", "option_minute"),
+    "future": ("future_daily", "future_minute"),
 }
+STORE_ASSET = {s: a for m in (STORES_FOR_ASSET, QUOTE_STORES_FOR_ASSET)
+               for a, stores in m.items() for s in stores}
 
 
 def sibling_parts(partition_dir: Path) -> list[Path]:

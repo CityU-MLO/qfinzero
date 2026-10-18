@@ -29,6 +29,9 @@ LEVELS = (
     ("options_eod", "option_day"),
     ("options_minute", "option_minute"),
     ("options_quotes", "option_quote_minute"),
+    ("futures_daily", "future_daily"),
+    ("futures_minute", "future_minute"),
+    ("futures_quotes", "future_quote_minute"),
 )
 OPTION_STORES = {"option_day", "option_minute", "option_quote_minute"}
 SESSIONS = ("overnight", "pre", "regular", "post")

@@ -197,7 +197,8 @@ header, so batch downloads, per-symbol folders and mixed layouts all work.
 `OPRA.*` datasets become `option_minute` / `option_day` with OSI symbols rewritten
 to the UPQ form (`SPY   250117C00500000` → `O:SPY250117C00500000`). US equity
 datasets (`XNAS.ITCH`, `EQUS.*`, `DBEQ.*`, …) become `stock_minute` /
-`stock_daily`; futures datasets are skipped. Minute bars use `ts_event`; trade
+`stock_daily`; futures venues (`GLBX.MDP3`, ICE, Nodal) become `future_minute` /
+`future_daily` / `future_quote_minute` on CME session dates. Minute bars use `ts_event`; trade
 dates and daily bars follow US/Eastern, with daily open/high/low/close taken
 from the 09:30–16:00 session and volume from the whole day. Only `T` records
 count as trades in MBO (`F` fills are the passive side of the same print).

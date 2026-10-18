@@ -175,3 +175,29 @@ def test_news_counts_per_ticker_and_et_date(client, esp_dir):
     (total,) = con.execute("SELECT count(*) FROM news_tickers t JOIN news n ON n.id = t.news_id WHERE t.ticker IN "
                            "('ACME','BOLT') AND n.published_utc >= '2025-03-01T05' AND n.published_utc < '2025-04-01T04'").fetchone()
     assert sum(by.values()) == total
+
+
+def test_sources_reconnect_when_they_come_back(tmp_path, esp_dir):
+    """A store missing at start is picked up by keep_connected once it appears."""
+    import asyncio
+    import shutil
+
+    from services.data_sources import DataSourceManager
+
+    async def scenario():
+        ds = DataSourceManager(mongo_uri="mongodb://127.0.0.1:1", mongo_db="x", mongo_collection="x",
+                               earnings_db=str(tmp_path / "earn.sqlite3"), econ_events_db=str(tmp_path / "econ.sqlite3"),
+                               news_backend="sqlite", news_db=str(tmp_path / "news.sqlite3"))
+        await ds.connect()
+        assert not ds.earnings.available
+        shutil.copy(esp_dir / "benzinga_earnings.sqlite3", tmp_path / "earn.sqlite3")
+        task = asyncio.create_task(ds.keep_connected(interval=0.05))
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            if ds.earnings.available:
+                break
+        task.cancel()
+        assert ds.earnings.available and not ds.econ.available
+        await ds.close()
+
+    asyncio.run(scenario())
