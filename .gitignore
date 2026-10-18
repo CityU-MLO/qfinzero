@@ -30,14 +30,15 @@ env/
 *.egg-info/
 dist/
 build/
-data/
-# ...but not the console's /data page (a Next.js route directory)
-!infra/dashboard-web/src/app/(console)/data/
+# local data and test coverage output at the root only: source directories
+# such as qfinzero/bench/data and src/components/coverage must stay tracked
+/data/
 runs/
 logs/
 node_modules/
 .next/
-coverage/
+/coverage/
+infra/dashboard-web/coverage/
 *.tsbuildinfo
 
 # Agent configurations
