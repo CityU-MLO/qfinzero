@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev,server,pipeline,databento]"
+      - name: core tests
+        run: pytest -q
+      - name: ESP tests
+        working-directory: infra/esp
+        run: python -m pytest tests -q
+      - name: PMB tests
+        working-directory: infra/pmb
+        run: python -m pytest tests -q
+
+  upq:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/upq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: infra/upq
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/dashboard-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version from package.json packageManager
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: infra/dashboard-web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  e2e:
+    needs: [python, upq]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: infra/upq
+      - run: cargo build -p upq-service
+        working-directory: infra/upq
+      - run: pip install -e ".[dev,server,pipeline]"
+      - name: full stack on the synthetic sample (oracle must score 100%)
+        env:
+          QFZ_E2E: "1"
+        run: pytest tests/test_e2e.py -v
+
+  docker:
+    needs: [e2e, web]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: qfinzero:ci
+          build-args: QFINZERO_GIT_HASH=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,12 @@
+.git
+**/__pycache__
+**/*.pyc
+.venv
+.cargo-target
+infra/upq/target
+infra/dashboard-web/node_modules
+infra/dashboard-web/.next
+infra/dashboard-web/screenshots
+eval/runs
+*.log
+.env

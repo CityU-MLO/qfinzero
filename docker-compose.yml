@@ -1,0 +1,36 @@
+# docker compose up -d       → http://localhost:19777 (sign in as admin)
+#
+# The first start generates the synthetic sample into the qfz-data volume.
+# To serve your own data, mount it at /data instead (layout: upq/ esp/) and
+# drop QFZ_SAMPLE. MongoDB is only needed for a live news collection; without
+# it ESP serves news from /data/esp/news.sqlite3.
+services:
+  qfinzero:
+    build:
+      context: .
+      args:
+        QFINZERO_GIT_HASH: ${QFINZERO_GIT_HASH:-unknown}
+    image: qfinzero:latest
+    ports:
+      - "19777:19777"
+    environment:
+      QFZ_SAMPLE: "1"
+      QFZ_ADMIN_USERNAME: admin
+      QFZ_ADMIN_PASSWORD: ${QFZ_ADMIN_PASSWORD:?set QFZ_ADMIN_PASSWORD}
+      # QFZ_PUBLIC_HOSTS: qfz.example.com     # needed for /mcp behind a proxy
+      # MONGO_URI: mongodb://mongo:27017
+      # ESP_NEWS_BACKEND: mongo
+    volumes:
+      - qfz-data:/data
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    profiles: ["mongo"]
+    volumes:
+      - qfz-mongo:/data/db
+    restart: unless-stopped
+
+volumes:
+  qfz-data:
+  qfz-mongo:
