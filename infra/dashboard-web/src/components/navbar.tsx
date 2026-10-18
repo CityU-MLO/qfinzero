@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, CalendarDays, Database, LineChart, MessageSquare, Newspaper, Settings } from "lucide-react";
+import { BookOpen, CalendarDays, Database, Grid3x3, LineChart, MessageSquare, Newspaper, Settings } from "lucide-react";
 
 import { useLegacySkin } from "@/components/app-providers";
 import { LanguageToggle, useT } from "@/components/locale-provider";
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/broker", label: ["Broker", "模拟交易"], icon: LineChart, admin: false },
   { href: "/news", label: ["News", "新闻"], icon: Newspaper, admin: false },
   { href: "/calendar", label: ["Calendar", "日历"], icon: CalendarDays, admin: false },
+  { href: "/coverage", label: ["Coverage", "数据覆盖"], icon: Grid3x3, admin: false },
   { href: "/data", label: ["Data", "数据"], icon: Database, admin: true },
   { href: "/docs", label: ["Docs", "文档"], icon: BookOpen, admin: false },
 ] as const;

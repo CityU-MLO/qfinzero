@@ -160,3 +160,18 @@ def test_undated_earnings_known_after_day_end():
     noon = datetime(2025, 1, 15, 17, tzinfo=timezone.utc)
     assert src._to_event(row, noon).payload["actual_eps"] is None
     assert src._to_event(row, noon + timedelta(days=1)).payload["actual_eps"] == 1.0
+
+
+def test_news_counts_per_ticker_and_et_date(client, esp_dir):
+    r = client.get("/esp/news/counts", params={"tickers": "ACME,BOLT", "start": "2025-03-01", "end": "2025-03-31"})
+    assert r.status_code == 200
+    rows = r.json()["counts"]
+    assert {x["ticker"] for x in rows} == {"ACME", "BOLT"}
+    by = {(x["ticker"], x["date"]): x["count"] for x in rows}
+    # ACME's result (16:06 ET) and preview are on ET dates, not UTC dates
+    assert by[("ACME", ACME.day.isoformat())] >= 1
+    import sqlite3
+    con = sqlite3.connect(esp_dir / "news.sqlite3")
+    (total,) = con.execute("SELECT count(*) FROM news_tickers t JOIN news n ON n.id = t.news_id WHERE t.ticker IN "
+                           "('ACME','BOLT') AND n.published_utc >= '2025-03-01T05' AND n.published_utc < '2025-04-01T04'").fetchone()
+    assert sum(by.values()) == total

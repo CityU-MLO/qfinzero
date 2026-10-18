@@ -433,6 +433,19 @@ class MongoNewsSource:
         async for doc in self._coll.find(q).sort([("published_utc", 1)]).limit(limit):
             yield doc
 
+    async def daily_counts(self, start: datetime, end: datetime, tickers: list[str]) -> list[dict]:
+        """Articles per (ticker, US/Eastern date) in ``[start, end)``."""
+        pipeline = [
+            {"$match": {"published_utc": {"$gte": start, "$lt": end}, "tickers": {"$in": tickers}}},
+            {"$unwind": "$tickers"},
+            {"$match": {"tickers": {"$in": tickers}}},
+            {"$group": {"_id": {"t": "$tickers", "d": {"$dateToString": {
+                "format": "%Y-%m-%d", "date": "$published_utc", "timezone": "America/New_York"}}},
+                "n": {"$sum": 1}}},
+        ]
+        return [{"ticker": r["_id"]["t"], "date": r["_id"]["d"], "count": r["n"]}
+                async for r in self._coll.aggregate(pipeline)]
+
 
 # =====================================================================
 # SQLiteNewsSource
@@ -587,6 +600,18 @@ class SQLiteNewsSource:
         where, args = self._where(start, end, tickers)
         async with self._db.execute("SELECT COUNT(*)" + where, args) as cur:
             return (await cur.fetchone())[0]
+
+    async def daily_counts(self, start: datetime, end: datetime, tickers: list[str]) -> list[dict]:
+        """Articles per (ticker, US/Eastern date) in ``[start, end)``."""
+        ph = ",".join("?" for _ in tickers)
+        sql = (f"SELECT t.ticker, n.published_utc FROM news n JOIN news_tickers t ON t.news_id = n.id "
+               f"WHERE t.ticker IN ({ph}) AND n.published_utc >= ? AND n.published_utc < ?")
+        counts: dict[tuple[str, str], int] = {}
+        async with self._db.execute(sql, [*tickers, self._iso(start), self._iso(end)]) as cur:
+            async for t, pub in cur:
+                key = (t, _parse_utc(pub).astimezone(EST).date().isoformat())
+                counts[key] = counts.get(key, 0) + 1
+        return [{"ticker": t, "date": d, "count": n} for (t, d), n in sorted(counts.items())]
 
     async def iter_docs(self, start: datetime, end: datetime, tickers: Optional[list[str]], limit: int):
         where, args = self._where(start, end, tickers)

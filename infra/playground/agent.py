@@ -11,6 +11,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
 from mcp_tools import get_tools
+from providers import chat_model_kwargs, protocol
+
+
+def chunk_text(content: Any) -> str:
+    """Text of a streamed chunk: a string (OpenAI) or content blocks (Anthropic
+    protocol, which also streams thinking, signature and tool-input blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content
+                       if isinstance(b, dict) and b.get("type") in ("text", "text_delta"))
+    return ""
 
 
 def safe_serialize(obj: Any) -> Any:
@@ -70,6 +82,7 @@ async def run_agent_stream(
     api_key: str,
     as_of_date: str,
     proxy: str | None = None,
+    api: str = "openai",
 ) -> AsyncIterator[dict]:
     """
     Run the ReAct agent for one user turn and yield SSE-ready event dicts.
@@ -85,16 +98,11 @@ async def run_agent_stream(
     """
     # Route LLM API calls through the egress proxy when configured; local MCP tool
     # calls are unaffected (they run over stdio, not this client).
-    http_client = httpx.AsyncClient(proxy=proxy) if proxy else None
+    # (OpenAI protocol only; the Anthropic client is created by langchain-anthropic.)
+    http_client = httpx.AsyncClient(proxy=proxy) if proxy and protocol(api) == "openai" else None
     try:
         async with get_tools() as tools:
-            llm_kwargs: dict[str, Any] = dict(
-                model=model,
-                model_provider="openai",
-                base_url=base_url,
-                api_key=api_key,
-                streaming=True,
-            )
+            llm_kwargs: dict[str, Any] = chat_model_kwargs(api, model, base_url, api_key)
             if http_client is not None:
                 llm_kwargs["http_async_client"] = http_client
             llm = init_chat_model(**llm_kwargs)
@@ -141,8 +149,9 @@ async def run_agent_stream(
 
                 elif kind == "on_chat_model_stream":
                     chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        yield {"type": "llm_chunk", "content": chunk.content}
+                    text = chunk_text(getattr(chunk, "content", None)) if chunk else ""
+                    if text:
+                        yield {"type": "llm_chunk", "content": text}
 
             yield {"type": "done"}
 

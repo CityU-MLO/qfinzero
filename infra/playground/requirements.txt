@@ -1,6 +1,7 @@
 langgraph>=1.0
 langchain>=1.2
 langchain-openai>=1.1
+langchain-anthropic>=1.0
 langchain-mcp-adapters>=0.2
 mcp>=1.0
 fastapi>=0.115.0

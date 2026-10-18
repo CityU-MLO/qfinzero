@@ -64,6 +64,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
         body: JSON.stringify({
           thread_id: threadId.current,
           messages: [{ role: "user", content: text }],
+          api: config.api ?? "openai",
           model: config.model,
           base_url: config.baseUrl,
           api_key: config.apiKey,

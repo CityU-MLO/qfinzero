@@ -37,6 +37,12 @@ Added:
 - Docker image, `docker-compose.yml` and a GitHub Actions workflow running the
   Python, Rust, web and end-to-end suites.
 - A documentation hub in the web UI (`/docs`) and an English / Chinese UI.
+- A coverage map (`/coverage`): data levels per ticker and day (daily, minute
+  by session, quotes, option EOD / minute / quotes) with news, earnings and
+  macro releases on the same time axis; ESP `GET /esp/news/counts`.
+- Model groups for Chat: OpenAI, Claude and Gemini via Antigravity endpoints,
+  model lists fetched from `/models`, import of Claude Code settings, export
+  lines or Codex `config.toml`, and JSON import / export.
 
 Changed:
 

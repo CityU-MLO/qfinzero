@@ -8,8 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { useT } from "@/components/locale-provider";
+import {
+  API_META, CHANGE_EVENT, STORAGE_KEY as GROUPS_KEY, loadSettings, resolve, type ApiType, type ModelSettings,
+} from "@/lib/model-groups";
 
 export interface PlaygroundConfig {
+  api: ApiType;
   model: string;
   baseUrl: string;
   apiKey: string;
@@ -18,37 +22,12 @@ export interface PlaygroundConfig {
 }
 
 const STORAGE_KEY = "playground_config";
-const SETTINGS_KEY = "qfz_console_settings"; // written by the Settings page
 export const ET_ZONE = "America/New_York";
 
-// ── Provider registry (mirrors the Settings page; base_url/api_key resolved here) ──
-type Provider = { id: string; label: string; baseUrl: string; apiKey: string; models: string[] };
-type ConsoleSettings = { providers: Provider[]; activeProviderId: string; activeModel: string; proxy: string };
-
-const DEFAULT_PROVIDERS: Provider[] = [
-  { id: "openai", label: "OpenAI (GPT)", baseUrl: "https://api.openai.com/v1", apiKey: "", models: ["gpt-4o", "gpt-4o-mini", "o3-mini"] },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", apiKey: "", models: ["deepseek-chat", "deepseek-reasoner"] },
-  { id: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", models: ["gemini-2.0-flash", "gemini-1.5-pro"] },
-  { id: "claude", label: "Claude (Anthropic)", baseUrl: "https://api.anthropic.com/v1", apiKey: "", models: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"] },
-];
-
-function loadConsoleSettings(): ConsoleSettings {
-  const fallback: ConsoleSettings = { providers: DEFAULT_PROVIDERS, activeProviderId: "openai", activeModel: "gpt-4o-mini", proxy: "" };
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<ConsoleSettings>;
-    if (!parsed.providers?.length) return fallback;
-    return { ...fallback, ...parsed, providers: parsed.providers };
-  } catch {
-    return fallback;
-  }
-}
-
 export const DEFAULT_CONFIG: PlaygroundConfig = {
-  model: "gpt-4o-mini",
-  baseUrl: "https://api.openai.com/v1",
+  api: "openai",
+  model: "",
+  baseUrl: "",
   apiKey: "",
   // Default: today at 09:00 ET stored as UTC ISO string
   asOfDate: getDefaultAsOfDate(),
@@ -103,48 +82,45 @@ interface ConfigPanelProps {
 export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
   const t = useT();
   const [saved, setSaved] = useState(false);
-  const [settings, setSettings] = useState<ConsoleSettings | null>(null);
+  const [groups, setGroups] = useState<ModelSettings | null>(null);
 
   useEffect(() => {
-    setSettings(loadConsoleSettings());
-    // pick up edits made on the Settings page in another tab
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === SETTINGS_KEY) setSettings(loadConsoleSettings());
-    };
+    const reload = () => setGroups(loadSettings());
+    reload();
+    // edits on the Settings page: other tabs fire "storage", this tab our own event
+    const onStorage = (e: StorageEvent) => e.key === GROUPS_KEY && reload();
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(CHANGE_EVENT, reload);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(CHANGE_EVENT, reload);
+    };
   }, []);
 
-  const providers = settings?.providers ?? DEFAULT_PROVIDERS;
-
-  // Which "<providerId>::<model>" option is currently selected.
-  const currentValue = useMemo(() => {
-    for (const p of providers)
-      for (const m of p.models)
-        if (m === config.model && p.baseUrl === config.baseUrl) return `${p.id}::${m}`;
-    for (const p of providers)
-      for (const m of p.models) if (m === config.model) return `${p.id}::${m}`;
-    return "";
-  }, [providers, config.model, config.baseUrl]);
-
-  // Once settings load, sync the current model's credentials from the provider
-  // registry (so Chat uses the keys configured in Settings, not stale ones).
+  // the model picked on the Settings page is the default; credentials always come from its group
   useEffect(() => {
-    if (!settings) return;
-    const [pid] = (currentValue || "").split("::");
-    const p = providers.find((x) => x.id === pid);
-    if (p && (p.baseUrl !== config.baseUrl || p.apiKey !== config.apiKey || (settings.proxy ?? "") !== (config.proxy ?? ""))) {
-      onChange({ ...config, baseUrl: p.baseUrl, apiKey: p.apiKey, proxy: settings.proxy ?? config.proxy });
+    if (!groups) return;
+    const current = groups.groups.find((g) => g.baseUrl === config.baseUrl && g.api === config.api &&
+      g.models.some((m) => m.id === config.model));
+    const r = current ? resolve(groups, current.id, config.model) : resolve(groups);
+    if (r && (r.model !== config.model || r.baseUrl !== config.baseUrl || r.apiKey !== config.apiKey ||
+              r.api !== config.api || (groups.proxy ?? "") !== (config.proxy ?? ""))) {
+      onChange({ ...config, api: r.api, model: r.model, baseUrl: r.baseUrl, apiKey: r.apiKey, proxy: groups.proxy });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings]);
+  }, [groups]);
+
+  const currentValue = useMemo(() => {
+    const g = groups?.groups.find((x) => x.baseUrl === config.baseUrl && x.api === config.api && x.models.some((m) => m.id === config.model));
+    return g ? `${g.id}::${config.model}` : "";
+  }, [groups, config.api, config.baseUrl, config.model]);
 
   function selectModel(value: string) {
+    if (!groups) return;
     setSaved(false);
-    const [pid, m] = value.split("::");
-    const p = providers.find((x) => x.id === pid);
-    if (!p) return;
-    onChange({ ...config, model: m, baseUrl: p.baseUrl, apiKey: p.apiKey, proxy: settings?.proxy ?? config.proxy });
+    const i = value.indexOf("::");
+    const r = resolve(groups, value.slice(0, i), value.slice(i + 2));
+    if (r) onChange({ ...config, api: r.api, model: r.model, baseUrl: r.baseUrl, apiKey: r.apiKey, proxy: groups.proxy });
   }
 
   function setAsOf(value: string) {
@@ -179,10 +155,10 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
               {currentValue === "" && (
                 <option value="">{config.model || t("Select a model…", "选择模型…")}</option>
               )}
-              {providers.map((p) => (
-                <optgroup key={p.id} label={p.label}>
-                  {p.models.map((m) => (
-                    <option key={`${p.id}::${m}`} value={`${p.id}::${m}`}>{m}</option>
+              {(groups?.groups ?? []).filter((g) => g.models.length).map((g) => (
+                <optgroup key={g.id} label={`${g.name} · ${API_META[g.api].label}`}>
+                  {g.models.map((m) => (
+                    <option key={`${g.id}::${m.id}`} value={`${g.id}::${m.id}`}>{m.id}</option>
                   ))}
                 </optgroup>
               ))}

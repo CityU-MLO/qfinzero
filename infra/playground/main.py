@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 from typing import AsyncIterator
 
-import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -13,11 +12,13 @@ from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+for _p in (PROJECT_ROOT, Path(__file__).resolve().parent):   # repo, and this service's modules
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from config import HOST, PORT, LLM_PROXY
 from agent import run_agent_stream
+from providers import API_TYPES, list_models
 from qfinzero.runtime import qfinzero_version
 
 
@@ -44,6 +45,7 @@ class ChatRequest(BaseModel):
     api_key: str
     as_of_date: str  # "YYYY-MM-DD"
     proxy: str | None = None  # optional per-request LLM egress proxy; overrides server default
+    api: str = "openai"  # openai | anthropic | antigravity (see providers.py)
 
 
 @app.get("/health")
@@ -55,23 +57,26 @@ class TestConnectionRequest(BaseModel):
     base_url: str
     api_key: str
     proxy: str | None = None  # optional per-request LLM egress proxy; overrides server default
+    api: str = "openai"
+
+
+@app.post("/models")
+async def provider_models(req: TestConnectionRequest):
+    """The models a provider offers: ``{ok, models: [{id, name}]}`` or ``{ok: false, error}``."""
+    if req.api not in API_TYPES:
+        return {"ok": False, "error": f"unknown api type {req.api!r}"}
+    try:
+        models = await list_models(req.api, req.base_url, req.api_key, (req.proxy or LLM_PROXY) or None)
+        return {"ok": True, "models": models}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/test-connection")
 async def test_connection(req: TestConnectionRequest):
-    """Test LLM provider connectivity by hitting the /models endpoint."""
-    url = req.base_url.rstrip("/") + "/models"
-    proxy = (req.proxy or LLM_PROXY) or None
-    try:
-        async with httpx.AsyncClient(timeout=10, proxy=proxy) as client:
-            resp = await client.get(
-                url, headers={"Authorization": f"Bearer {req.api_key}"}
-            )
-        if resp.status_code == 200:
-            return {"ok": True}
-        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    """Test LLM provider connectivity through its model list."""
+    r = await provider_models(req)
+    return {"ok": r["ok"], **({"count": len(r["models"])} if r["ok"] else {"error": r["error"]})}
 
 
 @app.post("/chat")
@@ -89,6 +94,7 @@ async def chat(req: ChatRequest):
             api_key=req.api_key,
             as_of_date=req.as_of_date,
             proxy=(req.proxy or LLM_PROXY) or None,
+            api=req.api,
         ):
             yield {"data": json.dumps(event)}
 

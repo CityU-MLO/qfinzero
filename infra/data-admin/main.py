@@ -190,6 +190,43 @@ def explore_symbols(
     return explore.store_symbols(store, limit=limit, start=start, end=end)
 
 
+# ── coverage map (read-only; the hub lets every signed-in user GET it via /api/coverage) ──
+@app.get("/coverage/extent")
+def coverage_extent() -> dict:
+    from qfinzero.admin import coverage
+    start, end = coverage.default_range()
+    return {"stores": coverage.extent(), "default": {"start": start, "end": end},
+            "suggested": coverage.suggest(limit=12)}
+
+
+@app.get("/coverage/matrix")
+def coverage_matrix(tickers: str = Query(...), start: str = Query(...), end: str = Query(...),
+                    events: bool = True) -> dict:
+    from qfinzero.admin import coverage
+    syms = tickers.split(",")
+    try:
+        out = coverage.matrix(syms, start, end)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if events:
+        out["events"] = coverage.events(syms, start, end)
+    return out
+
+
+@app.get("/coverage/cell")
+def coverage_cell(ticker: str = Query(...), date: str = Query(...)) -> dict:
+    from qfinzero.admin import coverage
+    out = coverage.cell(ticker, date)
+    out["events"] = coverage.day_events(ticker, date)
+    return out
+
+
+@app.get("/coverage/suggest")
+def coverage_suggest(q: str = "", limit: int = 20) -> dict:
+    from qfinzero.admin import coverage
+    return {"tickers": coverage.suggest(q, min(limit, 100))}
+
+
 def main() -> None:
     import uvicorn
     port = int(os.environ.get("DATA_ADMIN_PORT", "19340"))

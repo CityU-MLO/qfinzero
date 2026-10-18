@@ -1,288 +1,372 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, Loader2, Plus, Trash2, Wifi, WifiOff } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check, Download, Eye, EyeOff, FileUp, Loader2, Plus, RefreshCw, Search, Trash2, Upload, X,
+} from "lucide-react";
 
+import { useLocale, useT } from "@/components/locale-provider";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import { useT } from "@/components/locale-provider";
+import {
+  API_META, API_TYPES, emptySettings, exportJson, loadSettings, mergeImport, newId, parseImport, saveSettings,
+  type ApiType, type Imported, type ModelGroup, type ModelSettings,
+} from "@/lib/model-groups";
+import { cn } from "@/lib/utils";
 
-type Provider = {
-  id: string;
-  label: string;
-  baseUrl: string;
-  apiKey: string;
-  models: string[];
-  builtin: boolean;
-};
+const inputCls =
+  "w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
-type ConsoleSettings = {
-  providers: Provider[];
-  activeProviderId: string;
-  activeModel: string;
-  proxy: string; // LLM egress proxy; blank = use the server default (LLM_PROXY)
-};
+type FetchState = { status: "idle" | "loading" | "ok" | "error"; error?: string };
 
-const SETTINGS_KEY = "qfz_console_settings";
-const PLAYGROUND_KEY = "playground_config"; // the Chat reads this
-
-const DEFAULT_PROVIDERS: Provider[] = [
-  { id: "openai", label: "OpenAI (GPT)", baseUrl: "https://api.openai.com/v1", apiKey: "", models: ["gpt-4o", "gpt-4o-mini", "o3-mini"], builtin: true },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", apiKey: "", models: ["deepseek-chat", "deepseek-reasoner"], builtin: true },
-  { id: "gemini", label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", models: ["gemini-2.0-flash", "gemini-1.5-pro"], builtin: true },
-  { id: "claude", label: "Claude (Anthropic)", baseUrl: "https://api.anthropic.com/v1", apiKey: "", models: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"], builtin: true },
-];
-
-function defaultSettings(): ConsoleSettings {
-  return { providers: DEFAULT_PROVIDERS, activeProviderId: "openai", activeModel: "gpt-4o-mini", proxy: "" };
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/20 p-4 pt-[10vh]" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-lg border bg-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="text-[15px] font-semibold">{title}</h2>
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-accent" aria-label="close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-3 p-4">{children}</div>
+      </div>
+    </div>
+  );
 }
 
-function loadSettings(): ConsoleSettings {
-  if (typeof window === "undefined") return defaultSettings();
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return defaultSettings();
-    const parsed = JSON.parse(raw) as ConsoleSettings;
-    // merge built-ins so new defaults appear, keep user edits/custom
-    const byId = new Map(parsed.providers.map((p) => [p.id, p]));
-    const merged = [...DEFAULT_PROVIDERS.map((d) => byId.get(d.id) ?? d), ...parsed.providers.filter((p) => !p.builtin)];
-    return { ...parsed, providers: merged };
-  } catch {
-    return defaultSettings();
-  }
-}
+function GroupCard({
+  group, active, fetchState, onChange, onRemove, onFetch, onSelect,
+}: {
+  group: ModelGroup;
+  active: string | null;
+  fetchState: FetchState;
+  onChange: (patch: Partial<ModelGroup>) => void;
+  onRemove: () => void;
+  onFetch: () => void;
+  onSelect: (model: string) => void;
+}) {
+  const t = useT();
+  const { locale } = useLocale();
+  const [showKey, setShowKey] = useState(false);
+  const [q, setQ] = useState("");
+  const [all, setAll] = useState(false);
+  const meta = API_META[group.api];
+  const models = group.models.filter((m) => !q || `${m.id} ${m.name}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = all ? models : models.slice(0, 40);
 
-const inputCls = "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center gap-3 space-y-0">
+        <input
+          value={group.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          className="min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 text-[15px] font-semibold outline-none hover:bg-muted/60 focus:bg-muted/60"
+          aria-label={t("Group name", "分组名称")}
+        />
+        <Badge variant="secondary">{meta.label}</Badge>
+        {active && <Badge variant="success"><Check className="h-3 w-3" /> {t("in use", "使用中")}</Badge>}
+        <button onClick={onRemove} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title={t("Delete group", "删除分组")}>
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-[180px_1fr_1fr]">
+          <label className="space-y-1">
+            <span className="text-xs text-muted-foreground">{t("API type", "接口类型")}</span>
+            <select className={inputCls} value={group.api} onChange={(e) => onChange({ api: e.target.value as ApiType })}>
+              {API_TYPES.map((a) => (
+                <option key={a} value={a}>{API_META[a].label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs text-muted-foreground">Base URL</span>
+            <input className={cn(inputCls, "font-mono text-[13px]")} value={group.baseUrl} placeholder={meta.base || "http://host:8081/antigravity"}
+              onChange={(e) => onChange({ baseUrl: e.target.value.trim() })} />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs text-muted-foreground">{t("API key", "API 密钥")}</span>
+            <div className="relative">
+              <input className={cn(inputCls, "pr-9 font-mono text-[13px]")} type={showKey ? "text" : "password"} value={group.apiKey}
+                placeholder="sk-…" autoComplete="off" onChange={(e) => onChange({ apiKey: e.target.value.trim() })} />
+              <button type="button" onClick={() => setShowKey((v) => !v)} className="absolute right-2 top-1.5 text-muted-foreground hover:text-foreground"
+                title={showKey ? t("Hide", "隐藏") : t("Show", "显示")}>
+                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">{locale === "zh" ? meta.hint[1] : meta.hint[0]}</p>
+
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <Button size="sm" variant="outline" onClick={onFetch} disabled={!group.baseUrl || fetchState.status === "loading"}>
+            {fetchState.status === "loading" ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            {t("Fetch models", "获取模型列表")}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {group.models.length
+              ? t(`${group.models.length} models`, `${group.models.length} 个模型`) +
+                (group.fetchedAt ? t(` · fetched ${new Date(group.fetchedAt).toLocaleString()}`, ` · 获取于 ${new Date(group.fetchedAt).toLocaleString()}`) : "")
+              : t("No models yet: fetch them from /models", "还没有模型：从 /models 获取")}
+          </span>
+          {group.models.length > 8 && (
+            <label className="relative ml-auto">
+              <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Filter models", "筛选模型")}
+                className="w-48 rounded-md border border-input bg-card py-1 pl-7 pr-2 text-[13px] outline-none focus:border-ring" />
+            </label>
+          )}
+        </div>
+        {fetchState.status === "error" && <Alert variant="error" title={t("Could not fetch models", "获取模型失败")}>{fetchState.error}</Alert>}
+
+        {shown.length > 0 && (
+          <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {shown.map((m) => {
+              const on = active === m.id;
+              return (
+                <button key={m.id} onClick={() => onSelect(m.id)} title={t("Use this model in Chat", "在对话中使用此模型")}
+                  className={cn("flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors",
+                    on ? "border-primary bg-primary/5" : "hover:border-primary/40 hover:bg-muted/40")}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[12.5px]">{m.id}</span>
+                    {m.name !== m.id && <span className="block truncate text-[11px] text-muted-foreground">{m.name}</span>}
+                  </span>
+                  {on && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {models.length > shown.length && (
+          <button onClick={() => setAll(true)} className="text-xs font-medium text-primary hover:underline">
+            {t(`Show all ${models.length}`, `显示全部 ${models.length} 个`)}
+          </button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SettingsPage() {
   const t = useT();
-  const [settings, setSettings] = useState<ConsoleSettings>(defaultSettings());
-  const [saved, setSaved] = useState(false);
-  const [test, setTest] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
-  const [testErr, setTestErr] = useState<Record<string, string>>({});
-  const [envLoaded, setEnvLoaded] = useState<Record<string, boolean>>({});
+  const [s, setS] = useState<ModelSettings>(emptySettings());
+  const [loaded, setLoaded] = useState(false);
+  const [fetchState, setFetchState] = useState<Record<string, FetchState>>({});
   const [proxyLoaded, setProxyLoaded] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
-    const s = loadSettings();
-    // pre-fill provider keys from server-side env (.env.local), only when empty
+    const current = loadSettings();
     fetch("/api/providers/env-keys")
       .then((r) => r.json())
-      .then((d: { keys?: Record<string, string>; loaded?: Record<string, boolean>; proxyLoaded?: boolean }) => {
-        const providers = s.providers.map((p) =>
-          !p.apiKey && d.keys?.[p.id] ? { ...p, apiKey: d.keys[p.id] } : p
-        );
-        setSettings({ ...s, providers });
-        setEnvLoaded(d.loaded ?? {});
+      .then((d: { keys?: Record<string, string>; proxyLoaded?: boolean }) => {
         setProxyLoaded(Boolean(d.proxyLoaded));
+        // first visit: offer the keys configured on the server as groups
+        if (!current.groups.length) {
+          const seeded: ModelGroup[] = [];
+          if (d.keys?.openai) seeded.push({ id: newId(), name: "OpenAI", api: "openai", baseUrl: API_META.openai.base, apiKey: d.keys.openai, models: [] });
+          if (d.keys?.claude) seeded.push({ id: newId(), name: "Claude", api: "anthropic", baseUrl: API_META.anthropic.base, apiKey: d.keys.claude, models: [] });
+          if (seeded.length) current.groups = seeded;
+        }
+        setS(current);
       })
-      .catch(() => setSettings(s));
+      .catch(() => setS(current))
+      .finally(() => setLoaded(true));
   }, []);
 
-  const active = settings.providers.find((p) => p.id === settings.activeProviderId) ?? settings.providers[0];
-
-  function update(next: Partial<ConsoleSettings>) {
-    setSaved(false);
-    setSettings((s) => ({ ...s, ...next }));
+  function commit(next: ModelSettings) {
+    setS(next);
+    saveSettings(next);
   }
 
-  function updateProvider(id: string, patch: Partial<Provider>) {
-    setSaved(false);
-    setSettings((s) => ({ ...s, providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+  const update = (id: string, patch: Partial<ModelGroup>) =>
+    commit({ ...s, groups: s.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) });
+
+  function addGroup(api: ApiType) {
+    const g: ModelGroup = { id: newId(), name: API_META[api].label, api, baseUrl: API_META[api].base, apiKey: "", models: [] };
+    commit({ ...s, groups: [...s.groups, g] });
   }
 
-  function addCustom() {
-    const id = `custom-${Date.now()}`;
-    update({
-      providers: [
-        ...settings.providers,
-        { id, label: t("Custom / local vLLM", "自定义 / 本地 vLLM"), baseUrl: "http://localhost:8000/v1", apiKey: "", models: ["local-model"], builtin: false },
-      ],
-    });
+  function removeGroup(g: ModelGroup) {
+    if (!window.confirm(t(`Delete the group "${g.name}"?`, `删除分组「${g.name}」？`))) return;
+    commit({ ...s, groups: s.groups.filter((x) => x.id !== g.id), active: s.active?.groupId === g.id ? null : s.active });
   }
 
-  function removeProvider(id: string) {
-    update({ providers: settings.providers.filter((p) => p.id !== id) });
-  }
-
-  function save() {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    // mirror the active provider into the Chat's config so it uses this selection
-    let pg: Record<string, unknown> = {};
+  async function fetchModels(g: ModelGroup) {
+    setFetchState((f) => ({ ...f, [g.id]: { status: "loading" } }));
     try {
-      pg = JSON.parse(localStorage.getItem(PLAYGROUND_KEY) ?? "{}");
-    } catch {
-      pg = {};
-    }
-    localStorage.setItem(
-      PLAYGROUND_KEY,
-      JSON.stringify({ ...pg, model: settings.activeModel, baseUrl: active?.baseUrl, apiKey: active?.apiKey, proxy: settings.proxy })
-    );
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
-
-  async function testConnection(p: Provider) {
-    setTest((t) => ({ ...t, [p.id]: "loading" }));
-    setTestErr((e) => ({ ...e, [p.id]: "" }));
-    try {
-      const res = await fetch("/api/playground/test-connection", {
+      const res = await fetch("/api/playground/models", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ base_url: p.baseUrl, api_key: p.apiKey, proxy: settings.proxy || undefined }),
+        body: JSON.stringify({ api: g.api, base_url: g.baseUrl, api_key: g.apiKey, proxy: s.proxy || undefined }),
       });
-      const data = (await res.json()) as { ok: boolean; error?: string };
-      if (data.ok) setTest((t) => ({ ...t, [p.id]: "ok" }));
-      else {
-        setTest((t) => ({ ...t, [p.id]: "error" }));
-        setTestErr((e) => ({ ...e, [p.id]: data.error ?? t("Connection failed", "连接失败") }));
-      }
-    } catch (err) {
-      setTest((t) => ({ ...t, [p.id]: "error" }));
-      setTestErr((e) => ({ ...e, [p.id]: (err as Error).message }));
+      const d = (await res.json()) as { ok: boolean; models?: { id: string; name: string }[]; error?: string };
+      if (!d.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      const latest = loadSettings();
+      commit({ ...latest, groups: latest.groups.map((x) => (x.id === g.id ? { ...x, models: d.models ?? [], fetchedAt: new Date().toISOString() } : x)) });
+      setFetchState((f) => ({ ...f, [g.id]: { status: "ok" } }));
+    } catch (e) {
+      setFetchState((f) => ({ ...f, [g.id]: { status: "error", error: (e as Error).message } }));
     }
   }
+
+  const activeGroup = s.groups.find((g) => g.id === s.active?.groupId);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title={t("Settings", "设置")}
         description={t(
-          "Model providers and the active model used by Chat. Keys are stored only in this browser.",
-          "模型服务以及对话所用的当前模型。密钥仅保存在此浏览器中。",
+          "Model groups used by Chat. Keys are stored only in this browser.",
+          "对话使用的模型分组。密钥只保存在当前浏览器中。",
         )}
+        actions={
+          <>
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}><Upload /> {t("Import", "导入")}</Button>
+            <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} disabled={!s.groups.length}><Download /> {t("Export", "导出")}</Button>
+          </>
+        }
       />
 
-      {/* Active selector */}
-      <div className="rounded-lg border bg-card p-4">
-        <h3 className="mb-3 text-xs font-semibold text-muted-foreground">{t("Active model", "当前模型")}</h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">{t("Provider", "服务商")}</span>
-            <select
-              className={inputCls}
-              value={settings.activeProviderId}
-              onChange={(e) => {
-                const p = settings.providers.find((x) => x.id === e.target.value);
-                update({ activeProviderId: e.target.value, activeModel: p?.models[0] ?? settings.activeModel });
-              }}
-            >
-              {settings.providers.map((p) => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">{t("Model", "模型")}</span>
-            <select className={inputCls} value={settings.activeModel} onChange={(e) => update({ activeModel: e.target.value })}>
-              {(active?.models ?? []).map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            onClick={save}
-            className={buttonVariants()}
-          >
-            {saved ? <><Check className="h-4 w-4" /> {t("Saved", "已保存")}</> : t("Save", "保存")}
-          </button>
-        </div>
-        <div className="mt-4 border-t pt-4">
-          <label className="flex flex-col gap-1">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {t("LLM egress proxy", "LLM 出口代理")} <span className="font-normal">{t("(optional)", "（可选）")}</span>
-              {proxyLoaded && (
-                <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">{t("server proxy active", "服务器代理已启用")}</span>
-              )}
-            </span>
-            <input
-              className={inputCls}
-              placeholder={t("http://user:pass@host:3128 — blank uses the server default", "http://user:pass@host:3128 — 留空则使用服务器默认值")}
-              value={settings.proxy}
-              onChange={(e) => update({ proxy: e.target.value })}
-            />
-            <span className="text-[11px] text-muted-foreground">
-              {t(
-                "Routes provider API calls through this proxy (Chat + Test connection). Local services bypass it. Leave blank to use the server's LLM_PROXY.",
-                "服务商 API 调用（对话 + 测试连接）将经由此代理转发，本地服务不经过代理。留空则使用服务器的 LLM_PROXY。",
-              )}
-            </span>
-          </label>
-        </div>
-      </div>
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <span className="text-sm text-muted-foreground">{t("Chat uses", "对话当前使用")}</span>
+          {activeGroup && s.active ? (
+            <>
+              <span className="font-mono text-sm font-medium">{s.active.model}</span>
+              <Badge variant="secondary">{activeGroup.name}</Badge>
+            </>
+          ) : (
+            <span className="text-sm text-warning">{t("no model selected: fetch a group's models and pick one", "未选择模型：获取某个分组的模型后点选一个")}</span>
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Providers */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {settings.providers.map((p) => (
-          <div key={p.id} className="rounded-lg border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <input
-                className="rounded-md bg-transparent text-sm font-semibold outline-none"
-                value={p.label}
-                onChange={(e) => updateProvider(p.id, { label: e.target.value })}
-              />
-              <div className="flex items-center gap-2">
-                {p.builtin ? (
-                  <Badge variant="secondary">{t("built-in", "内置")}</Badge>
-                ) : (
-                  <button onClick={() => removeProvider(p.id)} className="text-muted-foreground hover:text-destructive" title={t("Remove", "移除")}>
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">{t("Base URL", "Base URL")}</span>
-                <input className={inputCls} value={p.baseUrl} onChange={(e) => updateProvider(p.id, { baseUrl: e.target.value })} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {t("API key", "API 密钥")}
-                  {envLoaded[p.id] && (
-                    <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">{t("loaded from env", "已从环境变量加载")}</span>
-                  )}
-                </span>
-                <input type="password" className={inputCls} placeholder={t("sk-…  (leave blank for local)", "sk-…（本地服务可留空）")} value={p.apiKey} onChange={(e) => updateProvider(p.id, { apiKey: e.target.value })} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">{t("Models (comma-separated)", "模型（逗号分隔）")}</span>
-                <input
-                  className={inputCls}
-                  value={p.models.join(", ")}
-                  onChange={(e) => updateProvider(p.id, { models: e.target.value.split(",").map((m) => m.trim()).filter(Boolean) })}
-                />
-              </label>
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={() => testConnection(p)}
-                  disabled={test[p.id] === "loading" || !p.baseUrl}
-                  className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-                >
-                  {test[p.id] === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {test[p.id] === "ok" && <Wifi className="h-3.5 w-3.5 text-success" />}
-                  {test[p.id] === "error" && <WifiOff className="h-3.5 w-3.5 text-destructive" />}
-                  {test[p.id] === "loading"
-                    ? t("Testing…", "测试中…")
-                    : test[p.id] === "ok"
-                      ? t("Connected", "已连接")
-                      : test[p.id] === "error"
-                        ? t("Failed", "失败")
-                        : t("Test connection", "测试连接")}
-                </button>
-                {test[p.id] === "error" && testErr[p.id] && (
-                  <span className="text-xs text-destructive truncate">{testErr[p.id]}</span>
-                )}
-              </div>
-            </div>
-          </div>
+      {loaded && !s.groups.length && (
+        <Alert variant="info" title={t("No model groups yet", "还没有模型分组")}>
+          {t("Add a group below, or import a Claude Code settings.json, export lines or a Codex config.toml.",
+             "在下方添加分组，或导入 Claude Code 的 settings.json、export 环境变量或 Codex 的 config.toml。")}
+        </Alert>
+      )}
+
+      {s.groups.map((g) => (
+        <GroupCard
+          key={g.id}
+          group={g}
+          active={s.active?.groupId === g.id ? s.active.model : null}
+          fetchState={fetchState[g.id] ?? { status: "idle" }}
+          onChange={(patch) => update(g.id, patch)}
+          onRemove={() => removeGroup(g)}
+          onFetch={() => fetchModels(g)}
+          onSelect={(model) => commit({ ...s, active: { groupId: g.id, model } })}
+        />
+      ))}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">{t("Add a group:", "添加分组：")}</span>
+        {API_TYPES.map((a) => (
+          <Button key={a} size="sm" variant="outline" onClick={() => addGroup(a)}><Plus /> {API_META[a].label}</Button>
         ))}
       </div>
 
-      <button onClick={addCustom} className="flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm hover:bg-accent">
-        <Plus className="h-4 w-4" /> {t("Add custom provider (local vLLM, …)", "添加自定义服务商（本地 vLLM 等）")}
-      </button>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("Network", "网络")}</CardTitle>
+          <CardDescription>
+            {t("Optional HTTP proxy for model calls. Blank uses the server default.", "访问模型服务的 HTTP 代理（可选），留空则使用服务器默认设置。")}
+            {proxyLoaded && <> <Badge variant="success">{t("server proxy active", "服务器代理已启用")}</Badge></>}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <input className={cn(inputCls, "font-mono text-[13px]")} placeholder="http://user:pass@host:3128" value={s.proxy}
+            onChange={(e) => commit({ ...s, proxy: e.target.value.trim() })} />
+        </CardContent>
+      </Card>
+
+      {importOpen && (
+        <ImportDialog
+          onClose={() => setImportOpen(false)}
+          onImport={(imp) => {
+            commit(mergeImport(loadSettings(), imp));
+            setImportOpen(false);
+          }}
+        />
+      )}
+      {exportOpen && <ExportDialog settings={s} onClose={() => setExportOpen(false)} />}
     </div>
+  );
+}
+
+function ImportDialog({ onClose, onImport }: { onClose: () => void; onImport: (imp: Imported) => void }) {
+  const t = useT();
+  const [text, setText] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const parsed = useMemo(() => {
+    if (!text.trim()) return null;
+    try {
+      return { ok: true as const, imp: parseImport(text) };
+    } catch (e) {
+      return { ok: false as const, error: (e as Error).message };
+    }
+  }, [text]);
+
+  return (
+    <Modal title={t("Import model groups", "导入模型分组")} onClose={onClose}>
+      <p className="text-[13px] text-muted-foreground">
+        {t("Paste or choose a file: a QFinZero export, a Claude Code settings.json, export ANTHROPIC_* lines, or a Codex config.toml.",
+           "粘贴或选择文件：QFinZero 导出文件、Claude Code 的 settings.json、export ANTHROPIC_* 环境变量，或 Codex 的 config.toml。")}
+      </p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} spellCheck={false}
+        className="w-full rounded-md border border-input bg-card p-2 font-mono text-xs outline-none focus:border-ring" />
+      <input ref={fileRef} type="file" accept=".json,.toml,.env,.txt,.sh" className="hidden"
+        onChange={async (e) => { const f = e.target.files?.[0]; if (f) setText(await f.text()); }} />
+      {parsed?.ok === false && <Alert variant="error">{parsed.error}</Alert>}
+      {parsed?.ok && (
+        <Alert variant="success" title={t(`Found ${parsed.imp.groups.length} group(s)`, `识别到 ${parsed.imp.groups.length} 个分组`)}>
+          {parsed.imp.groups.map((g) => `${g.name} (${API_META[g.api].label}${g.apiKey ? t(", with key", "，含密钥") : ""})`).join("; ")}
+          {parsed.imp.active && t(` · active model ${parsed.imp.active.model}`, ` · 当前模型 ${parsed.imp.active.model}`)}
+        </Alert>
+      )}
+      <div className="flex justify-between gap-2">
+        <Button size="sm" variant="ghost" onClick={() => fileRef.current?.click()}><FileUp /> {t("Choose file", "选择文件")}</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={onClose}>{t("Cancel", "取消")}</Button>
+          <Button size="sm" disabled={!parsed?.ok} onClick={() => parsed?.ok && onImport(parsed.imp)}>{t("Import", "导入")}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ExportDialog({ settings, onClose }: { settings: ModelSettings; onClose: () => void }) {
+  const t = useT();
+  const [keys, setKeys] = useState(false);
+  const json = exportJson(settings, keys);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "qfinzero-model-groups.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <Modal title={t("Export model groups", "导出模型分组")} onClose={onClose}>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={keys} onChange={(e) => setKeys(e.target.checked)} />
+        {t("Include API keys", "包含 API 密钥")}
+      </label>
+      {keys && <Alert variant="warning">{t("The file will contain your keys in plain text. Store it like a password.", "文件将以明文包含密钥，请像保管密码一样保管它。")}</Alert>}
+      <pre className="max-h-64 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-[11.5px]">{json}</pre>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(json)}>{t("Copy", "复制")}</Button>
+        <Button size="sm" onClick={download}><Download /> {t("Download", "下载")}</Button>
+      </div>
+    </Modal>
   );
 }

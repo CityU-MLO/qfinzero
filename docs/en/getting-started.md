@@ -56,8 +56,13 @@ The sample is a fictional market: 20 tickers on the real NYSE calendar for
   earnings after that day's close, so its price gaps the next morning.
 - **News** and **Calendar**: search `ACME`, or open the earnings calendar for
   March 2025.
-- **Chat**: add a model provider key under *Settings* (gear icon) first. The
-  chat agent uses the same MCP tools as external agents.
+- **Coverage**: which data exists per ticker and day, with news, earnings and
+  macro releases on the same axis; click a cell for the details of that day.
+- **Chat**: first add a model group under *Settings* (gear icon): choose
+  OpenAI, Claude or Gemini · Antigravity, enter the base URL and key, and fetch
+  the models. A Claude Code `settings.json`, `export ANTHROPIC_*` lines or a
+  Codex `config.toml` can be imported directly. The chat agent uses the same
+  MCP tools as external agents.
 - **Docs**: this documentation, also available without signing in.
 
 ## 3. Connect an agent
