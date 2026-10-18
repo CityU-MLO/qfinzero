@@ -7,6 +7,7 @@ import { AllocatePanel } from "@/components/broker/allocate-panel";
 import { EnterPanel } from "@/components/broker/enter-panel";
 import { Landing } from "@/components/broker/landing";
 import { Terminal } from "@/components/broker/terminal";
+import { useT } from "@/components/locale-provider";
 import { PmbSettingsPanel } from "@/components/pmb/settings-panel";
 import { PageHeader } from "@/components/ui/page-header";
 import { Segmented } from "@/components/ui/segmented";
@@ -21,11 +22,12 @@ interface Live {
 }
 
 const TABS = [
-  { value: "trade", label: "Trade", icon: LineChart },
-  { value: "settings", label: "Broker settings", icon: Settings2 },
+  { value: "trade", label: ["Trade", "交易"], icon: LineChart },
+  { value: "settings", label: ["Broker settings", "交易设置"], icon: Settings2 },
 ] as const;
 
 export default function BrokerPage() {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("trade");
   const [view, setView] = useState<View>("landing");
   const [presetAccount, setPresetAccount] = useState<string | null>(null);
@@ -55,9 +57,18 @@ export default function BrokerPage() {
   return (
     <div>
       <PageHeader
-        title="Paper broker"
-        description="Trade against historical market data minute by minute, with a clock you control. Agents use the same broker through the pmb_* tools."
-        actions={<Segmented value={tab} onChange={setTab} options={TABS} />}
+        title={t("Paper broker", "模拟券商")}
+        description={t(
+          "Trade against historical market data minute by minute, with a clock you control. Agents use the same broker through the pmb_* tools.",
+          "基于历史行情逐分钟交易，时钟由你控制。智能体通过 pmb_* 工具使用同一个模拟券商。",
+        )}
+        actions={
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={TABS.map((o) => ({ ...o, label: t(o.label[0], o.label[1]) }))}
+          />
+        }
       />
       {tab === "settings" ? (
         <div className="max-w-3xl">

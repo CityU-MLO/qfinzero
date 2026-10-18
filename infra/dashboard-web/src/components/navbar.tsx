@@ -5,23 +5,25 @@ import { usePathname } from "next/navigation";
 import { BookOpen, CalendarDays, Database, LineChart, MessageSquare, Newspaper, Settings } from "lucide-react";
 
 import { useLegacySkin } from "@/components/app-providers";
+import { LanguageToggle, useT } from "@/components/locale-provider";
 import { Logo } from "@/components/site/site-chrome";
 import { UserMenu, useMe } from "@/components/user-menu";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/chat", label: "Chat", icon: MessageSquare, admin: false },
-  { href: "/broker", label: "Broker", icon: LineChart, admin: false },
-  { href: "/news", label: "News", icon: Newspaper, admin: false },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays, admin: false },
-  { href: "/data", label: "Data", icon: Database, admin: true },
-  { href: "/doc", label: "Docs", icon: BookOpen, admin: false },
-];
+  { href: "/chat", label: ["Chat", "对话"], icon: MessageSquare, admin: false },
+  { href: "/broker", label: ["Broker", "模拟交易"], icon: LineChart, admin: false },
+  { href: "/news", label: ["News", "新闻"], icon: Newspaper, admin: false },
+  { href: "/calendar", label: ["Calendar", "日历"], icon: CalendarDays, admin: false },
+  { href: "/data", label: ["Data", "数据"], icon: Database, admin: true },
+  { href: "/docs", label: ["Docs", "文档"], icon: BookOpen, admin: false },
+] as const;
 
 export function Navbar() {
   const legacy = useLegacySkin();
   const pathname = usePathname();
   const { data: me } = useMe();
+  const t = useT();
   // Without the hub (no /auth) everything is shown; with it, admin-only links need admin.
   const items = NAV_ITEMS.filter((i) => !i.admin || !me || me.role === "admin");
   // Active state compares against the path with any /legacy prefix stripped; links keep
@@ -34,7 +36,7 @@ export function Navbar() {
     <header className="site-nav sticky top-0 z-40 border-b bg-card">
       <div className="mx-auto flex h-12 max-w-7xl items-center gap-6 px-4 md:px-6">
         <Logo compact />
-        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Console">
+        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label={t("Console", "控制台")}>
           {items.map((item) => {
             const Icon = item.icon;
             const on = active(item.href);
@@ -49,15 +51,16 @@ export function Navbar() {
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {item.label}
+                {t(item.label[0], item.label[1])}
               </Link>
             );
           })}
         </nav>
         <div className="flex items-center gap-1">
+          <LanguageToggle />
           <Link
             href={withSkin("/settings")}
-            title="Model providers and preferences"
+            title={t("Model providers and preferences", "模型服务与偏好设置")}
             aria-current={active("/settings") ? "page" : undefined}
             className={cn(
               "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
@@ -65,7 +68,7 @@ export function Navbar() {
             )}
           >
             <Settings className="h-4 w-4" />
-            <span className="sr-only">Settings</span>
+            <span className="sr-only">{t("Settings", "设置")}</span>
           </Link>
           <UserMenu />
         </div>

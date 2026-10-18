@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useT } from "@/components/locale-provider";
 
 type NewsFilters = {
   tickers: string;
@@ -29,13 +30,14 @@ export function NewsSearchPanel({
   onPreset: (preset: "aapl_window" | "nvda_last_day" | "macro_earnings") => void;
   isLoading: boolean;
 }) {
+  const t = useT();
   const hasFilters = filters.tickers || filters.keyword || filters.publisher || filters.startUtc || filters.endUtc;
 
   return (
     <div className="space-y-6 rounded-lg border bg-card p-5">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Ticker(s)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Ticker(s)", "代码")}</Label>
           <Input 
             value={filters.tickers} 
             onChange={(e) => onChange({ ...filters, tickers: e.target.value })} 
@@ -44,7 +46,7 @@ export function NewsSearchPanel({
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Publisher</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Publisher", "发布方")}</Label>
           <Input 
             value={filters.publisher} 
             onChange={(e) => onChange({ ...filters, publisher: e.target.value })} 
@@ -53,7 +55,7 @@ export function NewsSearchPanel({
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Keyword</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Keyword", "关键词")}</Label>
           <Input 
             value={filters.keyword} 
             onChange={(e) => onChange({ ...filters, keyword: e.target.value })} 
@@ -62,7 +64,7 @@ export function NewsSearchPanel({
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Start (UTC)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Start (UTC)", "开始 (UTC)")}</Label>
           <Input 
             type="datetime-local" 
             value={filters.startUtc} 
@@ -71,7 +73,7 @@ export function NewsSearchPanel({
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">End (UTC)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("End (UTC)", "结束 (UTC)")}</Label>
           <Input 
             type="datetime-local" 
             value={filters.endUtc} 
@@ -83,10 +85,10 @@ export function NewsSearchPanel({
 
       <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold text-muted-foreground/50 mr-1">Presets</span>
+          <span className="text-[10px] font-semibold text-muted-foreground/50 mr-1">{t("Presets", "预设")}</span>
           <PresetBadge onClick={() => onPreset("aapl_window")}>AAPL 2025-01-01~01-03</PresetBadge>
-          <PresetBadge onClick={() => onPreset("nvda_last_day")}>NVDA Last 24h</PresetBadge>
-          <PresetBadge onClick={() => onPreset("macro_earnings")}>Keyword: earnings</PresetBadge>
+          <PresetBadge onClick={() => onPreset("nvda_last_day")}>{t("NVDA Last 24h", "NVDA 最近 24 小时")}</PresetBadge>
+          <PresetBadge onClick={() => onPreset("macro_earnings")}>{t("Keyword: earnings", "关键词：earnings")}</PresetBadge>
           
           {hasFilters && (
             <Button 
@@ -102,14 +104,14 @@ export function NewsSearchPanel({
                 limit: 50,
               })}
             >
-              <X className="mr-1 h-3 w-3" /> Clear Filters
+              <X className="mr-1 h-3 w-3" /> {t("Clear Filters", "清除筛选")}
             </Button>
           )}
         </div>
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <Label className="text-xs font-medium text-muted-foreground">Limit</Label>
+            <Label className="text-xs font-medium text-muted-foreground">{t("Limit", "条数上限")}</Label>
             <Input
               type="number"
               min={1}
@@ -125,9 +127,9 @@ export function NewsSearchPanel({
             className="h-9 gap-2 shadow-primary/20"
           >
             {isLoading ? (
-              <span className="flex items-center gap-1.5"><div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Searching...</span>
+              <span className="flex items-center gap-1.5"><div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> {t("Searching...", "搜索中...")}</span>
             ) : (
-              <span className="flex items-center gap-1.5"><Search className="h-4 w-4" /> Run Query</span>
+              <span className="flex items-center gap-1.5"><Search className="h-4 w-4" /> {t("Run Query", "查询")}</span>
             )}
           </Button>
         </div>

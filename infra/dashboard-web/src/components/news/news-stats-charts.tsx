@@ -6,8 +6,10 @@ import { chart } from "@/lib/chart-theme";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { NewsStatsResponse } from "@/lib/types";
+import { useT } from "@/components/locale-provider";
 
 export function NewsStatsCharts({ stats }: { stats: NewsStatsResponse | null }) {
+  const t = useT();
   if (!stats) {
     return null;
   }
@@ -16,7 +18,7 @@ export function NewsStatsCharts({ stats }: { stats: NewsStatsResponse | null }) 
     <div className="grid gap-4 lg:grid-cols-2">
       <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle>Daily News Volume Trend</CardTitle>
+          <CardTitle>{t("Daily News Volume Trend", "每日新闻量趋势")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-64 w-full">
@@ -41,6 +43,7 @@ export function NewsStatsCharts({ stats }: { stats: NewsStatsResponse | null }) 
                 <Line 
                   type="monotone" 
                   dataKey="count" 
+                  name={t("Articles", "文章数")}
                   stroke={chart.primary}
                   strokeWidth={1.5}
                   dot={false}
@@ -54,7 +57,7 @@ export function NewsStatsCharts({ stats }: { stats: NewsStatsResponse | null }) 
 
       <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle>Top Tickers by News Volume</CardTitle>
+          <CardTitle>{t("Top Tickers by News Volume", "新闻量最多的代码")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-64 w-full">
@@ -80,6 +83,7 @@ export function NewsStatsCharts({ stats }: { stats: NewsStatsResponse | null }) 
                 />
                 <Bar 
                   dataKey="count" 
+                  name={t("Articles", "文章数")}
                   fill={chart.primary} 
                   radius={[0, 2, 2, 0]} 
                   barSize={14}

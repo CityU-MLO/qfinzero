@@ -11,6 +11,7 @@ import {
 
 import { fmtETTime, num } from "./api";
 
+import { useT } from "@/components/locale-provider";
 import { chart } from "@/lib/chart-theme";
 
 export interface PricePoint {
@@ -27,16 +28,17 @@ export function PriceChart({
   data: PricePoint[];
   up: boolean;
 }) {
+  const t = useT();
   const color = up ? chart.up : chart.down;
   return (
     <div className="h-full w-full">
       {data.length < 2 ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          Press{" "}
+          {t("Press", "点击")}{" "}
           <span className="mx-1 rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
-            Start
+            {t("Start", "开始")}
           </span>{" "}
-          to open {symbol} and watch the tape build.
+          {t(`to open ${symbol} and watch the tape build.`, `开盘 ${symbol}，观看价格走势逐步生成。`)}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height="100%">

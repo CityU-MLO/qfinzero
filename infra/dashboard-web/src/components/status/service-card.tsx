@@ -8,25 +8,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatRelative, formatUptime } from "@/lib/time";
 import type { ServiceStatusCard } from "@/lib/types";
+import { useT } from "@/components/locale-provider";
 
 function StateBadge({ state }: { state: ServiceStatusCard["state"] }) {
+  const t = useT();
   if (state === "running") {
     return (
       <Badge variant="success" className="gap-1 px-2 py-0.5">
-        <CheckCircle2 className="h-3.5 w-3.5" /> Running
+        <CheckCircle2 className="h-3.5 w-3.5" /> {t("Running", "运行中")}
       </Badge>
     );
   }
   if (state === "stale") {
     return (
       <Badge variant="warn" className="gap-1 px-2 py-0.5">
-        <AlertTriangle className="h-3.5 w-3.5" /> Stale
+        <AlertTriangle className="h-3.5 w-3.5" /> {t("Stale", "过期")}
       </Badge>
     );
   }
   return (
     <Badge variant="destructive" className="gap-1 px-2 py-0.5">
-      <XCircle className="h-3.5 w-3.5" /> Down
+      <XCircle className="h-3.5 w-3.5" /> {t("Down", "离线")}
     </Badge>
   );
 }
@@ -41,6 +43,7 @@ function MetricRow({ label, value, className }: { label: string; value: string |
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -55,7 +58,8 @@ function CopyButton({ text }: { text: string }) {
       size="icon"
       className="h-6 w-6 text-muted-foreground hover:text-primary"
       onClick={handleCopy}
-      title="Copy URL"
+      title={copied ? t("Copied", "已复制") : t("Copy URL", "复制 URL")}
+      aria-label={t("Copy URL", "复制 URL")}
     >
       <Copy className={cn("h-3 w-3 transition-transform", copied && "scale-110 text-success")} />
     </Button>
@@ -63,6 +67,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export function ServiceCard({ card }: { card: ServiceStatusCard }) {
+  const t = useT();
   const freshness = card.freshness?.sources ? Object.entries(card.freshness.sources) : [];
   const isDown = card.state === "down";
   const displayUrl = card.baseUrl.replace(/^https?:\/\//, "").split("/")[0];
@@ -80,6 +85,7 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
                 href={card.baseUrl}
                 target="_blank"
                 rel="noreferrer"
+                title={t("Open service", "打开服务")}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground"
               >
                 <ExternalLink className="h-3 w-3" />
@@ -91,13 +97,13 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         <div className={cn("space-y-0.5", isDown && "opacity-50")}>
-          <MetricRow label="Version" value={card.version ?? (isDown ? "N/A" : "-")} />
-          <MetricRow label="Uptime" value={isDown ? "0s" : formatUptime(card.uptimeSeconds)} />
-          <MetricRow label="Req/5m" value={card.requests5m} />
-          <MetricRow label="Err/5m" value={card.errors5m} />
-          <MetricRow label="Active" value={card.activeRequests} />
+          <MetricRow label={t("Version", "版本")} value={card.version ?? (isDown ? t("N/A", "不可用") : "-")} />
+          <MetricRow label={t("Uptime", "运行时长")} value={isDown ? "0s" : formatUptime(card.uptimeSeconds)} />
+          <MetricRow label={t("Req/5m", "请求/5分钟")} value={card.requests5m} />
+          <MetricRow label={t("Err/5m", "错误/5分钟")} value={card.errors5m} />
+          <MetricRow label={t("Active", "活跃请求")} value={card.activeRequests} />
           {(card.freshness !== null || isDown) && (
-            <MetricRow label="Latest Data" value={card.latestDataAt ? `${formatDateTime(card.latestDataAt)} (${formatRelative(card.latestDataAt)} ago)` : (isDown ? "N/A" : "-")} />
+            <MetricRow label={t("Latest Data", "最新数据")} value={card.latestDataAt ? `${formatDateTime(card.latestDataAt)} (${t(`${formatRelative(card.latestDataAt)} ago`, `${formatRelative(card.latestDataAt)}前`)})` : (isDown ? t("N/A", "不可用") : "-")} />
           )}
         </div>
 
@@ -106,18 +112,18 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
         {isDown ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-8 text-center">
             <XCircle className="mb-2 h-8 w-8 text-destructive/40" />
-            <p className="text-xs font-medium text-destructive/70">Service Unavailable</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">Cannot fetch freshness metrics</p>
+            <p className="text-xs font-medium text-destructive/70">{t("Service Unavailable", "服务不可用")}</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">{t("Cannot fetch freshness metrics", "无法获取新鲜度指标")}</p>
           </div>
         ) : freshness.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader className="bg-muted/30">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="h-9 px-3 text-[11px] font-semibold">Source</TableHead>
-                  <TableHead className="h-9 px-3 text-[11px] font-semibold">Latest</TableHead>
-                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">Rows</TableHead>
-                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">Keys</TableHead>
+                  <TableHead className="h-9 px-3 text-[11px] font-semibold">{t("Source", "数据源")}</TableHead>
+                  <TableHead className="h-9 px-3 text-[11px] font-semibold">{t("Latest", "最新")}</TableHead>
+                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">{t("Rows", "行数")}</TableHead>
+                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">{t("Keys", "键数")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

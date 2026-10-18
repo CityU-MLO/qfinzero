@@ -1,0 +1,46 @@
+{
+  "_comment": "Table of contents of the documentation hub (web /docs). Paths are relative to the repository root; a page without a zh file falls back to English. tests/test_docs.py checks that every path exists.",
+  "sections": [
+    {
+      "id": "start",
+      "title": { "en": "Get started", "zh": "入门" },
+      "pages": [
+        { "slug": "overview", "title": { "en": "Overview", "zh": "概览" }, "en": "README.md", "zh": "docs/cn/README.md" },
+        { "slug": "getting-started", "title": { "en": "Getting started", "zh": "快速开始" }, "en": "docs/en/getting-started.md", "zh": "docs/cn/getting-started.md" },
+        { "slug": "platform-guide", "title": { "en": "Platform guide", "zh": "平台指南" }, "en": "docs/en/platform-guide.md", "zh": "docs/cn/platform-guide.md" }
+      ]
+    },
+    {
+      "id": "guides",
+      "title": { "en": "Guides", "zh": "指南" },
+      "pages": [
+        { "slug": "agent-market-data", "title": { "en": "Market data for agents", "zh": "Agent 行情工具" }, "en": "docs/en/upq/agent-guide.md", "zh": "docs/cn/upq/agent-guide.md" },
+        { "slug": "agent-trading", "title": { "en": "Trading for agents", "zh": "Agent 交易工具" }, "en": "docs/en/pmb/agent-guide.md", "zh": "docs/cn/pmb/agent-guide.md" },
+        { "slug": "broker-terminal", "title": { "en": "Broker terminal", "zh": "交易终端" }, "en": "docs/en/pmb/broker-terminal.md", "zh": "docs/cn/pmb/broker-terminal.md" },
+        { "slug": "benchmark", "title": { "en": "Agent benchmark", "zh": "Agent 基准测试" }, "en": "docs/en/bench.md", "zh": "docs/cn/bench.md" },
+        { "slug": "sample-data", "title": { "en": "Sample dataset", "zh": "样本数据集" }, "en": "docs/en/sample-data.md", "zh": "docs/cn/sample-data.md" },
+        { "slug": "data-adapters", "title": { "en": "Data adapters", "zh": "数据适配器" }, "en": "docs/en/data-adapters.md", "zh": "docs/cn/data-adapters.md" }
+      ]
+    },
+    {
+      "id": "reference",
+      "title": { "en": "Reference", "zh": "参考" },
+      "pages": [
+        { "slug": "mcp-tools", "title": { "en": "MCP tools", "zh": "MCP 工具" }, "en": "docs/en/mcp-tools.md" },
+        { "slug": "upq", "title": { "en": "UPQ market data API", "zh": "UPQ 行情 API" }, "en": "docs/en/upq/README.md", "zh": "docs/cn/upq/README.md" },
+        { "slug": "esp", "title": { "en": "ESP events API", "zh": "ESP 事件 API" }, "en": "docs/en/esp/README.md", "zh": "docs/cn/esp/README.md" },
+        { "slug": "pmb", "title": { "en": "PMB broker API", "zh": "PMB 券商 API" }, "en": "docs/en/pmb/README.md", "zh": "docs/cn/pmb/README.md" },
+        { "slug": "configuration", "title": { "en": "Configuration", "zh": "配置" }, "en": "docs/en/configuration.md", "zh": "docs/cn/configuration.md" },
+        { "slug": "time-zones", "title": { "en": "Time zones", "zh": "时区约定" }, "en": "docs/en/conventions/timezone.md", "zh": "docs/cn/conventions/timezone.md" }
+      ]
+    },
+    {
+      "id": "operations",
+      "title": { "en": "Operations", "zh": "运维" },
+      "pages": [
+        { "slug": "deployment", "title": { "en": "Deployment and operations", "zh": "部署与运维" }, "en": "docs/en/operations.md", "zh": "docs/cn/operations.md" },
+        { "slug": "changelog", "title": { "en": "Changelog", "zh": "更新日志" }, "en": "CHANGELOG.md" }
+      ]
+    }
+  ]
+}

@@ -5,6 +5,8 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { createAccount } from "./api";
 
+import { useT } from "@/components/locale-provider";
+
 function Field({
   label,
   hint,
@@ -33,6 +35,7 @@ export function AllocatePanel({
   onBack: () => void;
   onCreated: (accountId: string) => void;
 }) {
+  const t = useT();
   const [cash, setCash] = useState(100_000);
   const [market, setMarket] = useState("us");
   const [leverage, setLeverage] = useState(2);
@@ -66,16 +69,19 @@ export function AllocatePanel({
         onClick={onBack}
         className="mb-6 flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="h-4 w-4" /> Back
+        <ArrowLeft className="h-4 w-4" /> {t("Back", "返回")}
       </button>
 
-      <h2 className="mb-1 text-xl font-semibold text-foreground">Open an account</h2>
+      <h2 className="mb-1 text-xl font-semibold text-foreground">{t("Open an account", "开立账户")}</h2>
       <p className="mb-6 text-sm text-muted-foreground">
-        Open a paper brokerage account with the capital and risk profile you want.
+        {t(
+          "Open a paper brokerage account with the capital and risk profile you want.",
+          "按你需要的资金规模和风险设置，开立一个模拟券商账户。",
+        )}
       </p>
 
       <div className="grid gap-5">
-        <Field label="Starting capital (USD)" hint="Cash the account opens with.">
+        <Field label={t("Starting capital (USD)", "初始资金（USD）")} hint={t("Cash the account opens with.", "账户开立时的现金。")}>
           <input
             type="number"
             min={1000}
@@ -86,25 +92,25 @@ export function AllocatePanel({
           />
         </Field>
 
-        <Field label="Market">
+        <Field label={t("Market", "市场")}>
           <select value={market} onChange={(e) => setMarket(e.target.value)} className={inputCls}>
-            <option value="us">US Equities</option>
+            <option value="us">{t("US Equities", "美股")}</option>
           </select>
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Leverage" hint={`Buying power ≈ ${leverage}×`}>
+          <Field label={t("Leverage", "杠杆")} hint={t(`Buying power ≈ ${leverage}×`, `购买力 ≈ ${leverage}×`)}>
             <select
               value={leverage}
               onChange={(e) => setLeverage(Number(e.target.value))}
               className={inputCls}
             >
-              <option value={1}>1× (cash)</option>
-              <option value={2}>2× (Reg-T)</option>
-              <option value={4}>4× (day)</option>
+              <option value={1}>{t("1× (cash)", "1×（现金）")}</option>
+              <option value={2}>{t("2× (Reg-T)", "2×（Reg-T）")}</option>
+              <option value={4}>{t("4× (day)", "4×（日内）")}</option>
             </select>
           </Field>
-          <Field label="Maintenance margin" hint="Margin-call threshold.">
+          <Field label={t("Maintenance margin", "维持保证金")} hint={t("Margin-call threshold.", "追加保证金的触发阈值。")}>
             <select
               value={maintenance}
               onChange={(e) => setMaintenance(Number(e.target.value))}
@@ -130,7 +136,7 @@ export function AllocatePanel({
         className="mt-6 flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-        Open account
+        {t("Open account", "开立账户")}
       </button>
     </div>
   );

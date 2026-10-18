@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PlaygroundConfig } from "./config-panel";
 import { MessageBubble, ChatMessage } from "./message-bubble";
 import { ToolCallData } from "./tool-call-card";
+import { useT } from "@/components/locale-provider";
 
 interface ChatPanelProps {
   config: PlaygroundConfig;
@@ -17,6 +18,7 @@ function makeId() {
 }
 
 export function ChatPanel({ config }: ChatPanelProps) {
+  const t = useT();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -154,7 +156,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, content: `Error: ${event.message as string}` }
+                  ? { ...m, content: `${t("Error", "错误")}: ${event.message as string}` }
                   : m
               )
             );
@@ -167,7 +169,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: `Connection error: ${(err as Error).message}` }
+              ? { ...m, content: `${t("Connection error", "连接错误")}: ${(err as Error).message}` }
               : m
           )
         );
@@ -176,7 +178,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, streaming, messages, config]);
+  }, [input, streaming, messages, config, t]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -191,7 +193,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
         {messages.length === 0 && (
           <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-            Ask anything about market data, news, or trading...
+            {t("Ask anything about market data, news, or trading...", "可以询问任何关于市场数据、新闻或交易的问题……")}
           </div>
         )}
         {messages.map((msg) => (
@@ -206,7 +208,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your question... (Enter to send, Shift+Enter for newline)"
+          placeholder={t("Type your question... (Enter to send, Shift+Enter for newline)", "输入你的问题……（Enter 发送，Shift+Enter 换行）")}
           className="resize-none text-sm min-h-[40px] max-h-[120px]"
           rows={1}
           disabled={streaming}
@@ -216,6 +218,8 @@ export function ChatPanel({ config }: ChatPanelProps) {
           disabled={streaming || !input.trim()}
           size="icon"
           className="shrink-0 h-10 w-10"
+          title={t("Send", "发送")}
+          aria-label={t("Send", "发送")}
         >
           <Send className="h-4 w-4" />
         </Button>

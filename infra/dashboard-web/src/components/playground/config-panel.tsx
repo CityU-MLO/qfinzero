@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { useT } from "@/components/locale-provider";
 
 export interface PlaygroundConfig {
   model: string;
@@ -100,6 +101,7 @@ interface ConfigPanelProps {
 }
 
 export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
+  const t = useT();
   const [saved, setSaved] = useState(false);
   const [settings, setSettings] = useState<ConsoleSettings | null>(null);
 
@@ -162,11 +164,11 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
     <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-card rounded-l-2xl">
       <div>
         <h2 className="text-xs font-semibold text-muted-foreground mb-3">
-          LLM Config
+          {t("LLM Config", "LLM 配置")}
         </h2>
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="model" className="text-xs">Model</Label>
+            <Label htmlFor="model" className="text-xs">{t("Model", "模型")}</Label>
             <select
               id="model"
               value={currentValue}
@@ -175,7 +177,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
               className="h-8 rounded-md border bg-card px-2 text-sm disabled:opacity-50"
             >
               {currentValue === "" && (
-                <option value="">{config.model || "Select a model…"}</option>
+                <option value="">{config.model || t("Select a model…", "选择模型…")}</option>
               )}
               {providers.map((p) => (
                 <optgroup key={p.id} label={p.label}>
@@ -190,10 +192,10 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
           {/* Base URL / API key / proxy are configured in Settings and resolved here */}
           <div className="flex items-center justify-between text-[11px]">
             <span className={hasKey ? "text-success" : "text-warning"}>
-              {hasKey ? "● key set" : "● no key"}
+              {hasKey ? t("● key set", "● 已设置密钥") : t("● no key", "● 未设置密钥")}
             </span>
             <Link href="/settings" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-              Manage in Settings <ExternalLink className="h-3 w-3" />
+              {t("Manage in Settings", "在设置中管理")} <ExternalLink className="h-3 w-3" />
             </Link>
           </div>
 
@@ -208,10 +210,10 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
               {saved ? (
                 <>
                   <Check className="h-3 w-3 text-success" />
-                  Saved
+                  {t("Saved", "已保存")}
                 </>
               ) : (
-                "Save"
+                t("Save", "保存")
               )}
             </Button>
           </div>
@@ -220,11 +222,11 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
 
       <div>
         <h2 className="text-xs font-semibold text-muted-foreground mb-3">
-          Context
+          {t("Context", "上下文")}
         </h2>
         <div className="flex flex-col gap-1">
           <Label htmlFor="asOfDate" className="text-xs">
-            As of Date <span className="text-muted-foreground font-normal">(ET)</span>
+            {t("As of Date", "截止时间")} <span className="text-muted-foreground font-normal">{t("(ET)", "（美东时间）")}</span>
           </Label>
           <Input
             id="asOfDate"

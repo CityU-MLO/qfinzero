@@ -6,6 +6,7 @@ import { Check, Loader2, Plus, Trash2, Wifi, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { useT } from "@/components/locale-provider";
 
 type Provider = {
   id: string;
@@ -55,6 +56,7 @@ function loadSettings(): ConsoleSettings {
 const inputCls = "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 export default function SettingsPage() {
+  const t = useT();
   const [settings, setSettings] = useState<ConsoleSettings>(defaultSettings());
   const [saved, setSaved] = useState(false);
   const [test, setTest] = useState<Record<string, "idle" | "loading" | "ok" | "error">>({});
@@ -95,7 +97,7 @@ export default function SettingsPage() {
     update({
       providers: [
         ...settings.providers,
-        { id, label: "Custom / local vLLM", baseUrl: "http://localhost:8000/v1", apiKey: "", models: ["local-model"], builtin: false },
+        { id, label: t("Custom / local vLLM", "自定义 / 本地 vLLM"), baseUrl: "http://localhost:8000/v1", apiKey: "", models: ["local-model"], builtin: false },
       ],
     });
   }
@@ -134,7 +136,7 @@ export default function SettingsPage() {
       if (data.ok) setTest((t) => ({ ...t, [p.id]: "ok" }));
       else {
         setTest((t) => ({ ...t, [p.id]: "error" }));
-        setTestErr((e) => ({ ...e, [p.id]: data.error ?? "Connection failed" }));
+        setTestErr((e) => ({ ...e, [p.id]: data.error ?? t("Connection failed", "连接失败") }));
       }
     } catch (err) {
       setTest((t) => ({ ...t, [p.id]: "error" }));
@@ -144,14 +146,20 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Settings" description="Model providers and the active model used by Chat. Keys are stored only in this browser." />
+      <PageHeader
+        title={t("Settings", "设置")}
+        description={t(
+          "Model providers and the active model used by Chat. Keys are stored only in this browser.",
+          "模型服务以及对话所用的当前模型。密钥仅保存在此浏览器中。",
+        )}
+      />
 
       {/* Active selector */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="mb-3 text-xs font-semibold text-muted-foreground">Active model</h3>
+        <h3 className="mb-3 text-xs font-semibold text-muted-foreground">{t("Active model", "当前模型")}</h3>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Provider</span>
+            <span className="text-xs text-muted-foreground">{t("Provider", "服务商")}</span>
             <select
               className={inputCls}
               value={settings.activeProviderId}
@@ -166,7 +174,7 @@ export default function SettingsPage() {
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Model</span>
+            <span className="text-xs text-muted-foreground">{t("Model", "模型")}</span>
             <select className={inputCls} value={settings.activeModel} onChange={(e) => update({ activeModel: e.target.value })}>
               {(active?.models ?? []).map((m) => (
                 <option key={m} value={m}>{m}</option>
@@ -177,25 +185,28 @@ export default function SettingsPage() {
             onClick={save}
             className={buttonVariants()}
           >
-            {saved ? <><Check className="h-4 w-4" /> Saved</> : "Save"}
+            {saved ? <><Check className="h-4 w-4" /> {t("Saved", "已保存")}</> : t("Save", "保存")}
           </button>
         </div>
         <div className="mt-4 border-t pt-4">
           <label className="flex flex-col gap-1">
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              LLM egress proxy <span className="font-normal">(optional)</span>
+              {t("LLM egress proxy", "LLM 出口代理")} <span className="font-normal">{t("(optional)", "（可选）")}</span>
               {proxyLoaded && (
-                <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">server proxy active</span>
+                <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">{t("server proxy active", "服务器代理已启用")}</span>
               )}
             </span>
             <input
               className={inputCls}
-              placeholder="http://user:pass@host:3128 — blank uses the server default"
+              placeholder={t("http://user:pass@host:3128 — blank uses the server default", "http://user:pass@host:3128 — 留空则使用服务器默认值")}
               value={settings.proxy}
               onChange={(e) => update({ proxy: e.target.value })}
             />
             <span className="text-[11px] text-muted-foreground">
-              Routes provider API calls through this proxy (Chat + Test connection). Local services bypass it. Leave blank to use the server&apos;s LLM_PROXY.
+              {t(
+                "Routes provider API calls through this proxy (Chat + Test connection). Local services bypass it. Leave blank to use the server's LLM_PROXY.",
+                "服务商 API 调用（对话 + 测试连接）将经由此代理转发，本地服务不经过代理。留空则使用服务器的 LLM_PROXY。",
+              )}
             </span>
           </label>
         </div>
@@ -213,9 +224,9 @@ export default function SettingsPage() {
               />
               <div className="flex items-center gap-2">
                 {p.builtin ? (
-                  <Badge variant="secondary">built-in</Badge>
+                  <Badge variant="secondary">{t("built-in", "内置")}</Badge>
                 ) : (
-                  <button onClick={() => removeProvider(p.id)} className="text-muted-foreground hover:text-destructive" title="Remove">
+                  <button onClick={() => removeProvider(p.id)} className="text-muted-foreground hover:text-destructive" title={t("Remove", "移除")}>
                     <Trash2 className="h-4 w-4" />
                   </button>
                 )}
@@ -223,20 +234,20 @@ export default function SettingsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">Base URL</span>
+                <span className="text-xs text-muted-foreground">{t("Base URL", "Base URL")}</span>
                 <input className={inputCls} value={p.baseUrl} onChange={(e) => updateProvider(p.id, { baseUrl: e.target.value })} />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  API key
+                  {t("API key", "API 密钥")}
                   {envLoaded[p.id] && (
-                    <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">loaded from env</span>
+                    <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">{t("loaded from env", "已从环境变量加载")}</span>
                   )}
                 </span>
-                <input type="password" className={inputCls} placeholder="sk-…  (leave blank for local)" value={p.apiKey} onChange={(e) => updateProvider(p.id, { apiKey: e.target.value })} />
+                <input type="password" className={inputCls} placeholder={t("sk-…  (leave blank for local)", "sk-…（本地服务可留空）")} value={p.apiKey} onChange={(e) => updateProvider(p.id, { apiKey: e.target.value })} />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">Models (comma-separated)</span>
+                <span className="text-xs text-muted-foreground">{t("Models (comma-separated)", "模型（逗号分隔）")}</span>
                 <input
                   className={inputCls}
                   value={p.models.join(", ")}
@@ -252,7 +263,13 @@ export default function SettingsPage() {
                   {test[p.id] === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   {test[p.id] === "ok" && <Wifi className="h-3.5 w-3.5 text-success" />}
                   {test[p.id] === "error" && <WifiOff className="h-3.5 w-3.5 text-destructive" />}
-                  {test[p.id] === "loading" ? "Testing…" : test[p.id] === "ok" ? "Connected" : test[p.id] === "error" ? "Failed" : "Test connection"}
+                  {test[p.id] === "loading"
+                    ? t("Testing…", "测试中…")
+                    : test[p.id] === "ok"
+                      ? t("Connected", "已连接")
+                      : test[p.id] === "error"
+                        ? t("Failed", "失败")
+                        : t("Test connection", "测试连接")}
                 </button>
                 {test[p.id] === "error" && testErr[p.id] && (
                   <span className="text-xs text-destructive truncate">{testErr[p.id]}</span>
@@ -264,7 +281,7 @@ export default function SettingsPage() {
       </div>
 
       <button onClick={addCustom} className="flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm hover:bg-accent">
-        <Plus className="h-4 w-4" /> Add custom provider (local vLLM, …)
+        <Plus className="h-4 w-4" /> {t("Add custom provider (local vLLM, …)", "添加自定义服务商（本地 vLLM 等）")}
       </button>
     </div>
   );

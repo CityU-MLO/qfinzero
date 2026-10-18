@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/time";
 import type { SanityResponse } from "@/lib/types";
+import { useT } from "@/components/locale-provider";
 
 type FilterStatus = "all" | "pass" | "warn" | "fail";
 
@@ -27,6 +28,8 @@ function statusVariant(status: "pass" | "warn" | "fail"): "success" | "warn" | "
   if (status === "warn") return "warn";
   return "danger";
 }
+
+const STATUS_ZH: Record<"pass" | "warn" | "fail", string> = { pass: "通过", warn: "警告", fail: "失败" };
 
 function StatusFilterCard({
   label,
@@ -73,26 +76,27 @@ function SamplesDrawer({
   samples: Record<string, unknown>[];
   onClose: () => void;
 }) {
+  const t = useT();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <Card className="flex max-h-[80vh] w-full max-w-3xl flex-col">
         <CardHeader className="border-b pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Badge variant={statusVariant(status)}>{status.toUpperCase()}</Badge>
+              <Badge variant={statusVariant(status)}>{t(status.toUpperCase(), STATUS_ZH[status])}</Badge>
               <CardTitle className="text-base">{checkName}</CardTitle>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose}>
+            <Button variant="ghost" size="icon" onClick={onClose} title={t("Close", "关闭")} aria-label={t("Close", "关闭")}>
               <X className="h-4 w-4" />
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            {samples.length} sample{samples.length !== 1 ? "s" : ""} showing
+            {t(`${samples.length} sample${samples.length !== 1 ? "s" : ""} showing`, `显示 ${samples.length} 条样例`)}
           </p>
         </CardHeader>
         <CardContent className="flex-1 overflow-auto p-4">
           {samples.length === 0 ? (
-            <p className="text-center text-muted-foreground">No samples available</p>
+            <p className="text-center text-muted-foreground">{t("No samples available", "暂无样例")}</p>
           ) : (
             <pre className="overflow-auto rounded-md bg-muted p-4 text-xs">
               {JSON.stringify(samples, null, 2)}
@@ -105,6 +109,7 @@ function SamplesDrawer({
 }
 
 export function SanityReport() {
+  const t = useT();
   const [filter, setFilter] = useState<FilterStatus>("all");
   const [selectedSamples, setSelectedSamples] = useState<{
     name: string;
@@ -133,7 +138,7 @@ export function SanityReport() {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted-foreground">
-            Last checked:{" "}
+            {t("Last checked:", "上次检查：")}{" "}
             {sanity.data ? (
               <span className="font-medium text-foreground">
                 {formatDateTime(sanity.data.checked_at)}
@@ -141,10 +146,10 @@ export function SanityReport() {
             ) : sanity.isFetching ? (
               <span className="flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" />
-                Checking...
+                {t("Checking...", "检查中...")}
               </span>
             ) : (
-              <span className="italic text-muted-foreground/60">Never</span>
+              <span className="italic text-muted-foreground/60">{t("Never", "从未")}</span>
             )}
           </p>
         </div>
@@ -156,10 +161,10 @@ export function SanityReport() {
           {sanity.isFetching ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Running...
+              {t("Running...", "运行中...")}
             </>
           ) : (
-            "Run Checks"
+            t("Run Checks", "运行检查")
           )}
         </Button>
       </div>
@@ -167,7 +172,7 @@ export function SanityReport() {
       {sanity.data ? (
         <div className="grid gap-3 md:grid-cols-4">
           <StatusFilterCard
-            label="Total Checks"
+            label={t("Total Checks", "检查总数")}
             value={sanity.data.summary.total}
             status="all"
             isActive={filter === "all"}
@@ -175,7 +180,7 @@ export function SanityReport() {
             colorClass=""
           />
           <StatusFilterCard
-            label="Pass"
+            label={t("Pass", "通过")}
             value={sanity.data.summary.pass}
             status="pass"
             isActive={filter === "pass"}
@@ -183,7 +188,7 @@ export function SanityReport() {
             colorClass="text-success"
           />
           <StatusFilterCard
-            label="Warn"
+            label={t("Warn", "警告")}
             value={sanity.data.summary.warn}
             status="warn"
             isActive={filter === "warn"}
@@ -191,7 +196,7 @@ export function SanityReport() {
             colorClass="text-warning"
           />
           <StatusFilterCard
-            label="Fail"
+            label={t("Fail", "失败")}
             value={sanity.data.summary.fail}
             status="fail"
             isActive={filter === "fail"}
@@ -203,23 +208,23 @@ export function SanityReport() {
 
       {sanity.data && totalRows > 0 && (
         <p className="text-xs text-muted-foreground">
-          Total rows evaluated: <span className="font-medium">{totalRows}</span>
+          {t("Total rows evaluated:", "已评估行数：")} <span className="font-medium">{totalRows}</span>
         </p>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Sanity Check Details</CardTitle>
+          <CardTitle className="text-base">{t("Sanity Check Details", "数据检查详情")}</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-48">Check</TableHead>
-                <TableHead className="w-20">Status</TableHead>
-                <TableHead className="w-16">Count</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Samples</TableHead>
+                <TableHead className="w-48">{t("Check", "检查项")}</TableHead>
+                <TableHead className="w-20">{t("Status", "状态")}</TableHead>
+                <TableHead className="w-16">{t("Count", "数量")}</TableHead>
+                <TableHead>{t("Description", "说明")}</TableHead>
+                <TableHead>{t("Samples", "样例")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -227,8 +232,8 @@ export function SanityReport() {
                 <TableRow>
                   <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     {filter !== "all"
-                      ? `No ${filter} checks found`
-                      : "No sanity checks available"}
+                      ? t(`No ${filter} checks found`, `没有${STATUS_ZH[filter]}的检查项`)
+                      : t("No sanity checks available", "暂无数据检查")}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -236,7 +241,7 @@ export function SanityReport() {
                   <TableRow key={check.name}>
                     <TableCell className="font-medium">{check.name}</TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(check.status)}>{check.status}</Badge>
+                      <Badge variant={statusVariant(check.status)}>{t(check.status, STATUS_ZH[check.status])}</Badge>
                     </TableCell>
                     <TableCell>{check.count}</TableCell>
                     <TableCell className="text-muted-foreground">{check.description}</TableCell>
@@ -257,7 +262,7 @@ export function SanityReport() {
                           }
                         >
                           <Eye className="h-3 w-3" />
-                          View {check.samples.length}
+                          {t("View", "查看")} {check.samples.length}
                         </Button>
                       )}
                     </TableCell>

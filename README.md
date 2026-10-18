@@ -17,6 +17,16 @@ QFinZero unifies price data, event/news retrieval, and brokerage simulation behi
 
 Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (ESP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
 
+## Quick start
+
+```bash
+export QFZ_ADMIN_PASSWORD='choose-a-long-password'
+docker compose up -d          # hub, all services, web UI and a synthetic sample dataset
+# open http://localhost:19777 and sign in as admin
+```
+
+From source, with the sample data: see [Getting started](docs/en/getting-started.md).
+
 ## The unified server
 
 QFinZero runs as **one server on a single public port** (`19777`). It fronts
@@ -440,11 +450,13 @@ Data paths (all default under `QFZ_DATA_ROOT`, default `/data/qfinzero`):
 
 ## Documentation
 
-- [Platform guide](docs/en/platform-guide.md) — time lock, trading sessions, quotes, research, accounts
-- [UPQ API Reference](docs/en/upq/README.md) | [Agent Guide](docs/en/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
-- [ESP API Reference](docs/en/esp/README.md) | [OpenAPI](docs/esp/openapi.yaml)
-- [PMB API Reference](docs/en/pmb/README.md) | [Agent Guide](docs/en/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
-- [Data adapters](docs/en/data-adapters.md) — the UPQ storage contract, how to add a vendor, Databento reference
+The web UI serves all of it as a searchable, bilingual doc hub at `/docs`.
+
+- Start: [Getting started](docs/en/getting-started.md) · [Platform guide](docs/en/platform-guide.md) (time lock, sessions, quotes, research, accounts)
+- Guides: [Market data for agents](docs/en/upq/agent-guide.md) · [Trading for agents](docs/en/pmb/agent-guide.md) · [Broker terminal](docs/en/pmb/broker-terminal.md) · [Agent benchmark](docs/en/bench.md) · [Sample dataset](docs/en/sample-data.md) · [Data adapters](docs/en/data-adapters.md)
+- Reference: [MCP tools](docs/en/mcp-tools.md) · [UPQ](docs/en/upq/README.md) ([OpenAPI](docs/upq/openapi.yaml)) · [ESP](docs/en/esp/README.md) ([OpenAPI](docs/esp/openapi.yaml)) · [PMB](docs/en/pmb/README.md) ([OpenAPI](docs/pmb/openapi.yaml)) · [Configuration](docs/en/configuration.md) · [Time zones](docs/en/conventions/timezone.md)
+- Operations: [Deployment and operations](docs/en/operations.md) · [Changelog](CHANGELOG.md)
+- 中文文档: [docs/cn/README.md](docs/cn/README.md)
 
 ## License
 

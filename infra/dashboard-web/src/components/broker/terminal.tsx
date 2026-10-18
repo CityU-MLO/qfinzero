@@ -37,12 +37,48 @@ import { ClockBar } from "./clock-bar";
 import { OptionChain } from "./option-chain";
 import { AccountPanel } from "./account-panel";
 
+import { useT } from "@/components/locale-provider";
+
 const MARKET_OPEN_ET = 9 * 60 + 30; // 09:30 ET
 
 type Blotter = "positions" | "orders" | "trades";
 
 function pnlCls(n: number) {
   return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-foreground";
+}
+
+type TFn = (en: string, zh: string) => string;
+
+const BLOTTER_LABEL: Record<Blotter, readonly [string, string]> = {
+  positions: ["Positions", "持仓"],
+  orders: ["Orders", "委托"],
+  trades: ["Trades", "成交"],
+};
+
+// Display labels for server enum values (the raw value is still what is sent).
+const ENUM_LABEL: Record<string, readonly [string, string]> = {
+  BUY: ["BUY", "买入"],
+  SELL: ["SELL", "卖出"],
+  MARKET: ["MARKET", "市价"],
+  LIMIT: ["LIMIT", "限价"],
+  STOP: ["STOP", "止损"],
+  NEW: ["NEW", "新建"],
+  ACCEPTED: ["ACCEPTED", "已接受"],
+  PARTIALLY_FILLED: ["PARTIALLY_FILLED", "部分成交"],
+  FILLED: ["FILLED", "已成交"],
+  CANCELLED: ["CANCELLED", "已撤销"],
+  REJECTED: ["REJECTED", "已拒绝"],
+  EXPIRED: ["EXPIRED", "已过期"],
+  OK: ["OK", "正常"],
+  NORMAL: ["NORMAL", "正常"],
+  MARGIN_CALL: ["MARGIN_CALL", "追加保证金"],
+  RESTRICTED: ["RESTRICTED", "受限"],
+  LIQUIDATION: ["LIQUIDATION", "强制平仓"],
+};
+
+function enumLabel(t: TFn, v: string) {
+  const l = ENUM_LABEL[v];
+  return l ? t(l[0], l[1]) : v;
 }
 
 export function Terminal({
@@ -76,6 +112,7 @@ export function Terminal({
   const [centerView, setCenterView] = useState<"chart" | "options">("chart");
   const [showAccount, setShowAccount] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const t = useT();
 
   // Order ticket
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
@@ -267,13 +304,15 @@ export function Terminal({
         });
         const s = await getState(sessionId);
         apply(s, true);
-        setToast(`${oside} ${contract} submitted`);
+        setToast(
+          t(`${oside} ${contract} submitted`, `${oside === "BUY" ? "买入" : "卖出"} ${contract} 已提交`),
+        );
         setTimeout(() => setToast(null), 2500);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     },
-    [sessionId, accountId, qty, apply],
+    [sessionId, accountId, qty, apply, t],
   );
 
   const addSymbol = useCallback(async () => {
@@ -289,7 +328,7 @@ export function Terminal({
     try {
       const r = await addStocks(sessionId, [sym]);
       if (r.loaded === 0) {
-        setErr(`No market data for ${sym} on this trading day.`);
+        setErr(t(`No market data for ${sym} on this trading day.`, `${sym} 在该交易日没有行情数据。`));
       } else {
         setWl((w) => [...w, sym]);
         setSelected(sym);
@@ -302,7 +341,7 @@ export function Terminal({
     } finally {
       setAddingSym(false);
     }
-  }, [newSym, wl, sessionId, apply]);
+  }, [newSym, wl, sessionId, apply, t]);
 
   const removeSymbol = useCallback((sym: string) => {
     setWl((w) => {
@@ -341,7 +380,8 @@ export function Terminal({
         }
         const s = await getState(sessionId);
         apply(s, true);
-        setToast(`Flatten ${p.instrument_id.replace(/^(STOCK|OPTION):/, "")} submitted`);
+        const inst = p.instrument_id.replace(/^(STOCK|OPTION):/, "");
+        setToast(t(`Flatten ${inst} submitted`, `平仓 ${inst} 已提交`));
         setTimeout(() => setToast(null), 2500);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -349,7 +389,7 @@ export function Terminal({
         busy2Ref.current = false;
       }
     },
-    [sessionId, accountId, apply],
+    [sessionId, accountId, apply, t],
   );
 
   const closeAll = useCallback(async () => {
@@ -409,30 +449,30 @@ export function Terminal({
       {/* Header */}
       <div className="broker-titlebar flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-4">
-          <div className="text-sm font-semibold text-foreground">Session</div>
+          <div className="text-sm font-semibold text-foreground">{t("Session", "会话")}</div>
           <div className="hidden font-mono text-xs text-muted-foreground sm:block">
-            acct {accountId} · {state ? fmtET(state.clock.current_ts) : "—"} ET
+            {t("acct", "账户")} {accountId} · {state ? fmtET(state.clock.current_ts) : "—"} ET
           </div>
         </div>
         <div className="flex items-center gap-5">
-          <Stat label="Equity" value={money(acct?.equity)} />
+          <Stat label={t("Equity", "权益")} value={money(acct?.equity)} />
           <Stat
-            label="Day P&L"
+            label={t("Day P&L", "当日盈亏")}
             value={`${dayPnl >= 0 ? "+" : ""}${money(dayPnl)}`}
             cls={pnlCls(dayPnl)}
           />
-          <Stat label="Buying power" value={money(acct?.buying_power)} />
+          <Stat label={t("Buying power", "购买力")} value={money(acct?.buying_power)} />
           <button
             onClick={() => setShowAccount(true)}
             className="broker-btn flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
           >
-            <Wallet2 className="h-4 w-4" /> Account
+            <Wallet2 className="h-4 w-4" /> {t("Account", "账户")}
           </button>
           <button
             onClick={onExit}
             className="broker-btn flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
           >
-            <LogOut className="h-4 w-4" /> Exit
+            <LogOut className="h-4 w-4" /> {t("Exit", "退出")}
           </button>
         </div>
       </div>
@@ -440,7 +480,7 @@ export function Terminal({
       {err && (
         <div className="flex items-center justify-between border-b border-destructive/30 bg-destructive/5 px-5 py-1.5 text-sm text-destructive">
           {err}
-          <button onClick={() => setErr(null)}>
+          <button onClick={() => setErr(null)} title={t("Dismiss", "关闭")}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -451,7 +491,7 @@ export function Terminal({
         {/* Watchlist */}
         <div className="broker-panel flex w-60 shrink-0 flex-col border-r border-border">
           <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
-            Watchlist
+            {t("Watchlist", "自选")}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {wl.map((sym) => {
@@ -481,7 +521,7 @@ export function Terminal({
                     {q && (up ? <TrendingUp className="h-3 w-3 text-up" /> : <TrendingDown className="h-3 w-3 text-down" />)}
                     <button
                       onClick={() => removeSymbol(sym)}
-                      title="Remove from watchlist"
+                      title={t("Remove from watchlist", "从自选移除")}
                       className="broker-btn opacity-0 transition group-hover:opacity-100 text-muted-foreground hover:text-down"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -497,14 +537,14 @@ export function Terminal({
               value={newSym}
               onChange={(e) => setNewSym(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === "Enter" && addSymbol()}
-              placeholder="Add symbol…"
+              placeholder={t("Add symbol…", "添加代码…")}
               className="w-full rounded-md border border-input bg-card px-2 py-1.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             />
             <button
               onClick={addSymbol}
               disabled={addingSym || !newSym.trim()}
               className="broker-btn flex items-center justify-center rounded-md bg-up px-2 py-1.5 text-white disabled:opacity-40"
-              title="Add to watchlist"
+              title={t("Add to watchlist", "加入自选")}
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -530,7 +570,8 @@ export function Terminal({
               })()}
               {sel && (
                 <span className="font-mono text-xs text-muted-foreground">
-                  O {num(sel.open)} · H {num(sel.high)} · L {num(sel.low)} · Vol{" "}
+                  {t("O", "开")} {num(sel.open)} · {t("H", "高")} {num(sel.high)} · {t("L", "低")} {num(sel.low)} ·{" "}
+                  {t("Vol", "成交量")}{" "}
                   {sel.volume.toLocaleString()}
                 </span>
               )}
@@ -545,7 +586,7 @@ export function Terminal({
                       className={`broker-btn flex items-center px-2.5 py-1.5 ${
                         chartKind === id ? "bg-muted text-foreground" : "bg-card text-muted-foreground"
                       }`}
-                      title={id === "candles" ? "Candlesticks" : "Line"}
+                      title={id === "candles" ? t("Candlesticks", "K线") : t("Line", "折线")}
                     >
                       <Icon className="h-3.5 w-3.5" />
                     </button>
@@ -553,7 +594,12 @@ export function Terminal({
                 </div>
               )}
               <div className="flex overflow-hidden rounded-lg border border-border text-xs">
-                {([["chart", "Chart", CandlestickChart], ["options", "Option chain", ListTree]] as const).map(
+                {(
+                  [
+                    ["chart", t("Chart", "图表"), CandlestickChart],
+                    ["options", t("Option chain", "期权链"), ListTree],
+                  ] as const
+                ).map(
                   ([id, label, Icon]) => (
                     <button
                       key={id}
@@ -590,17 +636,17 @@ export function Terminal({
           <div className="broker-panel h-56 shrink-0 border-t border-border">
             <div className="flex items-center justify-between px-4 pt-2">
               <div className="flex gap-1">
-                {(["positions", "orders", "trades"] as Blotter[]).map((t) => (
+                {(["positions", "orders", "trades"] as Blotter[]).map((b) => (
                   <button
-                    key={t}
-                    onClick={() => setTab(t)}
+                    key={b}
+                    onClick={() => setTab(b)}
                     className={`broker-btn rounded-t-md px-3 py-1.5 text-xs font-semibold capitalize ${
-                      tab === t ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+                      tab === b ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {t}
-                    {t === "positions" && state?.positions.length ? ` (${state.positions.length})` : ""}
-                    {t === "orders" && state?.open_orders.length ? ` (${state.open_orders.length})` : ""}
+                    {t(BLOTTER_LABEL[b][0], BLOTTER_LABEL[b][1])}
+                    {b === "positions" && state?.positions.length ? ` (${state.positions.length})` : ""}
+                    {b === "orders" && state?.open_orders.length ? ` (${state.open_orders.length})` : ""}
                   </button>
                 ))}
               </div>
@@ -609,7 +655,7 @@ export function Terminal({
                   onClick={closeAll}
                   className="broker-btn flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
                 >
-                  <X className="h-3 w-3" /> Close all
+                  <X className="h-3 w-3" /> {t("Close all", "全部平仓")}
                 </button>
               )}
               {tab === "orders" && !!state?.open_orders.length && (
@@ -617,7 +663,7 @@ export function Terminal({
                   onClick={cancelAll}
                   className="broker-btn flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
                 >
-                  <Ban className="h-3 w-3" /> Cancel all
+                  <Ban className="h-3 w-3" /> {t("Cancel all", "全部撤单")}
                 </button>
               )}
             </div>
@@ -636,7 +682,7 @@ export function Terminal({
         {/* Order ticket + account */}
         <div className="w-72 shrink-0 overflow-y-auto border-l border-border p-4">
           <div className="mb-3 text-xs font-semibold text-muted-foreground">
-            Order ticket
+            {t("Order ticket", "下单")}
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2">
             {(["BUY", "SELL"] as const).map((s) => (
@@ -651,12 +697,12 @@ export function Terminal({
                     : "bg-muted text-muted-foreground hover:bg-accent"
                 }`}
               >
-                {s}
+                {enumLabel(t, s)}
               </button>
             ))}
           </div>
 
-          <TicketField label="Symbol">
+          <TicketField label={t("Symbol", "代码")}>
             <select
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
@@ -670,7 +716,7 @@ export function Terminal({
             </select>
           </TicketField>
 
-          <TicketField label="Quantity (shares)">
+          <TicketField label={t("Quantity (shares)", "数量（股）")}>
             <input
               type="number"
               min={1}
@@ -680,24 +726,24 @@ export function Terminal({
             />
           </TicketField>
 
-          <TicketField label="Type">
+          <TicketField label={t("Type", "类型")}>
             <div className="grid grid-cols-2 gap-2">
-              {(["MARKET", "LIMIT"] as const).map((t) => (
+              {(["MARKET", "LIMIT"] as const).map((ot) => (
                 <button
-                  key={t}
-                  onClick={() => setOrderType(t)}
+                  key={ot}
+                  onClick={() => setOrderType(ot)}
                   className={`rounded-lg py-1.5 text-xs font-semibold ${
-                    orderType === t ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground"
+                    orderType === ot ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground"
                   }`}
                 >
-                  {t}
+                  {enumLabel(t, ot)}
                 </button>
               ))}
             </div>
           </TicketField>
 
           {orderType === "LIMIT" && (
-            <TicketField label="Limit price">
+            <TicketField label={t("Limit price", "限价")}>
               <input
                 type="number"
                 step="0.01"
@@ -711,11 +757,11 @@ export function Terminal({
 
           <div className="mb-3 space-y-1 rounded-lg bg-card px-3 py-2 text-xs text-muted-foreground">
             <div>
-              Est. {side === "BUY" ? "cost" : "proceeds"}
+              {side === "BUY" ? t("Est. cost", "预估成本") : t("Est. proceeds", "预估收入")}
               <span className="float-right font-mono text-foreground">{sel ? money(estCost) : "—"}</span>
             </div>
             <div>
-              Buying power after
+              {t("Buying power after", "下单后购买力")}
               <span className={`float-right font-mono ${bpAfter < 0 ? "text-down" : "text-foreground"}`}>
                 {acct ? money(bpAfter) : "—"}
               </span>
@@ -729,26 +775,28 @@ export function Terminal({
               side === "BUY" ? "bg-up hover:bg-up/90" : "bg-down hover:bg-down/90"
             }`}
           >
-            {side} {qty} {selected}
+            {side === "BUY"
+              ? t(`BUY ${qty} ${selected}`, `买入 ${qty} ${selected}`)
+              : t(`SELL ${qty} ${selected}`, `卖出 ${qty} ${selected}`)}
           </button>
           {!started && (
-            <p className="mt-2 text-center text-xs text-muted-foreground">Open the market to trade.</p>
+            <p className="mt-2 text-center text-xs text-muted-foreground">{t("Open the market to trade.", "开盘后即可交易。")}</p>
           )}
 
           {/* Account panel */}
           <div className="mt-6 space-y-1.5 border-t border-border pt-4 text-sm">
-            <AcctRow label="Cash" value={money(acct?.cash_available)} />
-            <AcctRow label="Cash locked" value={money(acct?.cash_locked)} />
-            <AcctRow label="Equity" value={money(acct?.equity)} />
-            <AcctRow label="Buying power" value={money(acct?.buying_power)} />
+            <AcctRow label={t("Cash", "现金")} value={money(acct?.cash_available)} />
+            <AcctRow label={t("Cash locked", "冻结资金")} value={money(acct?.cash_locked)} />
+            <AcctRow label={t("Equity", "权益")} value={money(acct?.equity)} />
+            <AcctRow label={t("Buying power", "购买力")} value={money(acct?.buying_power)} />
             <AcctRow
-              label="Maint. margin"
+              label={t("Maint. margin", "维持保证金")}
               value={money(acct?.maintenance_margin_req)}
             />
             <AcctRow
-              label="Margin status"
-              value={acct?.margin_status ?? "—"}
-              cls={acct?.margin_status === "OK" ? "text-up" : "text-warning"}
+              label={t("Margin status", "保证金状态")}
+              value={acct?.margin_status ? enumLabel(t, acct.margin_status) : "—"}
+              cls={acct?.margin_status === "NORMAL" || acct?.margin_status === "OK" ? "text-up" : "text-warning"}
             />
           </div>
         </div>
@@ -821,17 +869,18 @@ function PositionsTable({
   positions: Position[];
   onFlatten: (p: Position) => void;
 }) {
+  const t = useT();
   if (!positions.length)
-    return <div className="py-6 text-center text-muted-foreground">No open positions.</div>;
+    return <div className="py-6 text-center text-muted-foreground">{t("No open positions.", "暂无持仓。")}</div>;
   return (
     <table className="w-full">
       <thead className="text-muted-foreground">
         <tr className="text-left">
-          <th className="pb-1">Instrument</th>
-          <th className="pb-1 text-right">Qty</th>
-          <th className="pb-1 text-right">Avg</th>
-          <th className="pb-1 text-right">Mark</th>
-          <th className="pb-1 text-right">Unreal. P&L</th>
+          <th className="pb-1">{t("Instrument", "合约")}</th>
+          <th className="pb-1 text-right">{t("Qty", "数量")}</th>
+          <th className="pb-1 text-right">{t("Avg", "均价")}</th>
+          <th className="pb-1 text-right">{t("Mark", "市价")}</th>
+          <th className="pb-1 text-right">{t("Unreal. P&L", "未实现盈亏")}</th>
           <th className="pb-1 text-right"></th>
         </tr>
       </thead>
@@ -849,10 +898,10 @@ function PositionsTable({
             <td className="py-1 text-right">
               <button
                 onClick={() => onFlatten(p)}
-                title="Flatten (market close)"
+                title={t("Flatten (market close)", "平仓（市价）")}
                 className="broker-btn rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground hover:bg-accent"
               >
-                Flatten
+                {t("Flatten", "平仓")}
               </button>
             </td>
           </tr>
@@ -869,18 +918,19 @@ function OrdersTable({
   orders: FullState["open_orders"];
   onCancel: (id: string) => void;
 }) {
+  const t = useT();
   if (!orders.length)
-    return <div className="py-6 text-center text-muted-foreground">No working orders.</div>;
+    return <div className="py-6 text-center text-muted-foreground">{t("No working orders.", "暂无未成交委托。")}</div>;
   return (
     <table className="w-full">
       <thead className="text-muted-foreground">
         <tr className="text-left">
-          <th className="pb-1">Instrument</th>
-          <th className="pb-1">Side</th>
-          <th className="pb-1">Type</th>
-          <th className="pb-1 text-right">Qty</th>
-          <th className="pb-1 text-right">Limit</th>
-          <th className="pb-1 text-right">Status</th>
+          <th className="pb-1">{t("Instrument", "合约")}</th>
+          <th className="pb-1">{t("Side", "方向")}</th>
+          <th className="pb-1">{t("Type", "类型")}</th>
+          <th className="pb-1 text-right">{t("Qty", "数量")}</th>
+          <th className="pb-1 text-right">{t("Limit", "限价")}</th>
+          <th className="pb-1 text-right">{t("Status", "状态")}</th>
           <th className="pb-1"></th>
         </tr>
       </thead>
@@ -888,13 +938,13 @@ function OrdersTable({
         {orders.map((o) => (
           <tr key={o.order_id} className="border-t border-border">
             <td className="py-1 text-foreground">{o.instrument_id.replace("STOCK:", "")}</td>
-            <td className={o.side === "BUY" ? "text-up" : "text-down"}>{o.side}</td>
-            <td className="text-muted-foreground">{o.order_type}</td>
+            <td className={o.side === "BUY" ? "text-up" : "text-down"}>{enumLabel(t, o.side)}</td>
+            <td className="text-muted-foreground">{enumLabel(t, o.order_type)}</td>
             <td className="py-1 text-right">{o.qty}</td>
             <td className="py-1 text-right">{o.limit_price ? num(o.limit_price) : "—"}</td>
-            <td className="py-1 text-right text-muted-foreground">{o.status}</td>
+            <td className="py-1 text-right text-muted-foreground">{enumLabel(t, o.status)}</td>
             <td className="py-1 text-right">
-              <button onClick={() => onCancel(o.order_id)} className="text-muted-foreground hover:text-down">
+              <button onClick={() => onCancel(o.order_id)} title={t("Cancel order", "撤单")} className="text-muted-foreground hover:text-down">
                 <X className="h-3.5 w-3.5" />
               </button>
             </td>
@@ -906,33 +956,34 @@ function OrdersTable({
 }
 
 function TradesTable({ trades }: { trades: FullState["trades"] }) {
+  const t = useT();
   if (!trades.length)
-    return <div className="py-6 text-center text-muted-foreground">No fills yet.</div>;
+    return <div className="py-6 text-center text-muted-foreground">{t("No fills yet.", "暂无成交。")}</div>;
   return (
     <table className="w-full">
       <thead className="text-muted-foreground">
         <tr className="text-left">
-          <th className="pb-1">Time</th>
-          <th className="pb-1">Instrument</th>
-          <th className="pb-1">Side</th>
-          <th className="pb-1 text-right">Qty</th>
-          <th className="pb-1 text-right">Price</th>
+          <th className="pb-1">{t("Time", "时间")}</th>
+          <th className="pb-1">{t("Instrument", "合约")}</th>
+          <th className="pb-1">{t("Side", "方向")}</th>
+          <th className="pb-1 text-right">{t("Qty", "数量")}</th>
+          <th className="pb-1 text-right">{t("Price", "价格")}</th>
         </tr>
       </thead>
       <tbody>
         {trades
           .slice()
           .reverse()
-          .map((t, i) => {
-            const inst = String(t.instrument_id ?? t.symbol ?? "").replace("STOCK:", "");
-            const s = String(t.side ?? "");
+          .map((tr, i) => {
+            const inst = String(tr.instrument_id ?? tr.symbol ?? "").replace("STOCK:", "");
+            const s = String(tr.side ?? "");
             return (
               <tr key={i} className="border-t border-border">
-                <td className="py-1 text-muted-foreground">{t.ts ? fmtET(String(t.ts)) : "—"}</td>
+                <td className="py-1 text-muted-foreground">{tr.ts ? fmtET(String(tr.ts)) : "—"}</td>
                 <td className="py-1 text-foreground">{inst}</td>
-                <td className={s === "BUY" ? "text-up" : "text-down"}>{s}</td>
-                <td className="py-1 text-right">{t.qty ?? "—"}</td>
-                <td className="py-1 text-right">{t.price ? num(Number(t.price)) : "—"}</td>
+                <td className={s === "BUY" ? "text-up" : "text-down"}>{enumLabel(t, s)}</td>
+                <td className="py-1 text-right">{tr.qty ?? "—"}</td>
+                <td className="py-1 text-right">{tr.price ? num(Number(tr.price)) : "—"}</td>
               </tr>
             );
           })}

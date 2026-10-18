@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import type { EspEvent } from "@/lib/types";
+import { useT } from "@/components/locale-provider";
 
 function EmptyValue() {
   return <span className="text-muted-foreground/30">—</span>;
@@ -19,24 +20,25 @@ export function NewsTable({
   selectedId: string | null;
   onSelect: (event: EspEvent) => void;
 }) {
+  const t = useT();
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow>
-            <TableHead className="w-40 text-xs font-semibold">Time (UTC)</TableHead>
-            <TableHead className="text-xs font-semibold">Title</TableHead>
-            <TableHead className="w-32 text-xs font-semibold">Publisher</TableHead>
-            <TableHead className="w-32 text-xs font-semibold">Tickers</TableHead>
-            <TableHead className="w-20 text-xs font-semibold">Rating</TableHead>
-            <TableHead className="w-16 text-right text-xs font-semibold">URL</TableHead>
+            <TableHead className="w-40 text-xs font-semibold">{t("Time (UTC)", "时间 (UTC)")}</TableHead>
+            <TableHead className="text-xs font-semibold">{t("Title", "标题")}</TableHead>
+            <TableHead className="w-32 text-xs font-semibold">{t("Publisher", "发布方")}</TableHead>
+            <TableHead className="w-32 text-xs font-semibold">{t("Tickers", "代码")}</TableHead>
+            <TableHead className="w-20 text-xs font-semibold">{t("Rating", "评级")}</TableHead>
+            <TableHead className="w-16 text-right text-xs font-semibold">{t("URL", "链接")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="h-32 text-center text-sm text-muted-foreground">
-                No news entries found matching your query.
+                {t("No news entries found matching your query.", "没有符合查询条件的新闻。")}
               </TableCell>
             </TableRow>
           ) : (
@@ -76,9 +78,9 @@ export function NewsTable({
                   <TableCell>
                     {row.tickers.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {row.tickers.slice(0, 3).map(t => (
-                          <span key={t} className="rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
-                            {t}
+                        {row.tickers.slice(0, 3).map((tk) => (
+                          <span key={tk} className="rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
+                            {tk}
                           </span>
                         ))}
                         {row.tickers.length > 3 && <span className="text-[10px] text-muted-foreground">+{row.tickers.length - 3}</span>}
@@ -98,6 +100,7 @@ export function NewsTable({
                         rel="noreferrer" 
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary/10"
                         onClick={(e) => e.stopPropagation()}
+                        title={t("Open article", "打开文章")}
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>

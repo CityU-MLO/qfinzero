@@ -82,6 +82,10 @@ def test_policy():
     assert required_role("POST", "/mcp/") == "researcher"
     assert required_role("GET", "/svc/data-admin/data/config") == "admin"
     assert required_role("GET", "/admin/users") == "admin"
+    assert required_role("GET", "/docs") is None and required_role("GET", "/docs/mcp-tools") is None
+    assert required_role("GET", "/api/docs") is None
+    assert required_role("POST", "/api/docs") == "viewer"
+    assert required_role("GET", "/doc") == "viewer"          # not a prefix match of /docs/
 
 
 # ── hub ──────────────────────────────────────────────────────────────────

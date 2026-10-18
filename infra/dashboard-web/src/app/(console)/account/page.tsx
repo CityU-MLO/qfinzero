@@ -7,27 +7,31 @@ import { Check, Copy, KeyRound, Loader2, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMe } from "@/components/user-menu";
-import { auth, ROLE_LABEL, type ApiKey } from "@/lib/auth";
+import { auth, roleLabel, type ApiKey } from "@/lib/auth";
+import { useLocale, useT } from "@/components/locale-provider";
 
 const input =
   "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
-function when(ts: number | null) {
-  return ts ? new Date(ts * 1000).toLocaleString() : "never";
+function when(ts: number | null, never: string) {
+  return ts ? new Date(ts * 1000).toLocaleString() : never;
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [done, setDone] = useState(false);
   return (
     <button type="button" className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs hover:bg-accent"
             onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}>
-      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {done ? "Copied" : "Copy"}
+      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {done ? t("Copied", "已复制") : t("Copy", "复制")}
     </button>
   );
 }
 
 export default function AccountPage() {
   const { data: me } = useMe();
+  const t = useT();
+  const { locale } = useLocale();
   const qc = useQueryClient();
   const keys = useQuery({ queryKey: ["auth", "keys"], queryFn: auth.keys, enabled: !!me });
   const [keyName, setKeyName] = useState("");
@@ -39,7 +43,7 @@ export default function AccountPage() {
   useEffect(() => setOrigin(window.location.origin), []);
 
   if (!me) {
-    return <p className="text-sm text-muted-foreground">Accounts are managed by the QFinZero hub. Sign in through it to manage keys.</p>;
+    return <p className="text-sm text-muted-foreground">{t("Accounts are managed by the QFinZero hub. Sign in through it to manage keys.", "账户由 QFinZero hub 管理。请通过 hub 登录以管理密钥。")}</p>;
   }
 
   const createKey = async (e: React.FormEvent) => {
@@ -59,11 +63,11 @@ export default function AccountPage() {
   };
   const changePw = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pw.next !== pw.confirm) return setPwMsg({ ok: false, text: "new passwords do not match" });
+    if (pw.next !== pw.confirm) return setPwMsg({ ok: false, text: t("New passwords do not match", "两次输入的新密码不一致") });
     try {
       await auth.changePassword(pw.current, pw.next);
       setPw({ current: "", next: "", confirm: "" });
-      setPwMsg({ ok: true, text: "Password changed. Other browsers were signed out." });
+      setPwMsg({ ok: true, text: t("Password changed. Other browsers were signed out.", "密码已修改，其他浏览器已退出登录。") });
     } catch (err) {
       setPwMsg({ ok: false, text: (err as Error).message });
     }
@@ -75,35 +79,38 @@ export default function AccountPage() {
 
   return (
     <>
-    <PageHeader title="Account" description="Your profile, password and API keys for agents and scripts." />
+    <PageHeader
+      title={t("Account", "账户")}
+      description={t("Your profile, password and API keys for agents and scripts.", "你的个人资料、密码，以及供 agent 和脚本使用的 API 密钥。")}
+    />
     <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
       <div className="space-y-5">
         <Card>
           <CardHeader>
             <CardTitle>{me.display_name || me.username}</CardTitle>
-            <CardDescription>Signed in as <span className="font-mono">{me.username}</span> · {ROLE_LABEL[me.role]}</CardDescription>
+            <CardDescription>{t("Signed in as", "当前登录：")} <span className="font-mono">{me.username}</span> · {roleLabel(me.role, locale)}</CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {me.role === "viewer" && "Viewers can read data and sessions but cannot trade or use MCP."}
-            {me.role === "researcher" && "Researchers can trade in sessions, run research and connect agents over MCP."}
-            {me.role === "admin" && "Admins can also manage data sources and users."}
+            {me.role === "viewer" && t("Viewers can read data and sessions but cannot trade or use MCP.", "访客可以查看数据和会话，但不能交易或使用 MCP。")}
+            {me.role === "researcher" && t("Researchers can trade in sessions, run research and connect agents over MCP.", "研究员可以在会话中交易、运行研究，并通过 MCP 接入 agent。")}
+            {me.role === "admin" && t("Admins can also manage data sources and users.", "管理员还可以管理数据源和用户。")}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Change password</CardTitle>
-            <CardDescription>Changing it signs out every other browser.</CardDescription>
+            <CardTitle>{t("Change password", "修改密码")}</CardTitle>
+            <CardDescription>{t("Changing it signs out every other browser.", "修改后，其他所有浏览器都会退出登录。")}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={changePw} className="space-y-3">
-              <input className={input} type="password" placeholder="Current password" autoComplete="current-password"
+              <input className={input} type="password" placeholder={t("Current password", "当前密码")} autoComplete="current-password"
                      value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required />
-              <input className={input} type="password" placeholder="New password (10+ characters)" autoComplete="new-password"
+              <input className={input} type="password" placeholder={t("New password (10+ characters)", "新密码（至少 10 个字符）")} autoComplete="new-password"
                      value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} required minLength={10} />
-              <input className={input} type="password" placeholder="Confirm new password" autoComplete="new-password"
+              <input className={input} type="password" placeholder={t("Confirm new password", "确认新密码")} autoComplete="new-password"
                      value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} required />
               {pwMsg && <p className={`text-sm ${pwMsg.ok ? "text-success" : "text-destructive"}`}>{pwMsg.text}</p>}
-              <button className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">Update password</button>
+              <button className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">{t("Update password", "更新密码")}</button>
             </form>
           </CardContent>
         </Card>
@@ -112,19 +119,21 @@ export default function AccountPage() {
       <div className="space-y-5">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> API keys</CardTitle>
-            <CardDescription>For agents, scripts and MCP clients. A key acts with your role; the token is shown once.</CardDescription>
+            <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> {t("API keys", "API 密钥")}</CardTitle>
+            <CardDescription>{t("For agents, scripts and MCP clients. A key acts with your role; the token is shown once.", "供 agent、脚本和 MCP 客户端使用。密钥拥有与你相同的角色权限；令牌只显示一次。")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form onSubmit={createKey} className="flex gap-2">
-              <input className={input} placeholder="Key name, e.g. eval-runner" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
+              <input className={input} placeholder={t("Key name, e.g. eval-runner", "密钥名称，例如 eval-runner")} value={keyName} onChange={(e) => setKeyName(e.target.value)} />
               <button disabled={busy} className="flex h-9 flex-none items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-                {busy && <Loader2 className="h-4 w-4 animate-spin" />} Create key
+                {busy && <Loader2 className="h-4 w-4 animate-spin" />} {t("Create key", "创建密钥")}
               </button>
             </form>
             {fresh && (
               <div className="rounded-lg border border-success/30 bg-success/10 p-4">
-                <p className="text-sm font-semibold text-success">New key “{fresh.key.name}”: copy it now, it will not be shown again.</p>
+                <p className="text-sm font-semibold text-success">
+                  {t("New key", "新密钥")} “{fresh.key.name}”{t(": copy it now, it will not be shown again.", "：请立即复制，之后将不再显示。")}
+                </p>
                 <div className="mt-2 flex items-center gap-2">
                   <code className="flex-1 overflow-x-auto rounded-md bg-card px-2 py-1.5 font-mono text-xs">{fresh.token}</code>
                   <CopyButton text={fresh.token} />
@@ -134,18 +143,18 @@ export default function AccountPage() {
             <div className="overflow-hidden rounded-lg border">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
-                  <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Key</th><th className="px-3 py-2">Last used</th><th className="px-3 py-2" /></tr>
+                  <tr><th className="px-3 py-2">{t("Name", "名称")}</th><th className="px-3 py-2">{t("Key", "密钥")}</th><th className="px-3 py-2">{t("Last used", "最近使用")}</th><th className="px-3 py-2" /></tr>
                 </thead>
                 <tbody>
-                  {live.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No keys yet.</td></tr>}
+                  {live.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">{t("No keys yet.", "暂无密钥。")}</td></tr>}
                   {live.map((k) => (
                     <tr key={k.id} className="border-t">
                       <td className="px-3 py-2 font-medium">{k.name}</td>
                       <td className="px-3 py-2 font-mono text-xs">{k.prefix}_…</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{when(k.last_used_at)}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{when(k.last_used_at, t("never", "从未"))}</td>
                       <td className="px-3 py-2 text-right">
-                        <button onClick={() => revoke(k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10" title="Revoke">
-                          <Trash2 className="h-3.5 w-3.5" /> Revoke
+                        <button onClick={() => revoke(k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10" title={t("Revoke", "吊销")}>
+                          <Trash2 className="h-3.5 w-3.5" /> {t("Revoke", "吊销")}
                         </button>
                       </td>
                     </tr>
@@ -157,9 +166,10 @@ export default function AccountPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Connect an agent over MCP</CardTitle>
+            <CardTitle>{t("Connect an agent over MCP", "通过 MCP 接入 agent")}</CardTitle>
             <CardDescription>
-              Add the header <span className="font-mono">X-QFZ-Session: sess_…</span> to lock every data tool to a simulation session&apos;s clock.
+              {t("Add the header", "添加请求头")} <span className="font-mono">X-QFZ-Session: sess_…</span>{" "}
+              {t("to lock every data tool to a simulation session's clock.", "，即可将所有数据工具锁定到某个模拟会话的时钟。")}
             </CardDescription>
           </CardHeader>
           <CardContent>

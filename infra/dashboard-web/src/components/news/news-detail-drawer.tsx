@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { JsonViewer } from "@/components/news/json-viewer";
+import { useT } from "@/components/locale-provider";
 import { formatDateTime } from "@/lib/time";
 import type { NewsBodyResponse, EspEvent } from "@/lib/types";
 
@@ -16,11 +17,12 @@ export function NewsDetailDrawer({
   article: NewsBodyResponse | null;
   onClose: () => void;
 }) {
+  const t = useT();
   if (!selected) {
     return (
       <Card className="flex h-[400px] flex-col items-center justify-center border-dashed bg-muted/30 text-center">
-        <p className="text-sm font-medium text-muted-foreground">No entry selected</p>
-        <p className="mt-1 text-xs text-muted-foreground/60">Select a row from the table to view details.</p>
+        <p className="text-sm font-medium text-muted-foreground">{t("No entry selected", "未选择条目")}</p>
+        <p className="mt-1 text-xs text-muted-foreground/60">{t("Select a row from the table to view details.", "在表格中选择一行以查看详情。")}</p>
       </Card>
     );
   }
@@ -44,6 +46,8 @@ export function NewsDetailDrawer({
             size="icon"
             className="absolute right-4 top-4 h-8 w-8 rounded-full hover:bg-muted"
             onClick={onClose}
+            title={t("Close", "关闭")}
+            aria-label={t("Close", "关闭")}
           >
             <X className="h-4 w-4" />
           </Button>
@@ -54,14 +58,14 @@ export function NewsDetailDrawer({
           {article?.article_url ? (
             <Button asChild variant="outline" size="sm" className="w-full justify-start gap-2">
               <a href={article.article_url} target="_blank" rel="noreferrer">
-                <span>View Original Source</span>
+                <span>{t("View Original Source", "查看原文")}</span>
               </a>
             </Button>
           ) : null}
 
           <div className="space-y-4">
-            <JsonViewer data={payload} title="Event Payload" />
-            <JsonViewer data={article} title="Article Metadata" />
+            <JsonViewer data={payload} title={t("Event Payload", "事件载荷")} />
+            <JsonViewer data={article} title={t("Article Metadata", "文章元数据")} />
           </div>
         </div>
       </CardContent>

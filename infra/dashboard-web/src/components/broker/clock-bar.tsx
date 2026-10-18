@@ -4,6 +4,8 @@ import { Play, Pause, SkipForward, Rewind, Radio } from "lucide-react";
 
 import { fmtET, type Clock } from "./api";
 
+import { useT } from "@/components/locale-provider";
+
 const SPEEDS = [1, 2, 5, 10, 30, 60];
 
 export function ClockBar({
@@ -29,6 +31,7 @@ export function ClockBar({
   onScrub: (index: number) => void;
   scrubbing: boolean;
 }) {
+  const t = useT();
   const total = clock?.total_bars ?? 0;
   const index = clock?.index ?? -1;
   const done = clock?.is_done ?? false;
@@ -43,7 +46,7 @@ export function ClockBar({
             onClick={onStart}
             className="flex items-center gap-2 rounded-lg bg-up px-4 py-2 text-sm font-semibold text-white transition hover:bg-up/90"
           >
-            <Radio className="h-4 w-4" /> Open market
+            <Radio className="h-4 w-4" /> {t("Open market", "开盘")}
           </button>
         ) : (
           <>
@@ -51,7 +54,7 @@ export function ClockBar({
               onClick={onPlayPause}
               disabled={done}
               className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-foreground transition hover:bg-accent disabled:opacity-40"
-              title={playing ? "Pause" : "Play"}
+              title={playing ? t("Pause", "暂停") : t("Play", "播放")}
             >
               {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </button>
@@ -59,7 +62,7 @@ export function ClockBar({
               onClick={onStepOne}
               disabled={playing || done}
               className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-foreground transition hover:bg-accent disabled:opacity-40"
-              title="Step one minute"
+              title={t("Step one minute", "前进一分钟")}
             >
               <SkipForward className="h-4 w-4" />
             </button>
@@ -89,13 +92,13 @@ export function ClockBar({
         <span className={playing ? "h-2 w-2 animate-pulse rounded-full bg-up" : "h-2 w-2 rounded-full bg-muted-foreground/30"} />
         <span className="text-foreground">{clock ? fmtET(clock.current_ts) : "—"}</span>
         <span className="text-muted-foreground">ET</span>
-        {done && <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-warning">CLOSED</span>}
-        {scrubbing && <span className="text-xs text-primary">rewinding…</span>}
+        {done && <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-warning">{t("CLOSED", "已收盘")}</span>}
+        {scrubbing && <span className="text-xs text-primary">{t("rewinding…", "回溯中…")}</span>}
       </div>
 
       {/* Speed */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">Speed</span>
+        <span className="text-xs text-muted-foreground">{t("Speed", "速度")}</span>
         <input
           type="range"
           min={0}

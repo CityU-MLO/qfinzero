@@ -9,6 +9,7 @@ import { CalendarTable } from "@/components/calendar/calendar-table";
 import { CoverageHeatmap } from "@/components/calendar/coverage-heatmap";
 import { JsonViewer } from "@/components/news/json-viewer";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/components/locale-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CoverageResponse, EspEvent, PaginatedEventsResponse } from "@/lib/types";
 
@@ -60,6 +61,7 @@ function splitTickers(input: string): string[] | undefined {
 }
 
 export function CalendarBrowser() {
+  const t = useT();
   const [mode, setMode] = React.useState<"earnings" | "econ">("earnings");
   const [filters, setFilters] = React.useState<CalendarFilters>(defaultFilters);
   const [rows, setRows] = React.useState<EspEvent[]>([]);
@@ -110,12 +112,12 @@ export function CalendarBrowser() {
         setCursor(data.next_cursor);
         setSelected(data.events[0] ?? null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "calendar query failed");
+        setError(err instanceof Error ? err.message : t("calendar query failed", "日历查询失败"));
       } finally {
         setLoading(false);
       }
     },
-    [filters, mode, cursor],
+    [filters, mode, cursor, t],
   );
 
   React.useEffect(() => {
@@ -159,17 +161,17 @@ export function CalendarBrowser() {
         <div className="space-y-3">
           <CalendarTable rows={rows} selectedId={selected?.event_id ?? null} onSelect={setSelected} />
           <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">Rows: {rows.length}</p>
+            <p className="text-sm text-muted-foreground">{t("Rows", "行数")}: {rows.length}</p>
             <div className="flex gap-2">
               <Button
                 variant="secondary"
                 disabled={!prevCursor || loading}
                 onClick={() => void runQuery(prevCursor ?? undefined, true)}
               >
-                Previous
+                {t("Previous", "上一页")}
               </Button>
               <Button variant="secondary" disabled={!cursor || loading} onClick={() => void runQuery(cursor ?? undefined)}>
-                Next Page
+                {t("Next Page", "下一页")}
               </Button>
             </div>
           </div>
@@ -177,13 +179,15 @@ export function CalendarBrowser() {
 
         <Card>
           <CardHeader className="relative pb-2">
-            <CardTitle className="text-base">Row Details</CardTitle>
+            <CardTitle className="text-base">{t("Row Details", "行详情")}</CardTitle>
             {selected && (
               <Button
                 variant="ghost"
                 size="icon"
                 className="absolute right-2 top-2 h-7 w-7"
                 onClick={() => setSelected(null)}
+                title={t("Close", "关闭")}
+                aria-label={t("Close", "关闭")}
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -191,9 +195,9 @@ export function CalendarBrowser() {
           </CardHeader>
           <CardContent>
             {selected ? (
-              <JsonViewer data={selected} title="Event Details" />
+              <JsonViewer data={selected} title={t("Event Details", "事件详情")} />
             ) : (
-              <p className="text-sm text-muted-foreground">Select a row to view details</p>
+              <p className="text-sm text-muted-foreground">{t("Select a row to view details", "选择一行以查看详情")}</p>
             )}
           </CardContent>
         </Card>
@@ -202,13 +206,13 @@ export function CalendarBrowser() {
       {coverage.data ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <CoverageHeatmap
-            title="Earnings Coverage Heatmap"
+            title={t("Earnings Coverage Heatmap", "财报覆盖情况热力图")}
             dailyCounts={coverage.data.earnings.daily_counts}
             start={coverage.data.earnings.date_range.start}
             end={coverage.data.earnings.date_range.end}
           />
           <CoverageHeatmap
-            title="Economic Coverage Heatmap"
+            title={t("Economic Coverage Heatmap", "经济数据覆盖情况热力图")}
             dailyCounts={coverage.data.econ_events.daily_counts}
             start={coverage.data.econ_events.date_range.start}
             end={coverage.data.econ_events.date_range.end}

@@ -27,10 +27,11 @@ from .store import ROLE_RANK, AuthStore, User, load_secret, read_session
 COOKIE = "qfz_session"
 IDENTITY_HEADERS = (b"x-qfz-user", b"x-qfz-role", b"x-qfz-user-id")
 
-# Paths anyone may load (the public site, login, health, static assets).
-PUBLIC_EXACT = {"/", "/login", "/setup", "/health", "/favicon.ico", "/robots.txt",
-                "/auth/login", "/auth/logout", "/auth/status", "/auth/setup", "/auth/me"}
-PUBLIC_PREFIXES = ("/_next/", "/static/", "/brand/")
+# Paths anyone may load (the public site, the documentation, login, health,
+# static assets). The docs are the repository's own markdown, already public.
+PUBLIC_EXACT = {"/", "/login", "/setup", "/health", "/favicon.ico", "/robots.txt", "/docs",
+                "/api/docs", "/auth/login", "/auth/logout", "/auth/status", "/auth/setup", "/auth/me"}
+PUBLIC_PREFIXES = ("/_next/", "/static/", "/brand/", "/docs/")
 ADMIN_PREFIXES = ("/svc/data-admin", "/api/data-admin", "/auth/users", "/data", "/admin")
 READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -42,6 +43,8 @@ def auth_mode() -> str:
 def required_role(method: str, path: str) -> Optional[str]:
     """Least role needed for ``method path``; ``None`` means public."""
     if path in PUBLIC_EXACT or path.startswith(PUBLIC_PREFIXES):
+        if path.startswith(("/docs", "/api/docs")) and method.upper() not in READ_METHODS:
+            return "viewer"                  # the docs are public to read only
         return None
     if path.startswith(ADMIN_PREFIXES):
         return "admin"
@@ -164,13 +167,13 @@ class AuthMiddleware:
 
 
 _FORBIDDEN_HTML = """<!doctype html><meta charset=utf-8><title>No access · QFinZero</title>
-<style>body{font:15px/1.6 "Avenir Next",system-ui,sans-serif;background:#f6fbfc;color:#173a47;
-display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:26rem;padding:2rem;
-background:#fff;border:1px solid #d3e3e6;border-radius:16px;box-shadow:0 8px 30px #0b4c5c14}
-a{color:#147d93;font-weight:600}</style><main><h1 style="margin:0 0 .5rem;font-size:1.4rem">
+<style>body{font:14px/1.6 ui-sans-serif,-apple-system,"Segoe UI",sans-serif;background:#f6f7f9;
+color:#1d2331;display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:26rem;
+padding:1.5rem;background:#fff;border:1px solid #dfe2e8;border-radius:8px}a{color:#2557c2;
+font-weight:500}</style><main><h1 style="margin:0 0 .5rem;font-size:1.15rem">
 You don't have access to this page</h1><p>Your account's role does not allow it (%s). Ask an
-admin to change your role.</p><p><a href="/chat">Back to the console</a> &middot;
-<a href="/account">Your account</a></p></main>"""
+admin to change your role.</p><p>你的账户角色无权访问此页面，请联系管理员。</p>
+<p><a href="/chat">Back to the console</a> &middot; <a href="/account">Your account</a></p></main>"""
 
 
 class LoginThrottle:

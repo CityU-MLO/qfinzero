@@ -5,6 +5,8 @@ import { Loader2 } from "lucide-react";
 
 import { sessionOptionChain, num, type ChainResponse, type ChainLeg } from "./api";
 
+import { useT } from "@/components/locale-provider";
+
 export function OptionChain({
   sessionId,
   underlying,
@@ -16,6 +18,7 @@ export function OptionChain({
   clockIndex: number;
   onTrade: (contract: string, side: "BUY" | "SELL") => void;
 }) {
+  const t = useT();
   const [chain, setChain] = useState<ChainResponse | null>(null);
   const [expiry, setExpiry] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -86,7 +89,7 @@ export function OptionChain({
     <div className="broker-panel flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2">
         <div className="text-sm font-semibold text-foreground">
-          {underlying} <span className="text-muted-foreground">options</span>
+          {underlying} <span className="text-muted-foreground">{t("options", "期权")}</span>
         </div>
         <select
           value={expiry}
@@ -98,17 +101,17 @@ export function OptionChain({
         >
           {(chain?.expiries ?? []).map((x) => (
             <option key={x} value={x}>
-              exp {x}
+              {t("exp", "到期")} {x}
             </option>
           ))}
         </select>
         {spot != null && (
           <span className="font-mono text-xs text-muted-foreground">
-            spot <span className="text-foreground">{num(spot)}</span>
+            {t("spot", "现价")} <span className="text-foreground">{num(spot)}</span>
           </span>
         )}
         <span className="flex items-center gap-1 text-[11px] text-up">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-up" /> live · minute
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-up" /> {t("live · minute", "实时 · 分钟")}
         </span>
         {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
@@ -116,31 +119,31 @@ export function OptionChain({
       <div className="min-h-0 flex-1 overflow-y-auto font-mono text-xs">
         {err && <div className="p-4 text-down">{err}</div>}
         {!err && !rows.length && !loading && (
-          <div className="p-6 text-center text-muted-foreground">No chain for this underlying/date.</div>
+          <div className="p-6 text-center text-muted-foreground">{t("No chain for this underlying/date.", "该标的/日期没有期权链。")}</div>
         )}
         {!!rows.length && (
           <table className="w-full">
             <thead className="sticky top-0 z-10 bg-background text-[10px] text-muted-foreground">
               <tr>
                 <th className="py-1 text-center text-up" colSpan={5}>
-                  Calls
+                  {t("Calls", "看涨")}
                 </th>
-                <th className="py-1 text-center">Strike</th>
+                <th className="py-1 text-center">{t("Strike", "行权价")}</th>
                 <th className="py-1 text-center text-down" colSpan={5}>
-                  Puts
+                  {t("Puts", "看跌")}
                 </th>
               </tr>
               <tr className="text-right text-muted-foreground">
                 <th className="px-1"></th>
-                <th className="px-1">Bid</th>
-                <th className="px-1">Ask</th>
-                <th className="px-1">Last</th>
-                <th className="px-1">Vol</th>
+                <th className="px-1">{t("Bid", "买价")}</th>
+                <th className="px-1">{t("Ask", "卖价")}</th>
+                <th className="px-1">{t("Last", "最新价")}</th>
+                <th className="px-1">{t("Vol", "成交量")}</th>
                 <th className="px-1 text-center"></th>
-                <th className="px-1">Last</th>
-                <th className="px-1">Bid</th>
-                <th className="px-1">Ask</th>
-                <th className="px-1">Vol</th>
+                <th className="px-1">{t("Last", "最新价")}</th>
+                <th className="px-1">{t("Bid", "买价")}</th>
+                <th className="px-1">{t("Ask", "卖价")}</th>
+                <th className="px-1">{t("Vol", "成交量")}</th>
                 <th className="px-1"></th>
               </tr>
             </thead>
@@ -176,6 +179,7 @@ function Side({
   flash: Record<string, "up" | "down">;
   onTrade: (contract: string, s: "BUY" | "SELL") => void;
 }) {
+  const t = useT();
   if (!leg) {
     return (
       <>
@@ -200,15 +204,17 @@ function Side({
     <span className="inline-flex gap-0.5">
       <button
         onClick={() => leg.contract && onTrade(leg.contract, "BUY")}
+        title={t("Buy", "买入")}
         className="broker-btn rounded-sm bg-up/10 px-1 text-up hover:bg-up hover:text-white"
       >
-        B
+        {t("B", "买")}
       </button>
       <button
         onClick={() => leg.contract && onTrade(leg.contract, "SELL")}
+        title={t("Sell", "卖出")}
         className="broker-btn rounded-sm bg-down/10 px-1 text-down hover:bg-down hover:text-white"
       >
-        S
+        {t("S", "卖")}
       </button>
     </span>
   );

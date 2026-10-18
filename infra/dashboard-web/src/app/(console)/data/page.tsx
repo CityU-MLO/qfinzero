@@ -8,6 +8,7 @@ import { Loader2, Play, RefreshCw, ShieldCheck, TestTube2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { useT } from "@/components/locale-provider";
 import { dataAdmin, type Job, type Source } from "@/lib/data-admin";
 
 const DOT: Record<Source["colour"], string> = {
@@ -41,6 +42,7 @@ function useJob(id: string | null) {
 }
 
 export default function DataPage() {
+  const t = useT();
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ["data", "status"], queryFn: dataAdmin.sources, refetchInterval: 30_000 });
   const [jobId, setJobId] = useState<string | null>(null);
@@ -62,24 +64,29 @@ export default function DataPage() {
   };
 
   const sources = status.data?.sources ?? [];
+  const jobStatus = (s: Job["status"]) =>
+    s === "queued" ? t("queued", "排队中") : s === "running" ? t("running", "运行中") : s === "done" ? t("done", "完成") : t("error", "失败");
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Data"
-        description="Raw vendor data against converted UPQ storage. Updates convert new raw files only."
+        title={t("Data", "数据")}
+        description={t(
+          "Raw vendor data against converted UPQ storage. Updates convert new raw files only.",
+          "供应商原始数据与已转换的 UPQ 存储对照。更新只转换新的原始文件。",
+        )}
         actions={
           <>
           <Link href="/sanity" className={buttonVariants({ variant: "ghost", size: "sm" })}>
-            <ShieldCheck /> Data checks
+            <ShieldCheck /> {t("Data checks", "数据检查")}
           </Link>
           <button onClick={() => status.refetch()} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <RefreshCw className={status.isFetching ? "animate-spin" : ""} /> Refresh
+            <RefreshCw className={status.isFetching ? "animate-spin" : ""} /> {t("Refresh", "刷新")}
           </button>
           <button disabled={running} onClick={() => start("prices", true)} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <TestTube2 /> Plan all
+            <TestTube2 /> {t("Plan all", "全部预演")}
           </button>
           <button disabled={running} onClick={() => start("prices", false)} className={buttonVariants({ size: "sm" })}>
-            <Play /> Update all prices
+            <Play /> {t("Update all prices", "更新全部价格")}
           </button>
           </>
         }
@@ -87,19 +94,19 @@ export default function DataPage() {
       {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
       <Card>
         <CardHeader>
-          <CardTitle>Sources</CardTitle>
-          <CardDescription>Lag counts business days since the newest converted date.</CardDescription>
+          <CardTitle>{t("Sources", "数据源")}</CardTitle>
+          <CardDescription>{t("Lag counts business days since the newest converted date.", "延迟为自最新转换日期以来的交易日数。")}</CardDescription>
         </CardHeader>
         <CardContent>
           {status.isLoading && <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />}
-          {status.isError && <p className="text-sm text-destructive">data-admin is unreachable: {(status.error as Error).message}</p>}
+          {status.isError && <p className="text-sm text-destructive">{t("data-admin is unreachable: ", "无法连接 data-admin：")}{(status.error as Error).message}</p>}
           {sources.length > 0 && (
             <div className="overflow-x-auto rounded-lg border">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2">Source</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Raw until</th>
-                    <th className="px-3 py-2">Converted until</th><th className="px-3 py-2">Last run</th><th className="px-3 py-2" />
+                    <th className="px-3 py-2">{t("Source", "数据源")}</th><th className="px-3 py-2">{t("State", "状态")}</th><th className="px-3 py-2">{t("Raw until", "原始数据截至")}</th>
+                    <th className="px-3 py-2">{t("Converted until", "已转换截至")}</th><th className="px-3 py-2">{t("Last run", "上次运行")}</th><th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
@@ -116,8 +123,8 @@ export default function DataPage() {
                       <td className="px-3 py-2 font-mono text-xs">{s.store_max ?? "—"}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{s.last_run?.status ?? "—"}</td>
                       <td className="space-x-1 px-3 py-2 text-right">
-                        <button disabled={running} onClick={() => start(s.id, true)} className="rounded-md px-2 py-1 text-xs hover:bg-accent disabled:opacity-50">Plan</button>
-                        <button disabled={running} onClick={() => start(s.id, false)} className="rounded-md bg-secondary px-2 py-1 text-xs font-medium hover:bg-secondary/80 disabled:opacity-50">Update</button>
+                        <button disabled={running} onClick={() => start(s.id, true)} className="rounded-md px-2 py-1 text-xs hover:bg-accent disabled:opacity-50">{t("Plan", "预演")}</button>
+                        <button disabled={running} onClick={() => start(s.id, false)} className="rounded-md bg-secondary px-2 py-1 text-xs font-medium hover:bg-secondary/80 disabled:opacity-50">{t("Update", "更新")}</button>
                       </td>
                     </tr>
                   ))}
@@ -133,11 +140,11 @@ export default function DataPage() {
             <CardTitle className="flex items-center gap-2">
               {running && <Loader2 className="h-4 w-4 animate-spin" />} {job.label}
             </CardTitle>
-            <CardDescription>Job {job.id} · {job.status}{job.error ? ` · ${job.error}` : ""}</CardDescription>
+            <CardDescription>{t("Job", "任务")} {job.id} · {jobStatus(job.status)}{job.error ? ` · ${job.error}` : ""}</CardDescription>
           </CardHeader>
           <CardContent>
             <pre className="max-h-80 overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed text-foreground">
-              {(job.lines ?? []).join("\n") || "waiting for output…"}
+              {(job.lines ?? []).join("\n") || t("waiting for output…", "等待输出…")}
             </pre>
           </CardContent>
         </Card>

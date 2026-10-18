@@ -71,3 +71,13 @@ export const ROLE_LABEL: Record<Role, string> = {
   researcher: "Researcher",
   admin: "Admin",
 };
+
+export const ROLE_LABEL_ZH: Record<Role, string> = {
+  viewer: "访客",
+  researcher: "研究员",
+  admin: "管理员",
+};
+
+export function roleLabel(role: Role, locale: "en" | "zh"): string {
+  return (locale === "zh" ? ROLE_LABEL_ZH : ROLE_LABEL)[role];
+}

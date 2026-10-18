@@ -5,6 +5,8 @@ import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 
 import { listAccounts, createSession, money, type AccountRow } from "./api";
 
+import { useT } from "@/components/locale-provider";
+
 const inputCls =
   "rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
@@ -21,6 +23,7 @@ export function EnterPanel({
     watchlist: string[];
   }) => void;
 }) {
+  const t = useT();
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [accountId, setAccountId] = useState(presetAccountId ?? "");
   const [date, setDate] = useState("2024-03-22");
@@ -53,8 +56,8 @@ export function EnterPanel({
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean);
-    if (!accountId) return setErr("Select an account first.");
-    if (!watchlist.length) return setErr("Add at least one symbol.");
+    if (!accountId) return setErr(t("Select an account first.", "请先选择一个账户。"));
+    if (!watchlist.length) return setErr(t("Add at least one symbol.", "请至少添加一个代码。"));
     setBusy(true);
     try {
       const { session_id } = await createSession({
@@ -77,23 +80,23 @@ export function EnterPanel({
         onClick={onBack}
         className="mb-6 flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="h-4 w-4" /> Back
+        <ArrowLeft className="h-4 w-4" /> {t("Back", "返回")}
       </button>
 
-      <h2 className="mb-1 text-xl font-semibold text-foreground">Trade an account</h2>
+      <h2 className="mb-1 text-xl font-semibold text-foreground">{t("Trade an account", "交易账户")}</h2>
       <p className="mb-6 text-sm text-muted-foreground">
-        Choose an account and a trading day, then step onto the floor.
+        {t("Choose an account and a trading day, then step onto the floor.", "选择一个账户和交易日，然后进入交易。")}
       </p>
 
       <div className="grid gap-5">
         <label className="flex flex-col gap-1.5">
           <span className="flex items-center justify-between text-sm font-medium text-foreground">
-            Account
+            {t("Account", "账户")}
             <button
               onClick={refresh}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
-              <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} /> refresh
+              <RefreshCw className={loading ? "h-3 w-3 animate-spin" : "h-3 w-3"} /> {t("refresh", "刷新")}
             </button>
           </span>
           {accounts.length ? (
@@ -110,13 +113,13 @@ export function EnterPanel({
             </select>
           ) : (
             <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-              {loading ? "Loading…" : "No accounts yet — allocate one first."}
+              {loading ? t("Loading…", "加载中…") : t("No accounts yet — allocate one first.", "还没有账户，请先开立一个。")}
             </div>
           )}
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Trading day (start date)</span>
+          <span className="text-sm font-medium text-foreground">{t("Trading day (start date)", "交易日（开始日期）")}</span>
           <input
             type="date"
             value={date}
@@ -126,19 +129,19 @@ export function EnterPanel({
             className={inputCls}
           />
           <span className="text-xs text-muted-foreground">
-            The market opens on this date; you control the clock from there.
+            {t("The market opens on this date; you control the clock from there.", "市场在这一天开盘，之后的时钟由你控制。")}
           </span>
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-foreground">Watchlist</span>
+          <span className="text-sm font-medium text-foreground">{t("Watchlist", "自选")}</span>
           <input
             value={symbols}
             onChange={(e) => setSymbols(e.target.value)}
             placeholder="AAPL, MSFT, NVDA"
             className={inputCls}
           />
-          <span className="text-xs text-muted-foreground">Comma-separated tickers to trade.</span>
+          <span className="text-xs text-muted-foreground">{t("Comma-separated tickers to trade.", "要交易的代码，用逗号分隔。")}</span>
         </label>
       </div>
 
@@ -154,7 +157,7 @@ export function EnterPanel({
         className="mt-6 flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-        {busy ? "Loading market data…" : "Open the market"}
+        {busy ? t("Loading market data…", "正在加载行情数据…") : t("Open the market", "开盘")}
       </button>
     </div>
   );

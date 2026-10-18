@@ -3,16 +3,18 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { chart } from "@/lib/chart-theme";
+import { useT } from "@/components/locale-provider";
 
 export function FreshnessTrendChart({
   data,
 }: {
   data: Array<{ service: string; minutesBehind: number }>;
 }) {
+  const t = useT();
   if (data.length === 0) {
     return (
       <div className="flex h-48 w-full items-center justify-center rounded-lg border border-dashed">
-        <p className="text-sm text-muted-foreground">No freshness data yet.</p>
+        <p className="text-sm text-muted-foreground">{t("No freshness data yet.", "暂无新鲜度数据。")}</p>
       </div>
     );
   }
@@ -39,7 +41,7 @@ export function FreshnessTrendChart({
           <Tooltip 
             cursor={{ fill: chart.primaryFill }}
             contentStyle={chart.tooltip.contentStyle}
-            formatter={(value: number) => [`${value} ms`, "Lag"]} 
+            formatter={(value: number) => [`${value} ms`, t("Lag", "延迟")]} 
           />
           <Bar 
             dataKey="minutesBehind" 

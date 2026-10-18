@@ -2,6 +2,7 @@
 
 import { fmtETTime, num } from "./api";
 
+import { useT } from "@/components/locale-provider";
 import { chart } from "@/lib/chart-theme";
 
 export interface Candle {
@@ -30,14 +31,15 @@ function sma(vals: number[], period: number): (number | null)[] {
 }
 
 export function CandleChart({ symbol, data }: { symbol: string; data: Candle[] }) {
+  const t = useT();
   if (data.length < 2) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Press{" "}
+        {t("Press", "点击")}{" "}
         <span className="mx-1 rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
-          Start
+          {t("Start", "开始")}
         </span>{" "}
-        to open {symbol} and watch candles print.
+        {t(`to open ${symbol} and watch candles print.`, `开盘 ${symbol}，观看K线逐根生成。`)}
       </div>
     );
   }
@@ -97,7 +99,9 @@ export function CandleChart({ symbol, data }: { symbol: string; data: Candle[] }
       <div className="pointer-events-none absolute left-1 top-1 z-10 flex gap-3 text-[10px]">
         {legend("MA5", MA_FAST, ma5[ma5.length - 1])}
         {legend("MA20", MA_SLOW, ma20[ma20.length - 1])}
-        <span className="font-mono text-muted-foreground">VOL {last.v.toLocaleString()}</span>
+        <span className="font-mono text-muted-foreground">
+          {t("VOL", "成交量")} {last.v.toLocaleString()}
+        </span>
       </div>
 
       {/* price gridlines + labels */}

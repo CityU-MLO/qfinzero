@@ -8,6 +8,7 @@ import { NewsSearchPanel } from "@/components/news/news-search-panel";
 import { NewsStatsCharts } from "@/components/news/news-stats-charts";
 import { NewsTable } from "@/components/news/news-table";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/components/locale-provider";
 import type { NewsBodyResponse, NewsStatsResponse, EspEvent, PaginatedEventsResponse } from "@/lib/types";
 
 type NewsFilters = {
@@ -66,6 +67,7 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export function NewsBrowser() {
+  const t = useT();
   const [filters, setFilters] = React.useState<NewsFilters>(DEFAULT_FILTERS);
   const [result, setResult] = React.useState<PaginatedEventsResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -105,12 +107,12 @@ export function NewsBrowser() {
           setSelected(data.events[0] ?? null);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "news search failed");
+        setError(err instanceof Error ? err.message : t("news search failed", "新闻搜索失败"));
       } finally {
         setLoading(false);
       }
     },
-    [filters],
+    [filters, t],
   );
 
   React.useEffect(() => {
@@ -187,12 +189,12 @@ export function NewsBrowser() {
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline">
           <a href={`/api/esp/news/export?format=jsonl${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
-            Export JSONL
+            {t("Export JSONL", "导出 JSONL")}
           </a>
         </Button>
         <Button asChild variant="outline">
           <a href={`/api/esp/news/export?format=csv${exportQuery ? `&${exportQuery}` : ""}`} target="_blank" rel="noreferrer">
-            Export CSV
+            {t("Export CSV", "导出 CSV")}
           </a>
         </Button>
       </div>
@@ -207,14 +209,14 @@ export function NewsBrowser() {
 
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              Returned {result?.events.length ?? 0} rows
+              {t(`Returned ${result?.events.length ?? 0} rows`, `返回 ${result?.events.length ?? 0} 行`)}
             </p>
             <Button
               variant="secondary"
               disabled={!result?.next_cursor || loading}
               onClick={() => void runSearch(result?.next_cursor ?? undefined)}
             >
-              Next Page
+              {t("Next Page", "下一页")}
             </Button>
           </div>
         </div>

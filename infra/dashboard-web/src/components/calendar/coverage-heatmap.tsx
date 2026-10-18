@@ -1,6 +1,7 @@
 "use client";
 
 import { buildCoverageHeatmap } from "@/lib/coverage";
+import { useT } from "@/components/locale-provider";
 
 export function CoverageHeatmap({
   title,
@@ -13,6 +14,7 @@ export function CoverageHeatmap({
   start: string | null;
   end: string | null;
 }) {
+  const t = useT();
   const cells = buildCoverageHeatmap(dailyCounts, start, end);
   const max = Math.max(1, ...cells.map((cell) => cell.count));
 
@@ -33,7 +35,7 @@ export function CoverageHeatmap({
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground">{cells.length} days shown</p>
+      <p className="text-xs text-muted-foreground">{t(`${cells.length} days shown`, `显示 ${cells.length} 天`)}</p>
     </div>
   );
 }

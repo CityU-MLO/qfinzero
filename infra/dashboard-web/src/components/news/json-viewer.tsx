@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/components/locale-provider";
 
 interface JsonViewerProps {
   data: any;
@@ -11,6 +12,7 @@ interface JsonViewerProps {
 }
 
 export function JsonViewer({ data, title }: JsonViewerProps) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -30,6 +32,8 @@ export function JsonViewer({ data, title }: JsonViewerProps) {
           size="icon"
           className="h-6 w-6"
           onClick={handleCopy}
+          title={copied ? t("Copied", "已复制") : t("Copy JSON", "复制 JSON")}
+          aria-label={t("Copy JSON", "复制 JSON")}
         >
           {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
         </Button>

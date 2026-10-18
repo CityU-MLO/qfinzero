@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 from qfinzero.config import EARNINGS_DB as _EARNINGS_DB, ECON_EVENTS_DB as _ECON_EVENTS_DB, NEWS_DB as _NEWS_DB
@@ -16,10 +18,10 @@ class Settings(BaseSettings):
     news_backend: str = "auto"
     news_db: str = _NEWS_DB
 
-    # MongoDB
-    mongo_uri: str = "mongodb://localhost:27018"
-    mongo_db: str = "market_news"
-    mongo_collection: str = "ticker_news"
+    # MongoDB (ESP_MONGO_URI etc., falling back to the shared MONGO_* settings)
+    mongo_uri: str = os.getenv("MONGO_URI", "mongodb://localhost:27018")
+    mongo_db: str = os.getenv("MONGO_DB", "market_news")
+    mongo_collection: str = os.getenv("MONGO_COLLECTION", "ticker_news")
 
     # SQLite paths — defaults from the canonical data root (qfinzero.config).
     # Absolute, so REPO_ROOT / earnings_db (in main.py) resolves to them unchanged.

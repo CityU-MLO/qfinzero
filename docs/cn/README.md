@@ -382,11 +382,12 @@ cp .env.example .env
 
 ## 文档
 
-- [UPQ API Reference](docs/upq/README.md) | [Agent Guide](docs/upq/agent-guide.md) | [OpenAPI](docs/upq/openapi.yaml)
-- [ESP API Reference](docs/esp/README.md) | [Agent Guide](docs/esp/agent-guide.md) | [OpenAPI](docs/esp/openapi.yaml)
-- [PMB API Reference](docs/pmb/README.md) | [Agent Guide](docs/pmb/agent-guide.md) | [OpenAPI](docs/pmb/openapi.yaml)
-- [平台指南](platform-guide.md) —— 时间锁、交易时段、报价、研究、账号
-- [数据适配器](data-adapters.md) —— UPQ 存储契约、如何新增供应商、Databento 参考
+网页界面在 `/docs` 提供可搜索的中英文文档中心，内容与下列文件相同。
+
+- 入门：[快速开始](getting-started.md) · [平台指南](platform-guide.md)（时间锁、交易时段、报价、研究、账号）
+- 指南：[Agent 行情工具](upq/agent-guide.md) · [Agent 交易工具](pmb/agent-guide.md) · [交易终端](pmb/broker-terminal.md) · [Agent 基准测试](bench.md) · [样本数据集](sample-data.md) · [数据适配器](data-adapters.md)
+- 参考：[MCP 工具](../en/mcp-tools.md)（英文） · [UPQ](upq/README.md)（[OpenAPI](../upq/openapi.yaml)） · [ESP](esp/README.md)（[OpenAPI](../esp/openapi.yaml)） · [PMB](pmb/README.md)（[OpenAPI](../pmb/openapi.yaml)） · [配置](configuration.md) · [时区约定](conventions/timezone.md)
+- 运维：[部署与运维](operations.md) · [更新日志](../../CHANGELOG.md)（英文）
 
 ## 许可证
 
