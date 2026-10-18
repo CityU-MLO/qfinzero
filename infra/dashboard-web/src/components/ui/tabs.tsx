@@ -53,7 +53,7 @@ function Tabs({
 }
 
 function TabsList({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("inline-flex h-10 items-center rounded-md bg-muted p-1", className)} {...props} />;
+  return <div className={cn("flex items-center gap-1 border-b", className)} role="tablist" {...props} />;
 }
 
 function TabsTrigger({
@@ -68,9 +68,11 @@ function TabsTrigger({
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       className={cn(
-        "inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium transition-all",
-        active ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+        "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+        active ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
         className,
       )}
       onClick={() => context.onValueChange(value)}

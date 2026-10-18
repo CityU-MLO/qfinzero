@@ -42,7 +42,7 @@ export function CalendarTable({
   onSelect: (row: EspEvent) => void;
 }) {
   return (
-    <div className="rounded-lg border bg-white/70">
+    <div className="rounded-lg border bg-card">
       <Table>
         <TableHeader>
           <TableRow>

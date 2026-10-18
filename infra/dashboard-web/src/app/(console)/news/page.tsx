@@ -1,15 +1,13 @@
 import { NewsBrowser } from "@/components/news/news-browser";
+import { PageHeader } from "@/components/ui/page-header";
+
+export const metadata = { title: "News" };
 
 export default function NewsPage() {
   return (
-    <main className="space-y-4">
-      <section>
-        <h2 className="text-xl font-semibold">MongoDB News Browser</h2>
-        <p className="text-sm text-muted-foreground">
-          Query by ticker/time/publisher/keyword, inspect rows, and export current result set.
-        </p>
-      </section>
+    <>
+      <PageHeader title="News" description="Search articles by ticker, time, publisher or keyword; inspect rows and export the result set." />
       <NewsBrowser />
-    </main>
+    </>
   );
 }

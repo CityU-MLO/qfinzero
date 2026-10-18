@@ -42,7 +42,7 @@ const MARKET_OPEN_ET = 9 * 60 + 30; // 09:30 ET
 type Blotter = "positions" | "orders" | "trades";
 
 function pnlCls(n: number) {
-  return n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-slate-300";
+  return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-foreground";
 }
 
 export function Terminal({
@@ -405,14 +405,12 @@ export function Terminal({
   const bpAfter = acct ? acct.buying_power - (side === "BUY" ? estCost : 0) : 0;
 
   return (
-    <div className="broker-root relative flex h-full flex-col bg-slate-950 text-slate-200">
+    <div className="broker-root relative flex h-full flex-col bg-card text-foreground">
       {/* Header */}
-      <div className="broker-titlebar flex items-center justify-between border-b border-slate-800 px-5 py-3">
+      <div className="broker-titlebar flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-4">
-          <div className="text-sm font-bold tracking-tight text-white">
-            QFinZero <span className="text-emerald-400">Broker</span>
-          </div>
-          <div className="hidden font-mono text-xs text-slate-500 sm:block">
+          <div className="text-sm font-semibold text-foreground">Session</div>
+          <div className="hidden font-mono text-xs text-muted-foreground sm:block">
             acct {accountId} · {state ? fmtET(state.clock.current_ts) : "—"} ET
           </div>
         </div>
@@ -426,13 +424,13 @@ export function Terminal({
           <Stat label="Buying power" value={money(acct?.buying_power)} />
           <button
             onClick={() => setShowAccount(true)}
-            className="broker-btn flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            className="broker-btn flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
           >
             <Wallet2 className="h-4 w-4" /> Account
           </button>
           <button
             onClick={onExit}
-            className="broker-btn flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            className="broker-btn flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
           >
             <LogOut className="h-4 w-4" /> Exit
           </button>
@@ -440,7 +438,7 @@ export function Terminal({
       </div>
 
       {err && (
-        <div className="flex items-center justify-between bg-red-950/60 px-5 py-1.5 text-sm text-red-300">
+        <div className="flex items-center justify-between border-b border-destructive/30 bg-destructive/5 px-5 py-1.5 text-sm text-destructive">
           {err}
           <button onClick={() => setErr(null)}>
             <X className="h-4 w-4" />
@@ -451,8 +449,8 @@ export function Terminal({
       {/* Body */}
       <div className="flex min-h-0 flex-1">
         {/* Watchlist */}
-        <div className="broker-panel flex w-60 shrink-0 flex-col border-r border-slate-800">
-          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="broker-panel flex w-60 shrink-0 flex-col border-r border-border">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
             Watchlist
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -464,27 +462,27 @@ export function Terminal({
                 <div
                   key={sym}
                   className={`group flex w-full items-center justify-between px-3 py-2.5 transition ${
-                    selected === sym ? "bg-slate-800" : "hover:bg-slate-900"
+                    selected === sym ? "bg-muted" : "hover:bg-muted"
                   }`}
                 >
                   <button onClick={() => setSelected(sym)} className="flex flex-1 flex-col items-start text-left">
-                    <span className="font-semibold text-white">{sym}</span>
+                    <span className="font-semibold text-foreground">{sym}</span>
                     {chg != null && (
-                      <span className={`font-mono text-[11px] ${up ? "text-emerald-400" : "text-red-400"}`}>
+                      <span className={`font-mono text-[11px] ${up ? "text-up" : "text-down"}`}>
                         {chg >= 0 ? "+" : ""}
                         {chg.toFixed(2)}%
                       </span>
                     )}
                   </button>
                   <span className="flex items-center gap-1.5 font-mono text-sm">
-                    <span className={q ? (up ? "text-emerald-400" : "text-red-400") : "text-slate-600"}>
+                    <span className={q ? (up ? "text-up" : "text-down") : "text-muted-foreground"}>
                       {q ? num(q.close) : "—"}
                     </span>
-                    {q && (up ? <TrendingUp className="h-3 w-3 text-emerald-400" /> : <TrendingDown className="h-3 w-3 text-red-400" />)}
+                    {q && (up ? <TrendingUp className="h-3 w-3 text-up" /> : <TrendingDown className="h-3 w-3 text-down" />)}
                     <button
                       onClick={() => removeSymbol(sym)}
                       title="Remove from watchlist"
-                      className="broker-btn opacity-0 transition group-hover:opacity-100 text-slate-600 hover:text-red-400"
+                      className="broker-btn opacity-0 transition group-hover:opacity-100 text-muted-foreground hover:text-down"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -494,18 +492,18 @@ export function Terminal({
             })}
           </div>
           {/* Add symbol */}
-          <div className="flex items-center gap-1 border-t border-slate-800 p-2">
+          <div className="flex items-center gap-1 border-t border-border p-2">
             <input
               value={newSym}
               onChange={(e) => setNewSym(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === "Enter" && addSymbol()}
               placeholder="Add symbol…"
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-white outline-none focus:border-emerald-500"
+              className="w-full rounded-md border border-input bg-card px-2 py-1.5 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             />
             <button
               onClick={addSymbol}
               disabled={addingSym || !newSym.trim()}
-              className="broker-btn flex items-center justify-center rounded-md bg-emerald-500 px-2 py-1.5 text-slate-950 disabled:opacity-40"
+              className="broker-btn flex items-center justify-center rounded-md bg-up px-2 py-1.5 text-white disabled:opacity-40"
               title="Add to watchlist"
             >
               <Plus className="h-4 w-4" />
@@ -517,21 +515,21 @@ export function Terminal({
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between px-5 pt-3">
             <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-bold text-white">{selected}</span>
-              <span className={`font-mono text-xl ${sel ? (selUp ? "text-emerald-400" : "text-red-400") : "text-slate-600"}`}>
+              <span className="text-2xl font-semibold text-foreground">{selected}</span>
+              <span className={`font-mono text-xl ${sel ? (selUp ? "text-up" : "text-down") : "text-muted-foreground"}`}>
                 {sel ? num(sel.close) : "—"}
               </span>
               {(() => {
                 const c = changePct(selected);
                 return c == null ? null : (
-                  <span className={`font-mono text-sm font-semibold ${c >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  <span className={`font-mono text-sm font-semibold ${c >= 0 ? "text-up" : "text-down"}`}>
                     {c >= 0 ? "+" : ""}
                     {c.toFixed(2)}%
                   </span>
                 );
               })()}
               {sel && (
-                <span className="font-mono text-xs text-slate-500">
+                <span className="font-mono text-xs text-muted-foreground">
                   O {num(sel.open)} · H {num(sel.high)} · L {num(sel.low)} · Vol{" "}
                   {sel.volume.toLocaleString()}
                 </span>
@@ -539,13 +537,13 @@ export function Terminal({
             </div>
             <div className="flex items-center gap-2">
               {centerView === "chart" && (
-                <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
+                <div className="flex overflow-hidden rounded-lg border border-border text-xs">
                   {([["candles", CandlestickChart], ["line", LineChartIcon]] as const).map(([id, Icon]) => (
                     <button
                       key={id}
                       onClick={() => setChartKind(id)}
                       className={`broker-btn flex items-center px-2.5 py-1.5 ${
-                        chartKind === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
+                        chartKind === id ? "bg-muted text-foreground" : "bg-card text-muted-foreground"
                       }`}
                       title={id === "candles" ? "Candlesticks" : "Line"}
                     >
@@ -554,14 +552,14 @@ export function Terminal({
                   ))}
                 </div>
               )}
-              <div className="flex overflow-hidden rounded-lg border border-slate-700 text-xs">
+              <div className="flex overflow-hidden rounded-lg border border-border text-xs">
                 {([["chart", "Chart", CandlestickChart], ["options", "Option chain", ListTree]] as const).map(
                   ([id, label, Icon]) => (
                     <button
                       key={id}
                       onClick={() => setCenterView(id)}
                       className={`broker-btn flex items-center gap-1.5 px-3 py-1.5 font-semibold ${
-                        centerView === id ? "bg-slate-800 text-white" : "bg-slate-900 text-slate-400"
+                        centerView === id ? "bg-muted text-foreground" : "bg-card text-muted-foreground"
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" /> {label}
@@ -589,7 +587,7 @@ export function Terminal({
           </div>
 
           {/* Blotter */}
-          <div className="broker-panel h-56 shrink-0 border-t border-slate-800">
+          <div className="broker-panel h-56 shrink-0 border-t border-border">
             <div className="flex items-center justify-between px-4 pt-2">
               <div className="flex gap-1">
                 {(["positions", "orders", "trades"] as Blotter[]).map((t) => (
@@ -597,7 +595,7 @@ export function Terminal({
                     key={t}
                     onClick={() => setTab(t)}
                     className={`broker-btn rounded-t-md px-3 py-1.5 text-xs font-semibold capitalize ${
-                      tab === t ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
+                      tab === t ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     {t}
@@ -609,7 +607,7 @@ export function Terminal({
               {tab === "positions" && !!state?.positions.length && (
                 <button
                   onClick={closeAll}
-                  className="broker-btn flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  className="broker-btn flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
                 >
                   <X className="h-3 w-3" /> Close all
                 </button>
@@ -617,7 +615,7 @@ export function Terminal({
               {tab === "orders" && !!state?.open_orders.length && (
                 <button
                   onClick={cancelAll}
-                  className="broker-btn flex items-center gap-1 rounded-md border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  className="broker-btn flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
                 >
                   <Ban className="h-3 w-3" /> Cancel all
                 </button>
@@ -636,8 +634,8 @@ export function Terminal({
         </div>
 
         {/* Order ticket + account */}
-        <div className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 p-4">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="w-72 shrink-0 overflow-y-auto border-l border-border p-4">
+          <div className="mb-3 text-xs font-semibold text-muted-foreground">
             Order ticket
           </div>
           <div className="mb-3 grid grid-cols-2 gap-2">
@@ -645,12 +643,12 @@ export function Terminal({
               <button
                 key={s}
                 onClick={() => setSide(s)}
-                className={`rounded-lg py-2 text-sm font-bold transition ${
+                className={`rounded-lg py-2 text-sm font-semibold transition ${
                   side === s
                     ? s === "BUY"
-                      ? "bg-emerald-500 text-slate-950"
-                      : "bg-red-500 text-slate-950"
-                    : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                      ? "bg-up text-white"
+                      : "bg-down text-white"
+                    : "bg-muted text-muted-foreground hover:bg-accent"
                 }`}
               >
                 {s}
@@ -662,7 +660,7 @@ export function Terminal({
             <select
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             >
               {wl.map((s) => (
                 <option key={s} value={s}>
@@ -678,7 +676,7 @@ export function Terminal({
               min={1}
               value={qty}
               onChange={(e) => setQty(Math.max(1, Number(e.target.value)))}
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+              className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             />
           </TicketField>
 
@@ -689,7 +687,7 @@ export function Terminal({
                   key={t}
                   onClick={() => setOrderType(t)}
                   className={`rounded-lg py-1.5 text-xs font-semibold ${
-                    orderType === t ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400"
+                    orderType === t ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground"
                   }`}
                 >
                   {t}
@@ -706,19 +704,19 @@ export function Terminal({
                 value={limit}
                 onChange={(e) => setLimit(e.target.value === "" ? "" : Number(e.target.value))}
                 placeholder={sel ? num(sel.close) : "0.00"}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
               />
             </TicketField>
           )}
 
-          <div className="mb-3 space-y-1 rounded-lg bg-slate-900 px-3 py-2 text-xs text-slate-400">
+          <div className="mb-3 space-y-1 rounded-lg bg-card px-3 py-2 text-xs text-muted-foreground">
             <div>
               Est. {side === "BUY" ? "cost" : "proceeds"}
-              <span className="float-right font-mono text-slate-200">{sel ? money(estCost) : "—"}</span>
+              <span className="float-right font-mono text-foreground">{sel ? money(estCost) : "—"}</span>
             </div>
             <div>
               Buying power after
-              <span className={`float-right font-mono ${bpAfter < 0 ? "text-red-400" : "text-slate-200"}`}>
+              <span className={`float-right font-mono ${bpAfter < 0 ? "text-down" : "text-foreground"}`}>
                 {acct ? money(bpAfter) : "—"}
               </span>
             </div>
@@ -727,18 +725,18 @@ export function Terminal({
           <button
             onClick={submitOrder}
             disabled={!started}
-            className={`w-full rounded-lg py-2.5 text-sm font-bold text-slate-950 transition disabled:opacity-40 ${
-              side === "BUY" ? "bg-emerald-500 hover:bg-emerald-400" : "bg-red-500 hover:bg-red-400"
+            className={`w-full rounded-lg py-2.5 text-sm font-semibold text-white transition disabled:opacity-40 ${
+              side === "BUY" ? "bg-up hover:bg-up/90" : "bg-down hover:bg-down/90"
             }`}
           >
             {side} {qty} {selected}
           </button>
           {!started && (
-            <p className="mt-2 text-center text-xs text-slate-600">Open the market to trade.</p>
+            <p className="mt-2 text-center text-xs text-muted-foreground">Open the market to trade.</p>
           )}
 
           {/* Account panel */}
-          <div className="mt-6 space-y-1.5 border-t border-slate-800 pt-4 text-sm">
+          <div className="mt-6 space-y-1.5 border-t border-border pt-4 text-sm">
             <AcctRow label="Cash" value={money(acct?.cash_available)} />
             <AcctRow label="Cash locked" value={money(acct?.cash_locked)} />
             <AcctRow label="Equity" value={money(acct?.equity)} />
@@ -750,7 +748,7 @@ export function Terminal({
             <AcctRow
               label="Margin status"
               value={acct?.margin_status ?? "—"}
-              cls={acct?.margin_status === "OK" ? "text-emerald-400" : "text-amber-400"}
+              cls={acct?.margin_status === "OK" ? "text-up" : "text-warning"}
             />
           </div>
         </div>
@@ -771,7 +769,7 @@ export function Terminal({
       />
 
       {toast && (
-        <div className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-slate-800 px-4 py-2 text-sm text-white shadow-lg">
+        <div className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-muted px-4 py-2 text-sm text-foreground">
           {toast}
         </div>
       )}
@@ -792,8 +790,8 @@ export function Terminal({
 function Stat({ label, value, cls }: { label: string; value: string; cls?: string }) {
   return (
     <div className="text-right">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`font-mono text-sm font-semibold ${cls ?? "text-white"}`}>{value}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`font-mono text-sm font-semibold ${cls ?? "text-foreground"}`}>{value}</div>
     </div>
   );
 }
@@ -801,7 +799,7 @@ function Stat({ label, value, cls }: { label: string; value: string; cls?: strin
 function TicketField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3">
-      <div className="mb-1 text-xs text-slate-400">{label}</div>
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
       {children}
     </div>
   );
@@ -810,8 +808,8 @@ function TicketField({ label, children }: { label: string; children: React.React
 function AcctRow({ label, value, cls }: { label: string; value: string; cls?: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-slate-500">{label}</span>
-      <span className={`font-mono ${cls ?? "text-slate-200"}`}>{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-mono ${cls ?? "text-foreground"}`}>{value}</span>
     </div>
   );
 }
@@ -824,10 +822,10 @@ function PositionsTable({
   onFlatten: (p: Position) => void;
 }) {
   if (!positions.length)
-    return <div className="py-6 text-center text-slate-600">No open positions.</div>;
+    return <div className="py-6 text-center text-muted-foreground">No open positions.</div>;
   return (
     <table className="w-full">
-      <thead className="text-slate-500">
+      <thead className="text-muted-foreground">
         <tr className="text-left">
           <th className="pb-1">Instrument</th>
           <th className="pb-1 text-right">Qty</th>
@@ -839,8 +837,8 @@ function PositionsTable({
       </thead>
       <tbody>
         {positions.map((p) => (
-          <tr key={p.instrument_id} className="border-t border-slate-800/60">
-            <td className="py-1 text-white">{p.instrument_id.replace(/^(STOCK|OPTION):/, "")}</td>
+          <tr key={p.instrument_id} className="border-t border-border">
+            <td className="py-1 text-foreground">{p.instrument_id.replace(/^(STOCK|OPTION):/, "")}</td>
             <td className="py-1 text-right">{p.qty}</td>
             <td className="py-1 text-right">{num(p.avg_price)}</td>
             <td className="py-1 text-right">{num(p.mark_price)}</td>
@@ -852,7 +850,7 @@ function PositionsTable({
               <button
                 onClick={() => onFlatten(p)}
                 title="Flatten (market close)"
-                className="broker-btn rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+                className="broker-btn rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground hover:bg-accent"
               >
                 Flatten
               </button>
@@ -872,10 +870,10 @@ function OrdersTable({
   onCancel: (id: string) => void;
 }) {
   if (!orders.length)
-    return <div className="py-6 text-center text-slate-600">No working orders.</div>;
+    return <div className="py-6 text-center text-muted-foreground">No working orders.</div>;
   return (
     <table className="w-full">
-      <thead className="text-slate-500">
+      <thead className="text-muted-foreground">
         <tr className="text-left">
           <th className="pb-1">Instrument</th>
           <th className="pb-1">Side</th>
@@ -888,15 +886,15 @@ function OrdersTable({
       </thead>
       <tbody>
         {orders.map((o) => (
-          <tr key={o.order_id} className="border-t border-slate-800/60">
-            <td className="py-1 text-white">{o.instrument_id.replace("STOCK:", "")}</td>
-            <td className={o.side === "BUY" ? "text-emerald-400" : "text-red-400"}>{o.side}</td>
-            <td className="text-slate-400">{o.order_type}</td>
+          <tr key={o.order_id} className="border-t border-border">
+            <td className="py-1 text-foreground">{o.instrument_id.replace("STOCK:", "")}</td>
+            <td className={o.side === "BUY" ? "text-up" : "text-down"}>{o.side}</td>
+            <td className="text-muted-foreground">{o.order_type}</td>
             <td className="py-1 text-right">{o.qty}</td>
             <td className="py-1 text-right">{o.limit_price ? num(o.limit_price) : "—"}</td>
-            <td className="py-1 text-right text-slate-400">{o.status}</td>
+            <td className="py-1 text-right text-muted-foreground">{o.status}</td>
             <td className="py-1 text-right">
-              <button onClick={() => onCancel(o.order_id)} className="text-slate-500 hover:text-red-400">
+              <button onClick={() => onCancel(o.order_id)} className="text-muted-foreground hover:text-down">
                 <X className="h-3.5 w-3.5" />
               </button>
             </td>
@@ -909,10 +907,10 @@ function OrdersTable({
 
 function TradesTable({ trades }: { trades: FullState["trades"] }) {
   if (!trades.length)
-    return <div className="py-6 text-center text-slate-600">No fills yet.</div>;
+    return <div className="py-6 text-center text-muted-foreground">No fills yet.</div>;
   return (
     <table className="w-full">
-      <thead className="text-slate-500">
+      <thead className="text-muted-foreground">
         <tr className="text-left">
           <th className="pb-1">Time</th>
           <th className="pb-1">Instrument</th>
@@ -929,10 +927,10 @@ function TradesTable({ trades }: { trades: FullState["trades"] }) {
             const inst = String(t.instrument_id ?? t.symbol ?? "").replace("STOCK:", "");
             const s = String(t.side ?? "");
             return (
-              <tr key={i} className="border-t border-slate-800/60">
-                <td className="py-1 text-slate-400">{t.ts ? fmtET(String(t.ts)) : "—"}</td>
-                <td className="py-1 text-white">{inst}</td>
-                <td className={s === "BUY" ? "text-emerald-400" : "text-red-400"}>{s}</td>
+              <tr key={i} className="border-t border-border">
+                <td className="py-1 text-muted-foreground">{t.ts ? fmtET(String(t.ts)) : "—"}</td>
+                <td className="py-1 text-foreground">{inst}</td>
+                <td className={s === "BUY" ? "text-up" : "text-down"}>{s}</td>
                 <td className="py-1 text-right">{t.qty ?? "—"}</td>
                 <td className="py-1 text-right">{t.price ? num(Number(t.price)) : "—"}</td>
               </tr>

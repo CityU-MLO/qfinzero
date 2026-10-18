@@ -20,16 +20,16 @@ export function NewsTable({
   onSelect: (event: EspEvent) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border bg-white/70 shadow-sm">
+    <div className="overflow-hidden rounded-lg border bg-card">
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow>
-            <TableHead className="w-40 text-xs font-bold uppercase tracking-wider">Time (UTC)</TableHead>
-            <TableHead className="text-xs font-bold uppercase tracking-wider">Title</TableHead>
-            <TableHead className="w-32 text-xs font-bold uppercase tracking-wider">Publisher</TableHead>
-            <TableHead className="w-32 text-xs font-bold uppercase tracking-wider">Tickers</TableHead>
-            <TableHead className="w-20 text-xs font-bold uppercase tracking-wider">Rating</TableHead>
-            <TableHead className="w-16 text-right text-xs font-bold uppercase tracking-wider">URL</TableHead>
+            <TableHead className="w-40 text-xs font-semibold">Time (UTC)</TableHead>
+            <TableHead className="text-xs font-semibold">Title</TableHead>
+            <TableHead className="w-32 text-xs font-semibold">Publisher</TableHead>
+            <TableHead className="w-32 text-xs font-semibold">Tickers</TableHead>
+            <TableHead className="w-20 text-xs font-semibold">Rating</TableHead>
+            <TableHead className="w-16 text-right text-xs font-semibold">URL</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -77,7 +77,7 @@ export function NewsTable({
                     {row.tickers.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
                         {row.tickers.slice(0, 3).map(t => (
-                          <span key={t} className="rounded bg-muted px-1 text-[10px] font-bold text-muted-foreground">
+                          <span key={t} className="rounded bg-muted px-1 text-[10px] font-semibold text-muted-foreground">
                             {t}
                           </span>
                         ))}

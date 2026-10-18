@@ -18,7 +18,7 @@
 /* ============================================================
    PMB Broker Terminal — two themes share one DOM.
    Theme is selected via the data-theme attribute on <html>:
-     "modern"  → dark glassy trading terminal
+     "modern"  → the light theme shared with the console
      "win98"   → classic Windows 98 silver chrome
    Generic class names (.window, .titlebar, .btn, .field …) are
    restyled per theme below.
@@ -103,68 +103,61 @@ th.r, td.r { text-align: right; }
    MODERN THEME
    ============================================================ */
 html[data-theme="modern"] {
-  --bg: radial-gradient(1200px 700px at 80% -10%, #1b2a4a 0%, #0b1020 55%, #070a14 100%);
-  --panel: rgba(20, 27, 45, .72);
-  --panel-border: rgba(120, 140, 190, .18);
-  --header: linear-gradient(90deg, rgba(99,102,241,.20), rgba(16,185,129,.08));
-  --text: #e7ecf5;
-  --muted: #9aa6c0;
-  --accent: #6366f1;
-  --accent-2: #10b981;
-  --field-bg: rgba(8, 12, 24, .65);
-  --field-border: rgba(120, 140, 190, .28);
-  --up: #34d399;
-  --down: #f87171;
-  --warn: #fbbf24;
+  /* same tokens as the QFinZero console (infra/dashboard-web/src/app/globals.css) */
+  --bg: hsl(220 14% 97%);
+  --panel: hsl(0 0% 100%);
+  --panel-border: hsl(220 13% 88%);
+  --text: hsl(222 22% 14%);
+  --muted: hsl(220 9% 42%);
+  --accent: hsl(221 68% 45%);
+  --field-bg: hsl(0 0% 100%);
+  --field-border: hsl(220 13% 84%);
+  --soft: hsl(220 14% 95%);
+  --up: hsl(152 56% 32%);
+  --down: hsl(0 68% 47%);
+  --warn: hsl(32 92% 38%);
 }
 html[data-theme="modern"] body {
   background: var(--bg); color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
-  background-attachment: fixed;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
-html[data-theme="modern"] .window {
-  background: var(--panel); border: 1px solid var(--panel-border);
-  border-radius: 14px; backdrop-filter: blur(8px);
-  box-shadow: 0 20px 50px -24px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04);
-}
-html[data-theme="modern"] .titlebar {
-  background: var(--header); padding: 11px 14px;
-  border-bottom: 1px solid var(--panel-border); font-size: 13px;
-}
+html[data-theme="modern"] .window { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; }
+html[data-theme="modern"] .titlebar { padding: 10px 14px; border-bottom: 1px solid var(--panel-border); font-size: 14px; }
 html[data-theme="modern"] .titlebar .controls { display: none; }
 html[data-theme="modern"] .title .ico { color: var(--accent); }
 html[data-theme="modern"] input,
 html[data-theme="modern"] select {
   background: var(--field-bg); color: var(--text);
-  border: 1px solid var(--field-border); border-radius: 9px; outline: none;
+  border: 1px solid var(--field-border); border-radius: 6px; outline: none;
 }
 html[data-theme="modern"] input:focus,
-html[data-theme="modern"] select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+html[data-theme="modern"] select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px hsl(221 68% 45% / .15); }
 html[data-theme="modern"] .field label { color: var(--muted); }
 html[data-theme="modern"] .btn {
-  background: linear-gradient(180deg, #2b3656, #202944); color: var(--text);
-  border: 1px solid var(--field-border); border-radius: 9px;
-  transition: transform .05s ease, border-color .15s ease, background .15s ease;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--field-border); border-radius: 6px; transition: background .15s ease;
 }
-html[data-theme="modern"] .btn:hover:not(:disabled) { border-color: var(--accent); }
-html[data-theme="modern"] .btn:active:not(:disabled) { transform: translateY(1px); }
-html[data-theme="modern"] .btn.primary { background: linear-gradient(180deg, #6366f1, #4f46e5); border-color: transparent; }
-html[data-theme="modern"] .btn.buy { background: linear-gradient(180deg, #059669, #047857); border-color: transparent; }
-html[data-theme="modern"] .btn.sell { background: linear-gradient(180deg, #dc2626, #b91c1c); border-color: transparent; }
-html[data-theme="modern"] .stat { background: var(--field-bg); border: 1px solid var(--panel-border); border-radius: 11px; }
-html[data-theme="modern"] .stat .k { color: var(--muted); }
-html[data-theme="modern"] th { color: var(--muted); border-bottom: 1px solid var(--panel-border); font-weight: 500; }
-html[data-theme="modern"] td { border-bottom: 1px solid rgba(120,140,190,.10); }
+html[data-theme="modern"] .btn:hover:not(:disabled) { background: var(--soft); }
+html[data-theme="modern"] .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+html[data-theme="modern"] .btn.buy { background: var(--up); color: #fff; border-color: transparent; }
+html[data-theme="modern"] .btn.sell { background: var(--down); color: #fff; border-color: transparent; }
+html[data-theme="modern"] .btn.primary:hover:not(:disabled),
+html[data-theme="modern"] .btn.buy:hover:not(:disabled),
+html[data-theme="modern"] .btn.sell:hover:not(:disabled) { filter: brightness(.94); }
+html[data-theme="modern"] .stat { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; }
+html[data-theme="modern"] .stat .k { color: var(--muted); text-transform: none; letter-spacing: 0; font-size: 12px; }
+html[data-theme="modern"] th { color: var(--muted); background: var(--soft); border-bottom: 1px solid var(--panel-border); font-weight: 500; font-size: 12px; }
+html[data-theme="modern"] td { border-bottom: 1px solid var(--panel-border); }
 html[data-theme="modern"] tr:last-child td { border-bottom: none; }
-html[data-theme="modern"] .pill { border-radius: 999px; }
-html[data-theme="modern"] .acctchip { color: var(--accent-2); text-shadow: 0 0 18px rgba(16,185,129,.35); }
-html[data-theme="modern"] #log { background: rgba(0,0,0,.35); border: 1px solid var(--panel-border); border-radius: 10px; color: #9fe6c4; }
-html[data-theme="modern"] .brand .logo { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: inline-flex; align-items: center; justify-content: center; font-size: 16px; }
+html[data-theme="modern"] .pill { border-radius: 4px; }
+html[data-theme="modern"] .acctchip { color: var(--text); font-size: 20px; letter-spacing: 2px; }
+html[data-theme="modern"] #log { background: var(--soft); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--muted); }
+html[data-theme="modern"] .brand .logo { width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
 
 /* status pill colors (modern) */
-html[data-theme="modern"] .st-ACTIVE { background: rgba(16,185,129,.16); color: var(--up); }
-html[data-theme="modern"] .st-FROZEN { background: rgba(251,191,36,.16); color: var(--warn); }
-html[data-theme="modern"] .st-CLOSED { background: rgba(248,113,113,.16); color: var(--down); }
+html[data-theme="modern"] .st-ACTIVE { background: hsl(152 56% 32% / .1); color: var(--up); }
+html[data-theme="modern"] .st-FROZEN { background: hsl(32 92% 38% / .1); color: var(--warn); }
+html[data-theme="modern"] .st-CLOSED { background: hsl(0 68% 47% / .1); color: var(--down); }
 
 /* ============================================================
    WINDOWS 98 THEME
@@ -434,7 +427,8 @@ html[data-theme="win98"] .switch button.on { border-color: var(--silver-dd) var(
 <script>
 (() => {
   "use strict";
-  const API = "/v1";
+  // Served by PMB at /ui/ or behind the hub at /svc/pmb/ui/: the API sits next to it.
+  const API = location.pathname.split("/ui/")[0].replace(/\/$/, "") + "/v1";
   const $ = (id) => document.getElementById(id);
   const CCY = { us: { sym: "$", code: "USD" }, cn: { sym: "¥", code: "CNY" }, hk: { sym: "HK$", code: "HKD" } };
 

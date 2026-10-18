@@ -159,9 +159,9 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
   const hasKey = Boolean(config.apiKey);
 
   return (
-    <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-white/60 rounded-l-2xl">
+    <aside className="flex flex-col gap-5 p-5 border-r min-w-[240px] max-w-[280px] bg-card rounded-l-2xl">
       <div>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
+        <h2 className="text-xs font-semibold text-muted-foreground mb-3">
           LLM Config
         </h2>
         <div className="flex flex-col gap-3">
@@ -172,7 +172,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
               value={currentValue}
               onChange={(e) => selectModel(e.target.value)}
               disabled={disabled}
-              className="h-8 rounded-md border bg-white px-2 text-sm disabled:opacity-50"
+              className="h-8 rounded-md border bg-card px-2 text-sm disabled:opacity-50"
             >
               {currentValue === "" && (
                 <option value="">{config.model || "Select a model…"}</option>
@@ -189,7 +189,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
 
           {/* Base URL / API key / proxy are configured in Settings and resolved here */}
           <div className="flex items-center justify-between text-[11px]">
-            <span className={hasKey ? "text-emerald-600" : "text-amber-600"}>
+            <span className={hasKey ? "text-success" : "text-warning"}>
               {hasKey ? "● key set" : "● no key"}
             </span>
             <Link href="/settings" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
@@ -207,7 +207,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
             >
               {saved ? (
                 <>
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="h-3 w-3 text-success" />
                   Saved
                 </>
               ) : (
@@ -219,7 +219,7 @@ export function ConfigPanel({ config, onChange, disabled }: ConfigPanelProps) {
       </div>
 
       <div>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
+        <h2 className="text-xs font-semibold text-muted-foreground mb-3">
           Context
         </h2>
         <div className="flex flex-col gap-1">

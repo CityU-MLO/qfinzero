@@ -1,49 +1,42 @@
 import type { Config } from "tailwindcss";
 
+const token = (name: string) => `hsl(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
   darkMode: ["class"],
-  content: [
-    "./src/pages/**/*.{ts,tsx}",
-    "./src/components/**/*.{ts,tsx}",
-    "./src/app/**/*.{ts,tsx}",
-    "./src/**/*.{ts,tsx}"
-  ],
+  content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)"],
+        mono: ["var(--font-mono)"],
+      },
+      borderRadius: {
+        lg: "calc(var(--radius) + 2px)",
+        md: "var(--radius)",
+        sm: "calc(var(--radius) - 2px)",
+      },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))"
-        },
-        secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))"
-        },
-        muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))"
-        },
-        accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))"
-        },
-        destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))"
-        },
-        card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))"
-        }
-      }
-    }
+        border: token("border"),
+        input: token("input"),
+        ring: token("ring"),
+        background: token("background"),
+        foreground: token("foreground"),
+        primary: { DEFAULT: token("primary"), foreground: token("primary-foreground") },
+        secondary: { DEFAULT: token("secondary"), foreground: token("secondary-foreground") },
+        muted: { DEFAULT: token("muted"), foreground: token("muted-foreground") },
+        accent: { DEFAULT: token("accent"), foreground: token("accent-foreground") },
+        destructive: { DEFAULT: token("destructive"), foreground: token("destructive-foreground") },
+        card: { DEFAULT: token("card"), foreground: token("card-foreground") },
+        popover: { DEFAULT: token("popover"), foreground: token("popover-foreground") },
+        success: token("success"),
+        warning: token("warning"),
+        up: token("up"),
+        down: token("down"),
+      },
+    },
   },
-  plugins: []
+  plugins: [],
 };
 
 export default config;

@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Loader2, Trash2 } from "lucide-react";
 
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMe } from "@/components/user-menu";
 import { auth, ROLE_LABEL, type ApiKey } from "@/lib/auth";
 
 const input =
-  "w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 function when(ts: number | null) {
   return ts ? new Date(ts * 1000).toLocaleString() : "never";
@@ -18,7 +19,7 @@ function when(ts: number | null) {
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
-    <button type="button" className="inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs hover:bg-accent"
+    <button type="button" className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs hover:bg-accent"
             onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}>
       {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {done ? "Copied" : "Copy"}
     </button>
@@ -73,8 +74,10 @@ export default function AccountPage() {
   const live = (keys.data?.keys ?? []).filter((k) => !k.revoked);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-      <div className="space-y-6">
+    <>
+    <PageHeader title="Account" description="Your profile, password and API keys for agents and scripts." />
+    <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+      <div className="space-y-5">
         <Card>
           <CardHeader>
             <CardTitle>{me.display_name || me.username}</CardTitle>
@@ -99,14 +102,14 @@ export default function AccountPage() {
                      value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} required minLength={10} />
               <input className={input} type="password" placeholder="Confirm new password" autoComplete="new-password"
                      value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} required />
-              {pwMsg && <p className={`text-sm ${pwMsg.ok ? "text-emerald-700" : "text-red-700"}`}>{pwMsg.text}</p>}
+              {pwMsg && <p className={`text-sm ${pwMsg.ok ? "text-success" : "text-destructive"}`}>{pwMsg.text}</p>}
               <button className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">Update password</button>
             </form>
           </CardContent>
         </Card>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> API keys</CardTitle>
@@ -120,17 +123,17 @@ export default function AccountPage() {
               </button>
             </form>
             {fresh && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <p className="text-sm font-semibold text-emerald-900">New key “{fresh.key.name}”: copy it now, it will not be shown again.</p>
+              <div className="rounded-lg border border-success/30 bg-success/10 p-4">
+                <p className="text-sm font-semibold text-success">New key “{fresh.key.name}”: copy it now, it will not be shown again.</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <code className="flex-1 overflow-x-auto rounded-md bg-white px-2 py-1.5 font-mono text-xs">{fresh.token}</code>
+                  <code className="flex-1 overflow-x-auto rounded-md bg-card px-2 py-1.5 font-mono text-xs">{fresh.token}</code>
                   <CopyButton text={fresh.token} />
                 </div>
               </div>
             )}
-            <div className="overflow-hidden rounded-xl border">
+            <div className="overflow-hidden rounded-lg border">
               <table className="w-full text-sm">
-                <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
                   <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Key</th><th className="px-3 py-2">Last used</th><th className="px-3 py-2" /></tr>
                 </thead>
                 <tbody>
@@ -141,7 +144,7 @@ export default function AccountPage() {
                       <td className="px-3 py-2 font-mono text-xs">{k.prefix}_…</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{when(k.last_used_at)}</td>
                       <td className="px-3 py-2 text-right">
-                        <button onClick={() => revoke(k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-700 hover:bg-red-50" title="Revoke">
+                        <button onClick={() => revoke(k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10" title="Revoke">
                           <Trash2 className="h-3.5 w-3.5" /> Revoke
                         </button>
                       </td>
@@ -161,12 +164,13 @@ export default function AccountPage() {
           </CardHeader>
           <CardContent>
             <div className="relative">
-              <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">{mcp}</pre>
+              <pre className="overflow-x-auto rounded-lg bg-muted p-4 font-mono text-[12.5px] leading-relaxed text-foreground">{mcp}</pre>
               <div className="absolute right-2 top-2"><CopyButton text={mcp} /></div>
             </div>
           </CardContent>
         </Card>
       </div>
     </div>
+    </>
   );
 }

@@ -22,19 +22,19 @@ export function JsonViewer({ data, title }: JsonViewerProps) {
   if (!data) return null;
 
   return (
-    <div className="group relative overflow-hidden rounded-lg border bg-zinc-950">
-      <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-1.5">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">{title || "JSON"}</span>
+    <div className="group relative overflow-hidden rounded-md border bg-muted/40">
+      <div className="flex items-center justify-between border-b px-3 py-1">
+        <span className="text-[11px] font-medium text-muted-foreground">{title || "JSON"}</span>
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-zinc-400 hover:bg-white/10 hover:text-white"
+          className="h-6 w-6"
           onClick={handleCopy}
         >
-          {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
         </Button>
       </div>
-      <div className="max-h-80 overflow-auto p-3 scrollbar-thin scrollbar-thumb-white/10">
+      <div className="max-h-80 overflow-auto p-3">
         <pre className="font-mono text-[11px] leading-relaxed">
           {formatJson(data)}
         </pre>
@@ -55,7 +55,7 @@ function formatJson(obj: any) {
       return (
         <div key={i} className="min-h-[1.2em]">
           {indent}
-          <span className="text-sky-400">&quot;{key}&quot;</span>:
+          <span className="text-primary">&quot;{key}&quot;</span>:
           {formatValue(rest)}
         </div>
       );
@@ -66,13 +66,13 @@ function formatJson(obj: any) {
 
 function formatValue(val: string) {
   if (val.includes('"')) {
-    return <span className="text-amber-200">{val}</span>;
+    return <span className="text-success">{val}</span>;
   }
   if (val.match(/\d+/)) {
-    return <span className="text-indigo-300">{val}</span>;
+    return <span className="text-warning">{val}</span>;
   }
   if (val.includes("true") || val.includes("false") || val.includes("null")) {
-    return <span className="text-rose-300">{val}</span>;
+    return <span className="text-destructive">{val}</span>;
   }
-  return <span className="text-zinc-300">{val}</span>;
+  return <span className="text-foreground">{val}</span>;
 }

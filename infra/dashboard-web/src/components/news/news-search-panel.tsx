@@ -32,58 +32,58 @@ export function NewsSearchPanel({
   const hasFilters = filters.tickers || filters.keyword || filters.publisher || filters.startUtc || filters.endUtc;
 
   return (
-    <div className="space-y-6 rounded-2xl border bg-white/80 p-5 shadow-sm backdrop-blur">
+    <div className="space-y-6 rounded-lg border bg-card p-5">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="space-y-1.5">
-          <Label className="text-xs font-bold uppercase text-muted-foreground/70">Ticker(s)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Ticker(s)</Label>
           <Input 
             value={filters.tickers} 
             onChange={(e) => onChange({ ...filters, tickers: e.target.value })} 
             placeholder="AAPL,MSFT" 
-            className="bg-white/50"
+            className="bg-card"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-bold uppercase text-muted-foreground/70">Publisher</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Publisher</Label>
           <Input 
             value={filters.publisher} 
             onChange={(e) => onChange({ ...filters, publisher: e.target.value })} 
             placeholder="Reuters" 
-            className="bg-white/50"
+            className="bg-card"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-bold uppercase text-muted-foreground/70">Keyword</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Keyword</Label>
           <Input 
             value={filters.keyword} 
             onChange={(e) => onChange({ ...filters, keyword: e.target.value })} 
             placeholder="earnings" 
-            className="bg-white/50"
+            className="bg-card"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-bold uppercase text-muted-foreground/70">Start (UTC)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">Start (UTC)</Label>
           <Input 
             type="datetime-local" 
             value={filters.startUtc} 
             onChange={(e) => onChange({ ...filters, startUtc: e.target.value })} 
-            className="bg-white/50"
+            className="bg-card"
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs font-bold uppercase text-muted-foreground/70">End (UTC)</Label>
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">End (UTC)</Label>
           <Input 
             type="datetime-local" 
             value={filters.endUtc} 
             onChange={(e) => onChange({ ...filters, endUtc: e.target.value })} 
-            className="bg-white/50"
+            className="bg-card"
           />
         </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 mr-1">Presets</span>
+          <span className="text-[10px] font-semibold text-muted-foreground/50 mr-1">Presets</span>
           <PresetBadge onClick={() => onPreset("aapl_window")}>AAPL 2025-01-01~01-03</PresetBadge>
           <PresetBadge onClick={() => onPreset("nvda_last_day")}>NVDA Last 24h</PresetBadge>
           <PresetBadge onClick={() => onPreset("macro_earnings")}>Keyword: earnings</PresetBadge>
@@ -116,13 +116,13 @@ export function NewsSearchPanel({
               max={500}
               value={filters.limit}
               onChange={(e) => onChange({ ...filters, limit: Number(e.target.value) || 50 })}
-              className="h-8 w-16 bg-white/50 text-xs"
+              className="h-8 w-16 bg-card text-xs"
             />
           </div>
           <Button 
             onClick={onSearch} 
             disabled={isLoading} 
-            className="h-9 gap-2 shadow-md shadow-primary/20"
+            className="h-9 gap-2 shadow-primary/20"
           >
             {isLoading ? (
               <span className="flex items-center gap-1.5"><div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> Searching...</span>
@@ -140,7 +140,7 @@ function PresetBadge({ children, onClick }: { children: React.ReactNode; onClick
   return (
     <Badge 
       variant="secondary" 
-      className="cursor-pointer border-transparent bg-primary/5 text-primary transition-all hover:bg-primary/10 hover:shadow-sm"
+      className="cursor-pointer border-transparent bg-primary/5 text-primary transition-all hover:bg-primary/10 hover:"
       onClick={onClick}
     >
       {children}

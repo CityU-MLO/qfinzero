@@ -63,7 +63,7 @@ export function PmbSettingsPanel() {
     setSaved(false);
   }
 
-  if (!cfg) return <div className="rounded-2xl border bg-white/80 p-4 text-sm text-muted-foreground">{msg || "Loading broker settings…"}</div>;
+  if (!cfg) return <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{msg || "Loading broker settings…"}</div>;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -73,8 +73,8 @@ export function PmbSettingsPanel() {
       </div>
 
       {GROUPS.map((g) => (
-        <div key={g.title} className="rounded-2xl border bg-white/80 p-4 shadow-sm">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{g.title}</div>
+        <div key={g.title} className="rounded-lg border bg-card p-4">
+          <div className="mb-2 text-xs font-semibold text-muted-foreground">{g.title}</div>
           <div className="grid gap-3 sm:grid-cols-2">
             {g.keys.filter((k) => k in cfg).map((k) => {
               const v = cfg[k];
@@ -84,13 +84,13 @@ export function PmbSettingsPanel() {
                   <span className="text-xs font-medium">{LABEL[k] ?? k}</span>
                   {typeof v === "boolean" ? (
                     <button type="button" onClick={() => set(k, !v)}
-                      className={`flex h-8 w-full items-center rounded-lg border px-2 text-xs ${v ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "bg-white text-muted-foreground"}`}>
-                      <span className={`mr-2 h-3.5 w-3.5 rounded-full ${v ? "bg-emerald-500" : "bg-slate-300"}`} />
+                      className={`flex h-8 w-full items-center rounded-lg border px-2 text-xs ${v ? "border-success/30 bg-success/10 text-success" : "bg-card text-muted-foreground"}`}>
+                      <span className={`mr-2 h-3.5 w-3.5 rounded-full ${v ? "bg-success" : "bg-muted-foreground/40"}`} />
                       {v ? "On — real market fills" : "Off — agent supplies price"}
                     </button>
                   ) : SELECTS[k] ? (
                     <select value={String(v)} onChange={(e) => set(k, e.target.value)}
-                      className="h-8 rounded-lg border bg-white px-2 text-sm">
+                      className="h-8 rounded-lg border bg-card px-2 text-sm">
                       {SELECTS[k].map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
@@ -108,14 +108,14 @@ export function PmbSettingsPanel() {
 
       <div className="flex items-center gap-3">
         <button onClick={save} disabled={saving}
-          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary disabled:opacity-50">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
           {saved ? "Saved" : "Save settings"}
         </button>
         <button onClick={resetDefaults} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:bg-accent">
           <RotateCcw className="h-4 w-4" /> Reset to defaults
         </button>
-        {msg && <span className="text-xs text-red-600">{msg}</span>}
+        {msg && <span className="text-xs text-destructive">{msg}</span>}
       </div>
     </div>
   );

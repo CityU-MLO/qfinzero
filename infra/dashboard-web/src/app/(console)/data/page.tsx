@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, Loader2, Play, RefreshCw, TestTube2 } from "lucide-react";
+import Link from "next/link";
+import { Loader2, Play, RefreshCw, ShieldCheck, TestTube2 } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { dataAdmin, type Job, type Source } from "@/lib/data-admin";
 
 const DOT: Record<Source["colour"], string> = {
-  green: "bg-emerald-500",
-  amber: "bg-amber-400",
-  red: "bg-red-500",
-  grey: "bg-slate-300",
+  green: "bg-success",
+  amber: "bg-warning",
+  red: "bg-destructive",
+  grey: "bg-muted-foreground/40",
 };
 
 function useJob(id: string | null) {
@@ -60,25 +63,28 @@ export default function DataPage() {
 
   const sources = status.data?.sources ?? [];
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><Database className="h-5 w-5 text-primary" /> Data</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Raw vendor data vs. converted UPQ storage. Updates convert new raw files only.</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => status.refetch()} className="flex h-9 items-center gap-1.5 rounded-lg border bg-white px-3 text-sm hover:bg-accent">
-            <RefreshCw className={`h-4 w-4 ${status.isFetching ? "animate-spin" : ""}`} /> Refresh
+    <div className="space-y-5">
+      <PageHeader
+        title="Data"
+        description="Raw vendor data against converted UPQ storage. Updates convert new raw files only."
+        actions={
+          <>
+          <Link href="/sanity" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            <ShieldCheck /> Data checks
+          </Link>
+          <button onClick={() => status.refetch()} className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <RefreshCw className={status.isFetching ? "animate-spin" : ""} /> Refresh
           </button>
-          <button disabled={running} onClick={() => start("prices", true)} className="flex h-9 items-center gap-1.5 rounded-lg border bg-white px-3 text-sm hover:bg-accent disabled:opacity-50">
-            <TestTube2 className="h-4 w-4" /> Plan all
+          <button disabled={running} onClick={() => start("prices", true)} className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <TestTube2 /> Plan all
           </button>
-          <button disabled={running} onClick={() => start("prices", false)} className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            <Play className="h-4 w-4" /> Update all prices
+          <button disabled={running} onClick={() => start("prices", false)} className={buttonVariants({ size: "sm" })}>
+            <Play /> Update all prices
           </button>
-        </div>
-      </div>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          </>
+        }
+      />
+      {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
       <Card>
         <CardHeader>
           <CardTitle>Sources</CardTitle>
@@ -86,11 +92,11 @@ export default function DataPage() {
         </CardHeader>
         <CardContent>
           {status.isLoading && <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />}
-          {status.isError && <p className="text-sm text-red-700">data-admin is unreachable: {(status.error as Error).message}</p>}
+          {status.isError && <p className="text-sm text-destructive">data-admin is unreachable: {(status.error as Error).message}</p>}
           {sources.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border">
+            <div className="overflow-x-auto rounded-lg border">
               <table className="w-full text-sm">
-                <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2">Source</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Raw until</th>
                     <th className="px-3 py-2">Converted until</th><th className="px-3 py-2">Last run</th><th className="px-3 py-2" />
@@ -130,7 +136,7 @@ export default function DataPage() {
             <CardDescription>Job {job.id} · {job.status}{job.error ? ` · ${job.error}` : ""}</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="max-h-80 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-100">
+            <pre className="max-h-80 overflow-auto rounded-lg bg-muted p-4 font-mono text-xs leading-relaxed text-foreground">
               {(job.lines ?? []).join("\n") || "waiting for output…"}
             </pre>
           </CardContent>

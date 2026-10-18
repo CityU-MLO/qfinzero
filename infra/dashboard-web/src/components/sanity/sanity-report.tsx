@@ -75,7 +75,7 @@ function SamplesDrawer({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="flex max-h-[80vh] w-full max-w-3xl flex-col shadow-2xl">
+      <Card className="flex max-h-[80vh] w-full max-w-3xl flex-col">
         <CardHeader className="border-b pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -180,7 +180,7 @@ export function SanityReport() {
             status="pass"
             isActive={filter === "pass"}
             onClick={() => handleFilterClick("pass")}
-            colorClass="text-emerald-700"
+            colorClass="text-success"
           />
           <StatusFilterCard
             label="Warn"
@@ -188,7 +188,7 @@ export function SanityReport() {
             status="warn"
             isActive={filter === "warn"}
             onClick={() => handleFilterClick("warn")}
-            colorClass="text-amber-700"
+            colorClass="text-warning"
           />
           <StatusFilterCard
             label="Fail"
@@ -196,7 +196,7 @@ export function SanityReport() {
             status="fail"
             isActive={filter === "fail"}
             onClick={() => handleFilterClick("fail")}
-            colorClass="text-rose-700"
+            colorClass="text-destructive"
           />
         </div>
       ) : null}

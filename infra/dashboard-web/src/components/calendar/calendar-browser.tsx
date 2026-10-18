@@ -153,7 +153,7 @@ export function CalendarBrowser() {
         exportQuery={exportQuery}
       />
 
-      {error ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+      {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
         <div className="space-y-3">

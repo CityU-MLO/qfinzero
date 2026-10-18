@@ -3,17 +3,22 @@
 import Link from "next/link";
 import { ArrowRight, Github } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
 import { useMe } from "@/components/user-menu";
 
 const REPO = process.env.NEXT_PUBLIC_REPO_URL ?? "https://github.com/CityU-MLO/qfinzero";
 
-export function Logo() {
+export function Logo({ compact = false }: { compact?: boolean }) {
   return (
-    <Link href="/" className="flex items-center gap-2.5" aria-label="QFinZero home">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-600 to-emerald-500 text-lg font-bold text-white shadow-sm">
+    <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="QFinZero home">
+      <span
+        className={`nav-logo flex items-center justify-center rounded-md bg-primary font-semibold text-primary-foreground ${
+          compact ? "h-6 w-6 text-[13px]" : "h-7 w-7 text-sm"
+        }`}
+      >
         Q
       </span>
-      <span className="text-lg font-bold tracking-tight text-foreground">QFinZero</span>
+      <span className={`font-semibold tracking-tight text-foreground ${compact ? "text-[15px]" : "text-base"}`}>QFinZero</span>
     </Link>
   );
 }
@@ -21,8 +26,8 @@ export function Logo() {
 export function SiteHeader() {
   const { data: me, isFetched } = useMe();
   return (
-    <header className="sticky top-0 z-30 border-b border-white/60 bg-background/80 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
+    <header className="sticky top-0 z-30 border-b bg-card">
+      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 md:px-6">
         <Logo />
         <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
           <Link href="/#platform" className="hover:text-foreground">Platform</Link>
@@ -35,11 +40,11 @@ export function SiteHeader() {
         </nav>
         <div className="flex items-center gap-2">
           {isFetched && me ? (
-            <Link href="/chat" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">
-              Open console <ArrowRight className="h-4 w-4" />
+            <Link href="/chat" className={buttonVariants({ size: "sm" })}>
+              Open console <ArrowRight />
             </Link>
           ) : (
-            <Link href="/login" className="inline-flex h-9 items-center rounded-lg border bg-white px-4 text-sm font-medium shadow-sm hover:bg-accent">
+            <Link href="/login" className={buttonVariants({ size: "sm", variant: "outline" })}>
               Sign in
             </Link>
           )}
@@ -51,7 +56,7 @@ export function SiteHeader() {
 
 export function SiteFooter() {
   return (
-    <footer className="mt-24 border-t bg-white/50">
+    <footer className="mt-20 border-t bg-card">
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between md:px-6">
         <div className="space-y-2">
           <Logo />

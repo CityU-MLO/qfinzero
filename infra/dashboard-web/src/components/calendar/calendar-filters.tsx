@@ -32,7 +32,7 @@ export function CalendarFiltersPanel({
   exportQuery?: string;
 }) {
   return (
-    <div className="space-y-3 rounded-xl border bg-white/80 p-4">
+    <div className="space-y-3 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap gap-2">
         <Button variant={mode === "earnings" ? "default" : "outline"} onClick={() => onMode("earnings")}>Earnings</Button>
         <Button variant={mode === "econ" ? "default" : "outline"} onClick={() => onMode("econ")}>Economic</Button>

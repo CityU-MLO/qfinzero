@@ -17,7 +17,7 @@ export function CoverageHeatmap({
   const max = Math.max(1, ...cells.map((cell) => cell.count));
 
   return (
-    <div className="space-y-2 rounded-xl border bg-white/80 p-4">
+    <div className="space-y-2 rounded-lg border bg-card p-4">
       <h4 className="text-sm font-semibold">{title}</h4>
       <div className="grid grid-cols-14 gap-1">
         {cells.map((cell) => {
@@ -28,7 +28,7 @@ export function CoverageHeatmap({
               key={cell.date}
               title={`${cell.date}: ${cell.count}`}
               className="h-4 rounded-sm"
-              style={{ backgroundColor: `rgba(14,116,144,${alpha})` }}
+              style={{ backgroundColor: `hsl(var(--primary) / ${alpha.toFixed(2)})` }}
             />
           );
         })}

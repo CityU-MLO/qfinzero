@@ -2,6 +2,8 @@
 
 import { fmtETTime, num } from "./api";
 
+import { chart } from "@/lib/chart-theme";
+
 export interface Candle {
   ts: string;
   o: number;
@@ -11,10 +13,10 @@ export interface Candle {
   v: number;
 }
 
-const GREEN = "#34d399";
-const RED = "#f87171";
-const MA_FAST = "#fbbf24"; // MA5  — amber
-const MA_SLOW = "#38bdf8"; // MA20 — sky
+const GREEN = chart.up;
+const RED = chart.down;
+const MA_FAST = chart.series[2]; // MA5
+const MA_SLOW = chart.series[0]; // MA20
 
 function sma(vals: number[], period: number): (number | null)[] {
   const out: (number | null)[] = [];
@@ -30,9 +32,9 @@ function sma(vals: number[], period: number): (number | null)[] {
 export function CandleChart({ symbol, data }: { symbol: string; data: Candle[] }) {
   if (data.length < 2) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-600">
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Press{" "}
-        <span className="mx-1 rounded bg-slate-800 px-1.5 py-0.5 font-mono text-slate-300">
+        <span className="mx-1 rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">
           Start
         </span>{" "}
         to open {symbol} and watch candles print.
@@ -95,14 +97,14 @@ export function CandleChart({ symbol, data }: { symbol: string; data: Candle[] }
       <div className="pointer-events-none absolute left-1 top-1 z-10 flex gap-3 text-[10px]">
         {legend("MA5", MA_FAST, ma5[ma5.length - 1])}
         {legend("MA20", MA_SLOW, ma20[ma20.length - 1])}
-        <span className="font-mono text-slate-500">VOL {last.v.toLocaleString()}</span>
+        <span className="font-mono text-muted-foreground">VOL {last.v.toLocaleString()}</span>
       </div>
 
       {/* price gridlines + labels */}
       {gridlines.map((g, i) => (
         <div key={i} className="pointer-events-none absolute inset-x-0" style={{ top: g.top }}>
-          <div className="border-t border-slate-800/70" />
-          <div className="absolute right-1 -translate-y-1/2 bg-slate-950/70 px-1 font-mono text-[10px] text-slate-500">
+          <div className="border-t border-border" />
+          <div className="absolute right-1 -translate-y-1/2 bg-background px-1 font-mono text-[10px] text-muted-foreground">
             {num(g.price)}
           </div>
         </div>
@@ -146,13 +148,13 @@ export function CandleChart({ symbol, data }: { symbol: string; data: Candle[] }
 
       {/* last price marker */}
       <div className="pointer-events-none absolute right-0 -translate-y-1/2" style={{ top: `${(yP(last.c) / VH) * 100}%` }}>
-        <span className="rounded-l px-1 font-mono text-[10px] font-bold text-slate-950" style={{ background: lastUp ? GREEN : RED }}>
+        <span className="rounded-l px-1 font-mono text-[10px] font-semibold text-white" style={{ background: lastUp ? GREEN : RED }}>
           {num(last.c)}
         </span>
       </div>
 
       {/* time axis */}
-      <div className="pointer-events-none absolute bottom-0 left-0 flex w-full justify-between px-1 font-mono text-[10px] text-slate-600">
+      <div className="pointer-events-none absolute bottom-0 left-0 flex w-full justify-between px-1 font-mono text-[10px] text-muted-foreground">
         <span>{fmtETTime(rows[0].ts)}</span>
         <span>{fmtETTime(rows[Math.floor(n / 2)].ts)}</span>
         <span>{fmtETTime(last.ts)}</span>

@@ -34,10 +34,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       {message.content && (
         <div
           className={cn(
-            "rounded-2xl px-4 py-2.5 text-sm max-w-[90%] leading-relaxed",
+            "rounded-lg px-4 py-2.5 text-sm max-w-[90%] leading-relaxed",
             isUser
               ? "bg-primary text-primary-foreground rounded-br-sm"
-              : "bg-white border text-foreground rounded-bl-sm"
+              : "bg-card border text-foreground rounded-bl-sm"
           )}
         >
           {isUser ? (

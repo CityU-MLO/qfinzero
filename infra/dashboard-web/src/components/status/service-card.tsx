@@ -25,7 +25,7 @@ function StateBadge({ state }: { state: ServiceStatusCard["state"] }) {
     );
   }
   return (
-    <Badge variant="destructive" className="gap-1 px-2 py-0.5 shadow-sm">
+    <Badge variant="destructive" className="gap-1 px-2 py-0.5">
       <XCircle className="h-3.5 w-3.5" /> Down
     </Badge>
   );
@@ -57,7 +57,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       title="Copy URL"
     >
-      <Copy className={cn("h-3 w-3 transition-transform", copied && "scale-110 text-emerald-500")} />
+      <Copy className={cn("h-3 w-3 transition-transform", copied && "scale-110 text-success")} />
     </Button>
   );
 }
@@ -101,7 +101,7 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
           )}
         </div>
 
-        {card.staleReason ? <p className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-700">{card.staleReason}</p> : null}
+        {card.staleReason ? <p className="rounded-md bg-warning/10 px-2 py-1 text-xs text-warning">{card.staleReason}</p> : null}
 
         {isDown ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-8 text-center">
@@ -110,14 +110,14 @@ export function ServiceCard({ card }: { card: ServiceStatusCard }) {
             <p className="mt-0.5 text-[10px] text-muted-foreground">Cannot fetch freshness metrics</p>
           </div>
         ) : freshness.length > 0 ? (
-          <div className="rounded-lg border bg-card shadow-sm overflow-hidden">
+          <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader className="bg-muted/30">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="h-9 px-3 text-[11px] font-bold uppercase tracking-wider">Source</TableHead>
-                  <TableHead className="h-9 px-3 text-[11px] font-bold uppercase tracking-wider">Latest</TableHead>
-                  <TableHead className="h-9 px-3 text-right text-[11px] font-bold uppercase tracking-wider">Rows</TableHead>
-                  <TableHead className="h-9 px-3 text-right text-[11px] font-bold uppercase tracking-wider">Keys</TableHead>
+                  <TableHead className="h-9 px-3 text-[11px] font-semibold">Source</TableHead>
+                  <TableHead className="h-9 px-3 text-[11px] font-semibold">Latest</TableHead>
+                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">Rows</TableHead>
+                  <TableHead className="h-9 px-3 text-right text-[11px] font-semibold">Keys</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

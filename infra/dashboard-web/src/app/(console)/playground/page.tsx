@@ -1,9 +1,6 @@
-import { PlaygroundLayout } from "@/components/playground/playground-layout";
+import { redirect } from "next/navigation";
 
+// The playground is the Chat page.
 export default function PlaygroundPage() {
-  return (
-    <div className="flex flex-col h-[calc(100vh-6rem)]">
-      <PlaygroundLayout />
-    </div>
-  );
+  redirect("/chat");
 }

@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, Plus, Trash2, Wifi, WifiOff } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
+
 type Provider = {
   id: string;
   label: string;
@@ -48,7 +52,7 @@ function loadSettings(): ConsoleSettings {
   }
 }
 
-const inputCls = "w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200";
+const inputCls = "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<ConsoleSettings>(defaultSettings());
@@ -139,17 +143,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section>
-        <h2 className="text-xl font-semibold">Settings — LLM Providers</h2>
-        <p className="text-sm text-muted-foreground">
-          Configure providers and pick the active model used by Chat. Keys are stored only in this browser.
-        </p>
-      </section>
+    <div className="space-y-5">
+      <PageHeader title="Settings" description="Model providers and the active model used by Chat. Keys are stored only in this browser." />
 
       {/* Active selector */}
-      <div className="rounded-2xl border bg-white/80 p-4 shadow-sm">
-        <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">Active model</h3>
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="mb-3 text-xs font-semibold text-muted-foreground">Active model</h3>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">Provider</span>
@@ -176,7 +175,7 @@ export default function SettingsPage() {
           </label>
           <button
             onClick={save}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:opacity-90"
+            className={buttonVariants()}
           >
             {saved ? <><Check className="h-4 w-4" /> Saved</> : "Save"}
           </button>
@@ -186,7 +185,7 @@ export default function SettingsPage() {
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               LLM egress proxy <span className="font-normal">(optional)</span>
               {proxyLoaded && (
-                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">server proxy active</span>
+                <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">server proxy active</span>
               )}
             </span>
             <input
@@ -205,7 +204,7 @@ export default function SettingsPage() {
       {/* Providers */}
       <div className="grid gap-4 md:grid-cols-2">
         {settings.providers.map((p) => (
-          <div key={p.id} className="rounded-2xl border bg-white/80 p-4 shadow-sm">
+          <div key={p.id} className="rounded-lg border bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <input
                 className="rounded-md bg-transparent text-sm font-semibold outline-none"
@@ -214,9 +213,9 @@ export default function SettingsPage() {
               />
               <div className="flex items-center gap-2">
                 {p.builtin ? (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">built-in</span>
+                  <Badge variant="secondary">built-in</Badge>
                 ) : (
-                  <button onClick={() => removeProvider(p.id)} className="text-slate-400 hover:text-red-500" title="Remove">
+                  <button onClick={() => removeProvider(p.id)} className="text-muted-foreground hover:text-destructive" title="Remove">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 )}
@@ -231,7 +230,7 @@ export default function SettingsPage() {
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   API key
                   {envLoaded[p.id] && (
-                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">loaded from env</span>
+                    <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">loaded from env</span>
                   )}
                 </span>
                 <input type="password" className={inputCls} placeholder="sk-…  (leave blank for local)" value={p.apiKey} onChange={(e) => updateProvider(p.id, { apiKey: e.target.value })} />
@@ -251,12 +250,12 @@ export default function SettingsPage() {
                   className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
                 >
                   {test[p.id] === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {test[p.id] === "ok" && <Wifi className="h-3.5 w-3.5 text-emerald-500" />}
-                  {test[p.id] === "error" && <WifiOff className="h-3.5 w-3.5 text-red-500" />}
+                  {test[p.id] === "ok" && <Wifi className="h-3.5 w-3.5 text-success" />}
+                  {test[p.id] === "error" && <WifiOff className="h-3.5 w-3.5 text-destructive" />}
                   {test[p.id] === "loading" ? "Testing…" : test[p.id] === "ok" ? "Connected" : test[p.id] === "error" ? "Failed" : "Test connection"}
                 </button>
                 {test[p.id] === "error" && testErr[p.id] && (
-                  <span className="text-xs text-red-500 truncate">{testErr[p.id]}</span>
+                  <span className="text-xs text-destructive truncate">{testErr[p.id]}</span>
                 )}
               </div>
             </div>

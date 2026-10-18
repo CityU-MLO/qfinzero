@@ -201,7 +201,7 @@ export function ChatPanel({ config }: ChatPanelProps) {
       </div>
 
       {/* Input */}
-      <div className="border-t p-3 flex gap-2 items-end bg-white/80">
+      <div className="border-t p-3 flex gap-2 items-end bg-card">
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}

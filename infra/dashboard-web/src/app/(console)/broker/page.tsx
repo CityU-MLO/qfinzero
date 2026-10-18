@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { MonitorPlay } from "lucide-react";
+import { useEffect, useState } from "react";
+import { LineChart, Settings2 } from "lucide-react";
 
-import { useLegacySkin } from "@/components/app-providers";
-import { Landing } from "@/components/broker/landing";
 import { AllocatePanel } from "@/components/broker/allocate-panel";
 import { EnterPanel } from "@/components/broker/enter-panel";
+import { Landing } from "@/components/broker/landing";
 import { Terminal } from "@/components/broker/terminal";
+import { PmbSettingsPanel } from "@/components/pmb/settings-panel";
+import { PageHeader } from "@/components/ui/page-header";
+import { Segmented } from "@/components/ui/segmented";
 
 type View = "landing" | "allocate" | "enter" | "terminal";
+type Tab = "trade" | "settings";
 
 interface Live {
   sessionId: string;
@@ -17,73 +20,81 @@ interface Live {
   watchlist: string[];
 }
 
+const TABS = [
+  { value: "trade", label: "Trade", icon: LineChart },
+  { value: "settings", label: "Broker settings", icon: Settings2 },
+] as const;
+
 export default function BrokerPage() {
-  const legacy = useLegacySkin();
+  const [tab, setTab] = useState<Tab>("trade");
   const [view, setView] = useState<View>("landing");
   const [presetAccount, setPresetAccount] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
 
+  useEffect(() => {
+    if (window.location.hash === "#settings") setTab("settings");
+  }, []);
+
+  if (view === "terminal" && live) {
+    // the session terminal fills the console below the top bar
+    return (
+      <div className="-mx-4 -mb-12 -mt-6 h-[calc(100vh-3rem)] border-b md:-mx-6">
+        <Terminal
+          sessionId={live.sessionId}
+          accountId={live.accountId}
+          watchlist={live.watchlist}
+          onExit={() => {
+            setLive(null);
+            setView("landing");
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    // Full-screen immersive broker — escapes the console chrome behind it.
-    <div
-      className={`fixed inset-0 z-50 overflow-hidden bg-slate-950 text-slate-200 ${
-        legacy ? "broker-98" : ""
-      }`}
-    >
-      <div className="h-full w-full overflow-y-auto">
-        {view === "landing" && (
-          <Landing
-            onAllocate={() => setView("allocate")}
-            onEnter={() => {
-              setPresetAccount(null);
-              setView("enter");
-            }}
-          />
-        )}
-
-        {view === "allocate" && (
-          <AllocatePanel
-            onBack={() => setView("landing")}
-            onCreated={(accountId) => {
-              setPresetAccount(accountId);
-              setView("enter");
-            }}
-          />
-        )}
-
-        {view === "enter" && (
-          <EnterPanel
-            presetAccountId={presetAccount}
-            onBack={() => setView("landing")}
-            onEnter={(l) => {
-              setLive(l);
-              setView("terminal");
-            }}
-          />
-        )}
-
-        {view === "terminal" && live && (
-          <div className="h-full">
-            <Terminal
-              sessionId={live.sessionId}
-              accountId={live.accountId}
-              watchlist={live.watchlist}
-              onExit={() => {
-                setLive(null);
-                setView("landing");
+    <div>
+      <PageHeader
+        title="Paper broker"
+        description="Trade against historical market data minute by minute, with a clock you control. Agents use the same broker through the pmb_* tools."
+        actions={<Segmented value={tab} onChange={setTab} options={TABS} />}
+      />
+      {tab === "settings" ? (
+        <div className="max-w-3xl">
+          <PmbSettingsPanel />
+        </div>
+      ) : (
+        <>
+          {view === "landing" && (
+            <Landing
+              onAllocate={() => setView("allocate")}
+              onEnter={() => {
+                setPresetAccount(null);
+                setView("enter");
               }}
             />
-          </div>
-        )}
-      </div>
-
-      {/* Retro skin toggle — the Win98 broker lives at /legacy/broker. */}
-      <a
-        href={legacy ? "/broker" : "/legacy/broker"}
-        className="broker-skin-toggle fixed bottom-3 left-3 z-[60] flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-1.5 text-xs text-slate-300 shadow-lg hover:bg-slate-800"
-      >
-        <MonitorPlay className="h-3.5 w-3.5" /> {legacy ? "Modern UI" : "Win98 UI"}
-      </a>
+          )}
+          {view === "allocate" && (
+            <AllocatePanel
+              onBack={() => setView("landing")}
+              onCreated={(accountId) => {
+                setPresetAccount(accountId);
+                setView("enter");
+              }}
+            />
+          )}
+          {view === "enter" && (
+            <EnterPanel
+              presetAccountId={presetAccount}
+              onBack={() => setView("landing")}
+              onEnter={(l) => {
+                setLive(l);
+                setView("terminal");
+              }}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -16,15 +16,15 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-slate-200">{label}</span>
+      <span className="text-sm font-medium text-foreground">{label}</span>
       {children}
-      {hint && <span className="text-xs text-slate-500">{hint}</span>}
+      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
     </label>
   );
 }
 
 const inputCls =
-  "rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500";
+  "rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 export function AllocatePanel({
   onBack,
@@ -61,16 +61,16 @@ export function AllocatePanel({
   }
 
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-lg flex-col justify-center px-6 py-12">
+    <div className="flex w-full max-w-lg flex-col">
       <button
         onClick={onBack}
-        className="mb-6 flex w-fit items-center gap-1.5 text-sm text-slate-400 hover:text-white"
+        className="mb-6 flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
 
-      <h2 className="mb-1 text-2xl font-bold text-white">Allocate Account</h2>
-      <p className="mb-8 text-sm text-slate-400">
+      <h2 className="mb-1 text-xl font-semibold text-foreground">Open an account</h2>
+      <p className="mb-6 text-sm text-muted-foreground">
         Open a paper brokerage account with the capital and risk profile you want.
       </p>
 
@@ -119,7 +119,7 @@ export function AllocatePanel({
       </div>
 
       {err && (
-        <div className="mt-5 rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">
+        <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {err}
         </div>
       )}
@@ -127,7 +127,7 @@ export function AllocatePanel({
       <button
         onClick={submit}
         disabled={busy}
-        className="mt-8 flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+        className="mt-6 flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
       >
         {busy && <Loader2 className="h-4 w-4 animate-spin" />}
         Open account

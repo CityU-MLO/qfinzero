@@ -11,10 +11,12 @@ import {
 } from "recharts";
 
 import { fmtET, fmtETTime, money, num, type FullState } from "./api";
+
+import { chart } from "@/lib/chart-theme";
 import type { PricePoint } from "./price-chart";
 
 function pnlCls(n: number) {
-  return n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-slate-200";
+  return n > 0 ? "text-up" : n < 0 ? "text-down" : "text-foreground";
 }
 
 function mult(instrumentId: string) {
@@ -43,19 +45,19 @@ export function AccountPanel({
   const realized = state.positions.reduce((s, p) => s + p.realized_pnl, 0);
 
   return (
-    <div className="broker-98-window absolute inset-0 z-20 flex flex-col bg-slate-950/98 backdrop-blur">
+    <div className="absolute inset-0 z-20 flex flex-col bg-card">
       {/* Title bar */}
-      <div className="broker-titlebar flex items-center justify-between border-b border-slate-800 px-5 py-3">
+      <div className="broker-titlebar flex items-center justify-between border-b border-border px-5 py-3">
         <div>
-          <div className="text-lg font-bold text-white">Account</div>
-          <div className="font-mono text-xs text-slate-500">
+          <div className="text-lg font-semibold text-foreground">Account</div>
+          <div className="font-mono text-xs text-muted-foreground">
             {accountId} · {fmtET(state.clock.current_ts)} ET · bar{" "}
             {state.clock.index + 1}/{state.clock.total_bars}
           </div>
         </div>
         <button
           onClick={onClose}
-          className="broker-close flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+          className="broker-close flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
         >
           <X className="h-4 w-4" /> Close
         </button>
@@ -78,7 +80,7 @@ export function AccountPanel({
           {/* Account details */}
           <section>
             <H>Account details</H>
-            <dl className="broker-panel divide-y divide-slate-800 rounded-xl border border-slate-800 text-sm">
+            <dl className="broker-panel divide-y divide-border rounded-lg border border-border text-sm">
               <Row k="Account ID" v={accountId} mono />
               <Row k="Session" v={state.session_id} mono />
               <Row k="Clock" v={`${fmtET(state.clock.current_ts)} ET`} />
@@ -94,7 +96,7 @@ export function AccountPanel({
               <Row
                 k="Margin status"
                 v={a.margin_status}
-                cls={a.margin_status === "OK" ? "text-emerald-400" : "text-amber-400"}
+                cls={a.margin_status === "OK" ? "text-up" : "text-warning"}
               />
             </dl>
           </section>
@@ -102,9 +104,9 @@ export function AccountPanel({
           {/* History: equity curve */}
           <section>
             <H>Equity history</H>
-            <div className="broker-panel h-48 rounded-xl border border-slate-800 p-2">
+            <div className="broker-panel h-48 rounded-lg border border-border p-2">
               {equityHist.length < 2 ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-600">
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   Equity curve builds as the session plays.
                 </div>
               ) : (
@@ -112,18 +114,18 @@ export function AccountPanel({
                   <AreaChart data={equityHist} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
                     <defs>
                       <linearGradient id="eqfill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={eqUp ? "#34d399" : "#f87171"} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={eqUp ? "#34d399" : "#f87171"} stopOpacity={0} />
+                        <stop offset="0%" stopColor={eqUp ? chart.up : chart.down} stopOpacity={0.18} />
+                        <stop offset="100%" stopColor={eqUp ? chart.up : chart.down} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <XAxis dataKey="ts" tickFormatter={fmtETTime} tick={{ fill: "#64748b", fontSize: 10 }} minTickGap={40} tickLine={false} axisLine={{ stroke: "#1e293b" }} />
-                    <YAxis domain={["auto", "auto"]} orientation="right" width={64} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => money(v)} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="ts" tickFormatter={fmtETTime} tick={chart.tick} minTickGap={40} tickLine={false} axisLine={{ stroke: chart.grid }} />
+                    <YAxis domain={["auto", "auto"]} orientation="right" width={64} tick={chart.tick} tickFormatter={(v) => money(v)} tickLine={false} axisLine={false} />
                     <Tooltip
-                      contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8, fontSize: 12 }}
+                      contentStyle={chart.tooltip.contentStyle}
                       labelFormatter={(l) => fmtET(String(l))}
                       formatter={(v: number) => [money(v), "Equity"]}
                     />
-                    <Area type="monotone" dataKey="price" stroke={eqUp ? "#34d399" : "#f87171"} strokeWidth={2} fill="url(#eqfill)" isAnimationActive={false} dot={false} />
+                    <Area type="monotone" dataKey="price" stroke={eqUp ? chart.up : chart.down} strokeWidth={1.5} fill="url(#eqfill)" isAnimationActive={false} dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -134,10 +136,10 @@ export function AccountPanel({
         {/* Holdings */}
         <section className="mt-6">
           <H>Holdings ({state.positions.length})</H>
-          <div className="broker-panel overflow-x-auto rounded-xl border border-slate-800">
+          <div className="broker-panel overflow-x-auto rounded-lg border border-border">
             {state.positions.length ? (
               <table className="w-full font-mono text-xs">
-                <thead className="bg-slate-900 text-slate-500">
+                <thead className="bg-card text-muted-foreground">
                   <tr className="text-right">
                     <th className="px-3 py-2 text-left">Instrument</th>
                     <th className="px-3">Qty</th>
@@ -154,13 +156,13 @@ export function AccountPanel({
                     const mv = p.qty * p.mark_price * mult(p.instrument_id);
                     const w = a.equity ? (mv / a.equity) * 100 : 0;
                     return (
-                      <tr key={p.instrument_id} className="border-t border-slate-800/60 text-right">
-                        <td className="px-3 py-1.5 text-left text-white">{p.instrument_id.replace("STOCK:", "").replace("OPTION:", "")}</td>
+                      <tr key={p.instrument_id} className="border-t border-border text-right">
+                        <td className="px-3 py-1.5 text-left text-foreground">{p.instrument_id.replace("STOCK:", "").replace("OPTION:", "")}</td>
                         <td className="px-3">{p.qty}</td>
                         <td className="px-3">{num(p.avg_price)}</td>
                         <td className="px-3">{num(p.mark_price)}</td>
                         <td className="px-3">{money(mv)}</td>
-                        <td className="px-3 text-slate-400">{w.toFixed(1)}%</td>
+                        <td className="px-3 text-muted-foreground">{w.toFixed(1)}%</td>
                         <td className={`px-3 ${pnlCls(p.unrealized_pnl)}`}>{p.unrealized_pnl >= 0 ? "+" : ""}{num(p.unrealized_pnl)}</td>
                         <td className={`px-3 ${pnlCls(p.realized_pnl)}`}>{num(p.realized_pnl)}</td>
                       </tr>
@@ -169,7 +171,7 @@ export function AccountPanel({
                 </tbody>
               </table>
             ) : (
-              <div className="p-6 text-center text-sm text-slate-600">No holdings.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">No holdings.</div>
             )}
           </div>
         </section>
@@ -177,10 +179,10 @@ export function AccountPanel({
         {/* Trade history */}
         <section className="mt-6">
           <H>Trade history ({state.trades.length})</H>
-          <div className="broker-panel overflow-x-auto rounded-xl border border-slate-800">
+          <div className="broker-panel overflow-x-auto rounded-lg border border-border">
             {state.trades.length ? (
               <table className="w-full font-mono text-xs">
-                <thead className="bg-slate-900 text-slate-500">
+                <thead className="bg-card text-muted-foreground">
                   <tr className="text-left">
                     <th className="px-3 py-2">Time</th>
                     <th className="px-3">Instrument</th>
@@ -197,20 +199,20 @@ export function AccountPanel({
                     .map((t, i) => {
                       const s = String(t.side ?? "");
                       return (
-                        <tr key={i} className="border-t border-slate-800/60">
-                          <td className="px-3 py-1.5 text-slate-400">{t.ts ? fmtET(String(t.ts)) : "—"}</td>
-                          <td className="px-3 text-white">{String(t.instrument_id ?? t.symbol ?? "").replace("STOCK:", "").replace("OPTION:", "")}</td>
-                          <td className={`px-3 ${s === "BUY" ? "text-emerald-400" : "text-red-400"}`}>{s}</td>
+                        <tr key={i} className="border-t border-border">
+                          <td className="px-3 py-1.5 text-muted-foreground">{t.ts ? fmtET(String(t.ts)) : "—"}</td>
+                          <td className="px-3 text-foreground">{String(t.instrument_id ?? t.symbol ?? "").replace("STOCK:", "").replace("OPTION:", "")}</td>
+                          <td className={`px-3 ${s === "BUY" ? "text-up" : "text-down"}`}>{s}</td>
                           <td className="px-3 text-right">{t.qty ?? "—"}</td>
                           <td className="px-3 text-right">{t.price != null ? num(Number(t.price)) : "—"}</td>
-                          <td className="px-3 text-right text-slate-500">{t.fee != null ? num(Number(t.fee)) : "—"}</td>
+                          <td className="px-3 text-right text-muted-foreground">{t.fee != null ? num(Number(t.fee)) : "—"}</td>
                         </tr>
                       );
                     })}
                 </tbody>
               </table>
             ) : (
-              <div className="p-6 text-center text-sm text-slate-600">No fills yet.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">No fills yet.</div>
             )}
           </div>
         </section>
@@ -221,22 +223,22 @@ export function AccountPanel({
 
 function Tile({ label, value, cls }: { label: string; value: string; cls?: string }) {
   return (
-    <div className="broker-panel rounded-xl border border-slate-800 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`mt-0.5 font-mono text-lg font-semibold ${cls ?? "text-white"}`}>{value}</div>
+    <div className="broker-panel rounded-lg border border-border px-4 py-3">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 font-mono text-lg font-semibold ${cls ?? "text-foreground"}`}>{value}</div>
     </div>
   );
 }
 
 function H({ children }: { children: React.ReactNode }) {
-  return <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{children}</div>;
+  return <div className="mb-2 text-xs font-semibold text-muted-foreground">{children}</div>;
 }
 
 function Row({ k, v, mono, cls }: { k: string; v: string; mono?: boolean; cls?: string }) {
   return (
     <div className="flex items-center justify-between px-4 py-2">
-      <span className="text-slate-500">{k}</span>
-      <span className={`${mono ? "font-mono" : ""} ${cls ?? "text-slate-200"}`}>{v}</span>
+      <span className="text-muted-foreground">{k}</span>
+      <span className={`${mono ? "font-mono" : ""} ${cls ?? "text-foreground"}`}>{v}</span>
     </div>
   );
 }

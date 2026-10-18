@@ -23,9 +23,9 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const statusIcon = {
-    loading: <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />,
-    done: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />,
-    error: <XCircle className="h-3.5 w-3.5 text-rose-500" />,
+    loading: <Loader2 className="h-3.5 w-3.5 animate-spin text-warning" />,
+    done: <CheckCircle2 className="h-3.5 w-3.5 text-success" />,
+    error: <XCircle className="h-3.5 w-3.5 text-destructive" />,
   }[call.status];
 
   const chevron = expanded
@@ -33,13 +33,13 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
     : <ChevronRight className="h-3 w-3 text-muted-foreground" />;
 
   return (
-    <div className="rounded-lg border bg-zinc-50 text-sm overflow-hidden">
+    <div className="overflow-hidden rounded-md border bg-card text-sm">
       <button
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-zinc-100 transition-colors text-left"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
         onClick={() => setExpanded(!expanded)}
       >
         {statusIcon}
-        <span className="font-mono text-xs font-semibold text-zinc-700 flex-1">{call.tool}</span>
+        <span className="flex-1 font-mono text-xs font-medium text-foreground">{call.tool}</span>
         {chevron}
       </button>
 
@@ -52,7 +52,7 @@ export function ToolCallCard({ call }: ToolCallCardProps) {
             <JsonViewer data={call.output} title="Output" />
           )}
           {call.error && (
-            <p className="text-xs text-rose-500 font-mono">{call.error}</p>
+            <p className="text-xs text-destructive font-mono">{call.error}</p>
           )}
         </div>
       )}

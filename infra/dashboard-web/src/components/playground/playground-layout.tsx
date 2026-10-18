@@ -13,7 +13,7 @@ export function PlaygroundLayout() {
   }, []);
 
   return (
-    <div className="flex flex-1 min-h-0 rounded-2xl border bg-white/80 shadow-sm overflow-hidden">
+    <div className="flex flex-1 min-h-0 rounded-lg border bg-card overflow-hidden">
       <ConfigPanel config={config} onChange={setConfig} />
       <ChatPanel config={config} />
     </div>

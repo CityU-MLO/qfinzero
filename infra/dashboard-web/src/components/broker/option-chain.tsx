@@ -84,9 +84,9 @@ export function OptionChain({
 
   return (
     <div className="broker-panel flex h-full flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-2">
-        <div className="text-sm font-bold text-white">
-          {underlying} <span className="text-slate-500">options</span>
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2">
+        <div className="text-sm font-semibold text-foreground">
+          {underlying} <span className="text-muted-foreground">options</span>
         </div>
         <select
           value={expiry}
@@ -94,7 +94,7 @@ export function OptionChain({
             setExpiry(e.target.value);
             setChain(null);
           }}
-          className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+          className="rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground"
         >
           {(chain?.expiries ?? []).map((x) => (
             <option key={x} value={x}>
@@ -103,34 +103,34 @@ export function OptionChain({
           ))}
         </select>
         {spot != null && (
-          <span className="font-mono text-xs text-slate-400">
-            spot <span className="text-white">{num(spot)}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            spot <span className="text-foreground">{num(spot)}</span>
           </span>
         )}
-        <span className="flex items-center gap-1 text-[11px] text-emerald-400">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> live · minute
+        <span className="flex items-center gap-1 text-[11px] text-up">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-up" /> live · minute
         </span>
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto font-mono text-xs">
-        {err && <div className="p-4 text-red-400">{err}</div>}
+        {err && <div className="p-4 text-down">{err}</div>}
         {!err && !rows.length && !loading && (
-          <div className="p-6 text-center text-slate-600">No chain for this underlying/date.</div>
+          <div className="p-6 text-center text-muted-foreground">No chain for this underlying/date.</div>
         )}
         {!!rows.length && (
           <table className="w-full">
-            <thead className="sticky top-0 z-10 bg-slate-950 text-[10px] uppercase tracking-wider text-slate-500">
+            <thead className="sticky top-0 z-10 bg-background text-[10px] text-muted-foreground">
               <tr>
-                <th className="py-1 text-center text-emerald-500" colSpan={5}>
+                <th className="py-1 text-center text-up" colSpan={5}>
                   Calls
                 </th>
                 <th className="py-1 text-center">Strike</th>
-                <th className="py-1 text-center text-red-500" colSpan={5}>
+                <th className="py-1 text-center text-down" colSpan={5}>
                   Puts
                 </th>
               </tr>
-              <tr className="text-right text-slate-500">
+              <tr className="text-right text-muted-foreground">
                 <th className="px-1"></th>
                 <th className="px-1">Bid</th>
                 <th className="px-1">Ask</th>
@@ -148,9 +148,9 @@ export function OptionChain({
               {rows.map((r) => {
                 const atm = r.strike === atmStrike;
                 return (
-                  <tr key={r.strike} className={atm ? "bg-slate-800/50" : "hover:bg-slate-900/40"}>
+                  <tr key={r.strike} className={atm ? "bg-muted" : "hover:bg-muted"}>
                     <Side leg={r.call} side="call" flash={flash} onTrade={onTrade} />
-                    <td className={`px-2 py-1 text-center font-bold ${atm ? "text-amber-400" : "text-white"}`}>
+                    <td className={`px-2 py-1 text-center font-semibold ${atm ? "text-warning" : "text-foreground"}`}>
                       {num(r.strike)}
                     </td>
                     <Side leg={r.put} side="put" flash={flash} onTrade={onTrade} />
@@ -180,7 +180,7 @@ function Side({
     return (
       <>
         {Array.from({ length: 5 }).map((_, i) => (
-          <td key={i} className="px-1 py-1 text-right text-slate-700">
+          <td key={i} className="px-1 py-1 text-right text-muted-foreground">
             —
           </td>
         ))}
@@ -190,35 +190,35 @@ function Side({
   const dir = leg.contract ? flash[leg.contract] : undefined;
   const lastCls =
     dir === "up"
-      ? "bg-emerald-500/25 text-emerald-300"
+      ? "bg-up/25 text-up"
       : dir === "down"
-        ? "bg-red-500/25 text-red-300"
+        ? "bg-down/25 text-down"
         : leg.live
           ? "text-white"
-          : "text-slate-400";
+          : "text-muted-foreground";
   const bs = (
     <span className="inline-flex gap-0.5">
       <button
         onClick={() => leg.contract && onTrade(leg.contract, "BUY")}
-        className="broker-btn rounded bg-emerald-500/20 px-1 text-emerald-400 hover:bg-emerald-500 hover:text-slate-950"
+        className="broker-btn rounded-sm bg-up/10 px-1 text-up hover:bg-up hover:text-white"
       >
         B
       </button>
       <button
         onClick={() => leg.contract && onTrade(leg.contract, "SELL")}
-        className="broker-btn rounded bg-red-500/20 px-1 text-red-400 hover:bg-red-500 hover:text-slate-950"
+        className="broker-btn rounded-sm bg-down/10 px-1 text-down hover:bg-down hover:text-white"
       >
         S
       </button>
     </span>
   );
   const cBid = (
-    <td key="bid" className="px-1 py-1 text-right text-slate-400">
+    <td key="bid" className="px-1 py-1 text-right text-muted-foreground">
       {leg.bid != null ? num(leg.bid) : "—"}
     </td>
   );
   const cAsk = (
-    <td key="ask" className="px-1 py-1 text-right text-slate-400">
+    <td key="ask" className="px-1 py-1 text-right text-muted-foreground">
       {leg.ask != null ? num(leg.ask) : "—"}
     </td>
   );
@@ -228,7 +228,7 @@ function Side({
     </td>
   );
   const cVol = (
-    <td key="vol" className="px-1 py-1 text-right text-slate-500">
+    <td key="vol" className="px-1 py-1 text-right text-muted-foreground">
       {leg.volume?.toLocaleString?.() ?? "—"}
     </td>
   );

@@ -11,11 +11,9 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   return (
     <>
       {legacy && <LegacyBanner />}
-      <div className="mx-auto max-w-7xl px-4 pb-10 pt-6 md:px-6">
-        <Navbar />
-        <main>{children}</main>
-        {legacy && <LegacyFooter />}
-      </div>
+      <Navbar />
+      <main className="mx-auto max-w-7xl px-4 pb-12 pt-6 md:px-6">{children}</main>
+      {legacy && <LegacyFooter />}
     </>
   );
 }

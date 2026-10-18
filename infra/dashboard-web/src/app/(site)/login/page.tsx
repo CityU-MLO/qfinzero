@@ -6,10 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Lock } from "lucide-react";
 
+import { Alert } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { auth, safeNext } from "@/lib/auth";
 
 const input =
-  "w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 function LoginForm() {
   const router = useRouter();
@@ -43,17 +46,17 @@ function LoginForm() {
   };
 
   return (
-    <div className="mx-auto flex max-w-md flex-col px-4 py-16 md:py-24">
-      <div className="rounded-2xl border bg-white/90 p-8 shadow-xl">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary text-primary">
-          <Lock className="h-5 w-5" />
-        </span>
-        <h1 className="mt-5 text-2xl font-bold tracking-tight">Sign in</h1>
+    <div className="mx-auto flex max-w-sm flex-col px-4 py-16 md:py-20">
+      <div className="rounded-lg border bg-card p-6">
+        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <Lock className="h-5 w-5 text-primary" />
+          Sign in
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">Use the account your administrator created.</p>
         {setupRequired && (
-          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            No accounts exist yet. <Link href="/setup" className="font-semibold underline">Create the first admin</Link>.
-          </p>
+          <Alert variant="warning" className="mt-4">
+            No accounts exist yet. <Link href="/setup" className="font-medium text-primary underline">Create the first admin</Link>.
+          </Alert>
         )}
         <form onSubmit={submit} className="mt-6 space-y-4">
           <label className="block text-sm font-medium">
@@ -66,9 +69,9 @@ function LoginForm() {
             <input className={`${input} mt-1.5`} type="password" autoComplete="current-password"
                    value={password} onChange={(e) => setPassword(e.target.value)} required />
           </label>
-          {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</p>}
+          {error && <Alert variant="error">{error}</Alert>}
           <button type="submit" disabled={busy}
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-60">
+                  className={cn(buttonVariants(), "w-full")}>
             {busy && <Loader2 className="h-4 w-4 animate-spin" />} Sign in
           </button>
         </form>
