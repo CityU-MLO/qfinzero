@@ -43,6 +43,7 @@ server = [
 
 [project.scripts]
 qfz-data = "qfinzero.pipeline.cli:main"
+qfz-research = "qfinzero.research.cli:main"
 qfz-server = "qfinzero.server.__main__:main"
 
 [project.urls]
@@ -55,6 +56,7 @@ packages = [
     "qfinzero.admin",
     "qfinzero.pipeline",
     "qfinzero.pipeline.sources",
+    "qfinzero.research",
     "qfinzero.update",
     "qfinzero.update.loaders",
     "qfinzero.server",

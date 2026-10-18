@@ -858,6 +858,135 @@ def esp_timeline(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# RESEARCH TOOLS — intraday factor mining over UPQ storage
+# ════════════════════════════════════════════════════════════════════════════
+
+RESEARCH_MAX_DAYS = int(os.environ.get("QFZ_RESEARCH_MAX_DAYS", "40"))
+RESEARCH_MAX_UNIVERSE = int(os.environ.get("QFZ_RESEARCH_MAX_UNIVERSE", "1000"))
+
+
+def _research_window(start: str, end: str, universe, as_of: Optional[str]):
+    """Validate limits and apply the time lock (end capped at as_of's date)."""
+    from datetime import date as _date
+    from qfinzero.research.data import valid_symbol
+    end = timelock.clamp_date(end, as_of) or end
+    if (_date.fromisoformat(end) - _date.fromisoformat(start)).days > RESEARCH_MAX_DAYS * 7 // 5 + 3:
+        raise ValueError(f"window too long (max ~{RESEARCH_MAX_DAYS} trading days)")
+    if isinstance(universe, list):
+        bad = [t for t in universe if not valid_symbol(t)]
+        if bad or len(universe) > RESEARCH_MAX_UNIVERSE:
+            raise ValueError(f"universe must be <= {RESEARCH_MAX_UNIVERSE} valid tickers")
+    elif not 1 <= int(universe) <= RESEARCH_MAX_UNIVERSE:
+        raise ValueError(f"universe size must be 1..{RESEARCH_MAX_UNIVERSE}")
+    as_of_ns = None
+    if as_of:
+        from datetime import datetime as _dt
+        as_of_ns = int(_dt.fromisoformat(as_of.replace("Z", "+00:00")).timestamp() * 1e9)
+    return end, as_of_ns
+
+
+@mcp.tool()
+def research_eval_factor(
+    expression: str,
+    start: str,
+    end: str,
+    universe: Optional[List[str]] = None,
+    top_n: int = 500,
+    horizons: Optional[List[int]] = None,
+    bar_minutes: int = 1,
+    session: Literal["regular", "extended"] = "regular",
+    cross_day: bool = False,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Evaluate an intraday factor: IC, rank IC, ICIR, t-stats, quantile returns,
+    long-short spread, turnover and IC by hour, for each forward horizon.
+
+    The factor is one expression over per-minute fields, e.g.
+    "cs_rank(-pct(close, 15))" or "ts_zscore(close - vwap, 60) * cs_rank(volume)".
+    Fields: open high low close volume transactions vwap ret minute
+    (+ bid ask mid spread imbalance when stock quotes exist).
+    Functions: ts_mean ts_sum ts_std ts_min ts_max ts_zscore (x, n);
+    ts_corr ts_cov (x, y, n); delay delta pct (x, n>=1); cs_rank cs_zscore
+    cs_demean (x); abs log sign sqrt; max min (a, b). Windows only look back and
+    reset each day unless cross_day. Signals trade at the next bar's open.
+
+    Args:
+        expression: the factor
+        start / end: YYYY-MM-DD trading-day range
+        universe: explicit tickers; default is top_n by prior-day dollar volume
+        top_n: size of the default universe (default 500)
+        horizons: forward horizons in bars (default [5, 15, 30])
+        bar_minutes: bar size (1, 5, 15, ...)
+        session: "regular" (default) or "extended" hours
+        cross_day: let time-series windows span days
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
+    """
+    from qfinzero.research import EvalConfig, evaluate_factor
+    as_of = _lock(ctx, session_id)
+    uni = universe or top_n
+    end, as_of_ns = _research_window(start, end, uni, as_of)
+    res = evaluate_factor(EvalConfig(
+        expression=expression, start=start, end=end, universe=uni,
+        horizons=horizons or [5, 15, 30], bar_minutes=bar_minutes, session=session,
+        cross_day=cross_day, as_of_ns=as_of_ns))
+    return json.dumps(res, default=str)
+
+
+@mcp.tool()
+def research_backtest(
+    expression: str,
+    start: str,
+    end: str,
+    universe: Optional[List[str]] = None,
+    top_n: int = 500,
+    rebalance: int = 15,
+    fraction: float = 0.1,
+    long_short: bool = True,
+    cost_bps: float = 0.5,
+    bar_minutes: int = 1,
+    session: Literal["regular", "extended"] = "regular",
+    cross_day: bool = False,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Backtest a factor as an intraday portfolio: every `rebalance` bars hold the
+    top (and short the bottom) `fraction` of names equal-weighted, enter at the
+    next bar's open, flat at the close. Costs: cost_bps per unit traded plus
+    half the quoted spread (2 bps assumed without quotes).
+
+    Returns total return, Sharpe (daily, annualised), max drawdown, hit rate,
+    turnover, gross vs cost, and the daily equity curve. Same expression
+    language as research_eval_factor.
+
+    Args:
+        expression: the factor
+        start / end: YYYY-MM-DD trading-day range
+        universe: explicit tickers; default is top_n by prior-day dollar volume
+        top_n: size of the default universe (default 500)
+        rebalance: bars between rebalances (default 15)
+        fraction: share of names held per side (default 0.1)
+        long_short: short the bottom fraction too (default true)
+        cost_bps: per-unit trading cost on top of the half-spread
+        bar_minutes: bar size (1, 5, 15, ...)
+        session: "regular" (default) or "extended" hours
+        cross_day: let time-series windows span days
+        session_id: Optional PMB session to time-lock this query to (data after
+            the session's current bar is hidden, enforced server-side).
+    """
+    from qfinzero.research import BacktestConfig, backtest_factor
+    as_of = _lock(ctx, session_id)
+    uni = universe or top_n
+    end, as_of_ns = _research_window(start, end, uni, as_of)
+    res = backtest_factor(BacktestConfig(
+        expression=expression, start=start, end=end, universe=uni, rebalance=rebalance,
+        fraction=fraction, long_short=long_short, cost_bps=cost_bps, bar_minutes=bar_minutes,
+        session=session, cross_day=cross_day, as_of_ns=as_of_ns))
+    return json.dumps(res, default=str)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # PMB TOOLS — Paper Money Broker (Trading Simulation)
 # ════════════════════════════════════════════════════════════════════════════
 
