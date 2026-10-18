@@ -120,10 +120,30 @@ DEFAULT_SPECS: dict[str, FutureSpec] = {s.root: s for s in (
 )}
 
 
-def resolve_spec(symbol: str, overrides: dict[str, FutureSpec] | None = None) -> FutureSpec | None:
-    """The spec of a contract or root: an account override, else a built-in one."""
+class FutureSpecOverride(BaseModel):
+    """Account-level changes to a root's spec: only the fields given replace the
+    built-in ones (a root without a built-in spec needs at least ``multiplier``)."""
+    name: Optional[str] = None
+    multiplier: Optional[float] = None
+    tick_size: Optional[float] = None
+    margin_rate: Optional[float] = None
+    maintenance_margin: Optional[float] = None
+    initial_ratio: Optional[float] = None
+    fee_per_contract: Optional[float] = None
+
+
+def resolve_spec(symbol: str, overrides: dict | None = None) -> FutureSpec | None:
+    """The spec of a contract or root: the built-in one with the account's
+    overrides applied, or the override alone for a root that is not built in."""
     root = root_of(symbol)
-    if overrides and root in overrides:
-        spec = overrides[root]
-        return spec if spec.root else spec.model_copy(update={"root": root})
-    return DEFAULT_SPECS.get(root)
+    base = DEFAULT_SPECS.get(root)
+    o = (overrides or {}).get(root)
+    if o is None:
+        return base
+    fields = {k: v for k, v in (o.model_dump() if hasattr(o, "model_dump") else dict(o)).items()
+              if v is not None and k != "root"}
+    if base is not None:
+        return base.model_copy(update=fields)
+    if "multiplier" not in fields:
+        return None
+    return FutureSpec(root=root, **fields)

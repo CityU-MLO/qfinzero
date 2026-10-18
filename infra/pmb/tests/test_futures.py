@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from domain.futures import DEFAULT_SPECS, FutureSpec, root_of, session_date_of
+from domain.futures import DEFAULT_SPECS, root_of, session_date_of
 from domain.ledger import Ledger
 from domain.margin_engine import MarginEngine
 from models.account import CreateAccountRequest, MarginConfig
@@ -68,9 +68,11 @@ def test_margin_per_contract_from_spec_or_override():
     eng = MarginEngine(MarginConfig())
     zn = DEFAULT_SPECS["ZN"]
     assert eng.future_initial_for_order("ZNZ6", 2, 110.0) == pytest.approx(2 * 110 * 1000 * zn.margin_rate * 1.1)
-    eng = MarginEngine(MarginConfig(future_specs={"ZN": FutureSpec(root="ZN", multiplier=1000,
-                                                                   tick_size=1 / 64, maintenance_margin=2000)}))
+    eng = MarginEngine(MarginConfig(future_specs={"ZN": {"maintenance_margin": 2000},
+                                                  "QQ": {"multiplier": 10, "margin_rate": 0.1}}))
     assert eng.future_initial_for_order("ZN", 1, 110.0) == pytest.approx(2200.0)
+    assert eng.future_spec("ZNZ6").multiplier == 1000            # the rest of the built-in spec is kept
+    assert eng.future_spec("QQZ6").multiplier == 10
     assert eng.future_spec("XYZ") is None
 
 

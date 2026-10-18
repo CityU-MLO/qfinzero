@@ -160,11 +160,14 @@ the notional at the last settlement, with `initial = maintenance ×
 initial_ratio` (1.10). Built-in specs cover the common CME contracts (ES, NQ,
 YM, RTY and their micros, CL, NG, RB, HO, GC, SI, HG, PL, ZT, ZF, ZN, TN, ZB,
 UB, 6E, 6J, 6B, 6A, 6C, ZC, ZS, ZW) with approximate rates. Set the real
-numbers per root in the account's `margin_config.future_specs`, for example
-`{"ZN": {"root": "ZN", "multiplier": 1000, "tick_size": 0.015625,
-"maintenance_margin": 2100}}`; an order on a root without a spec is refused.
+numbers per root when opening the account (*Broker → Open an account →
+Futures margin*) or in `margin_config.future_specs`: only the fields given
+replace the built-in ones, for example `{"ZN": {"maintenance_margin": 2100}}`
+(a root that is not built in needs at least `multiplier`). An order on a root
+without a spec is refused. `GET /v1/futures/specs` lists the built-in specs;
 `GET /v1/sessions/{id}/state` lists the session's specs with the margin per
-contract at the current price (`futures_specs`).
+contract at the current price (`futures_specs`). The account's stock leverage
+sets buying power: `equity / stock_initial − initial margin` (Reg-T 50% is 2×).
 
 Not modelled yet: contract expiry and rolls (front-month continuous series do
 not expire), exchange settlement prices other than the session's last trade,

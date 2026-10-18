@@ -239,10 +239,11 @@ class Ledger:
         maintenance_margin_req: float,
         margin_status: MarginStatus,
         open_orders: list,
+        leverage: float = 2.0,
     ) -> AccountSnapshotPayload:
         equity = self.total_equity()
         margin_excess = equity - maintenance_margin_req
-        buying_power = max(0.0, equity * 2 - initial_margin_req)
+        buying_power = max(0.0, equity * leverage - initial_margin_req)
 
         return AccountSnapshotPayload(
             cash_available=round(self._cash, 2),

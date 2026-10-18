@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any, Dict
 
-from domain.futures import FutureSpec
+from domain.futures import FutureSpecOverride
 
 from .enums import MarginStatus, Market, AccountStatus, Side
 
@@ -16,7 +16,7 @@ class MarginConfig(BaseModel):
     # futures (see domain/futures.py): per-root overrides of the built-in
     # contract specs, and how many settlements a margin call may stay open
     # before the futures are liquidated (0 = never liquidate)
-    future_specs: Dict[str, FutureSpec] = {}
+    future_specs: Dict[str, FutureSpecOverride] = {}
     future_margin_call_sessions: int = 1
 
 

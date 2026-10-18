@@ -150,6 +150,27 @@ def extent(root: Optional[Path] = None) -> dict[str, Any]:
     return out
 
 
+def days(start: str, end: str, root: Optional[Path] = None) -> dict[str, list[str]]:
+    """Dates with a partition, per level, in ``[start, end]`` (for date pickers)."""
+    root = root or _storage()
+    return {level: _dates(store, start, end, root) for level, store in LEVELS}
+
+
+def day(d: str, top: int = 12, root: Optional[Path] = None) -> dict[str, Any]:
+    """What one day has, per level: how many tickers (underlyings for options)
+    and the most traded ones."""
+    root = root or _storage()
+    out: dict[str, Any] = {"date": d, "levels": {}}
+    for level, store in LEVELS:
+        if not _partition(store, d, root).is_dir():
+            out["levels"][level] = None
+            continue
+        s = day_summary(store, d, root)
+        ranked = sorted(s.items(), key=lambda kv: -(kv[1].get("dollar_volume") or kv[1].get("volume") or kv[1]["rows"]))
+        out["levels"][level] = {"tickers": len(s), "top": [t for t, _ in ranked[:top]]}
+    return out
+
+
 def matrix(tickers: list[str], start: str, end: str, root: Optional[Path] = None) -> dict[str, Any]:
     """Availability per ticker and day.
 

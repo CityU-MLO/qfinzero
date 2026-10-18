@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 
 import { listAccounts, createSession, money, type AccountRow } from "./api";
+import { DataDatePicker } from "./data-date-picker";
 
 import { useT } from "@/components/locale-provider";
 
@@ -32,6 +33,27 @@ export function EnterPanel({
   const [symbols, setSymbols] = useState("SPY,QQQ,NVDA,AAPL");
   const [futureSyms, setFutureSyms] = useState("");
   const [futRange, setFutRange] = useState<{ start: string; end: string } | null>(null);
+  const [missing, setMissing] = useState<string[]>([]);
+
+  // which of the chosen tickers have no minute bars on the day
+  useEffect(() => {
+    const split = (v: string) => v.split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const stocks = split(symbols);
+    const futs = split(futureSyms);
+    const all = Array.from(new Set([...stocks, ...futs]));
+    if (!date || !all.length) { setMissing([]); return; }
+    const h = setTimeout(() => {
+      fetch(`/api/coverage/matrix?tickers=${encodeURIComponent(all.join(","))}&start=${date}&end=${date}&events=false`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((m: { cells?: Record<string, Record<string, Record<string, number>>> } | null) => {
+          if (!m?.cells) return setMissing([]);
+          const has = (tk: string, level: string) => Boolean(m.cells?.[tk]?.[date]?.[level]);
+          setMissing([...stocks.filter((tk) => !has(tk, "minute")), ...futs.filter((tk) => !has(tk, "futures_minute"))]);
+        })
+        .catch(() => setMissing([]));
+    }, 300);
+    return () => clearTimeout(h);
+  }, [date, symbols, futureSyms]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -137,26 +159,22 @@ export function EnterPanel({
           )}
         </label>
 
-        <label className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">{t("Trading day (start date)", "交易日（开始日期）")}</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className={inputCls}
-          />
+          <DataDatePicker value={date} onChange={setDate} onPick={(kind, tk) => {
+            const add = (cur: string) => {
+              const list = cur.split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
+              return list.includes(tk) ? cur : [...list, tk].join(",");
+            };
+            if (kind === "future") setFutureSyms(add); else setSymbols(add);
+          }} />
           <span className="text-xs text-muted-foreground">
             {t("The market opens on this date; you control the clock from there.", "市场在这一天开盘，之后的时钟由你控制。")}
             {minuteRange && (
               <> {t(`Minute data: ${minuteRange.start} → ${minuteRange.end}.`, `分钟数据范围：${minuteRange.start} → ${minuteRange.end}。`)}</>
             )}
           </span>
-          {minuteRange && date && (date < minuteRange.start || date > minuteRange.end) && (
-            <span className="text-xs text-warning">
-              {t("No minute bars on this date: the session will have nothing to trade.", "这一天没有分钟数据，会话中将无法交易。")}
-            </span>
-          )}
-        </label>
+        </div>
 
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-foreground">{t("Watchlist", "自选")}</span>
@@ -184,6 +202,13 @@ export function EnterPanel({
           </span>
         </label>
       </div>
+
+      {missing.length > 0 && (
+        <div className="mt-5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-warning">
+          {t(`No minute bars on ${date} for ${missing.join(", ")}: they will not trade in this session.`,
+            `${date} 没有 ${missing.join("、")} 的分钟数据，这些代码在本次会话中无法交易。`)}
+        </div>
+      )}
 
       {err && (
         <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

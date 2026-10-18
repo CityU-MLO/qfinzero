@@ -329,6 +329,7 @@ class AccountService:
             "num_trades_today": len(account.trades_today),
             "trades_today": [t.model_dump() for t in account.trades_today],
             "history_days": len(account.history),
+            "margin_config": account.margin_config.model_dump(exclude_none=True),
         }
 
     def history_view(self, account_id: str, limit: int | None = None) -> list[dict] | None:

@@ -82,3 +82,13 @@ def test_suggest_and_limits(root):
 def test_service_error_messages_are_unwrapped():
     assert C._msg(RuntimeError("{'detail': 'News store unavailable'}")) == "News store unavailable"
     assert C._msg(RuntimeError("plain")) == "plain"
+
+
+def test_days_and_day_summary_for_date_pickers(root):
+    ds = C.days(str(DAYS[0]), str(DAYS[-1]), root)
+    assert ds["daily"] == [str(d) for d in DAYS]
+    assert set(map(str, MINUTE_WINDOW)) <= set(ds["minute"])
+    assert ds["futures_minute"] == []
+    d = C.day(str(MINUTE_WINDOW[3]), top=3, root=root)
+    assert d["levels"]["minute"]["tickers"] >= 3 and len(d["levels"]["minute"]["top"]) == 3
+    assert d["levels"]["futures_minute"] is None

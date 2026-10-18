@@ -135,7 +135,21 @@ export interface FullState {
 export interface AllocateParams {
   initial_cash: number;
   market: string;
-  margin_config?: Record<string, number>;
+  margin_config?: Record<string, unknown>;
+}
+
+export interface FutureSpecRow {
+  root: string;
+  name: string;
+  multiplier: number;
+  tick_size: number;
+  margin_rate: number;
+  maintenance_margin: number | null;
+  initial_ratio: number;
+}
+
+export function futuresSpecs() {
+  return req<{ specs: FutureSpecRow[] }>("/futures/specs");
 }
 
 export function listAccounts() {

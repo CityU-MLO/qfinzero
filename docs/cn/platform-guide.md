@@ -127,9 +127,10 @@ step 的返回结果会带上 `clock.segment` 和 `clock.trading_date`。
 每手保证金来自合约规格：固定的 `maintenance_margin`（美元，即交易所公布的数值），或按上次结算价名义价值的
 `margin_rate` 计算；`初始 = 维持 × initial_ratio`（1.10）。内置规格覆盖常见 CME 合约（ES、NQ、YM、RTY 及其微型合约，
 CL、NG、RB、HO、GC、SI、HG、PL、ZT、ZF、ZN、TN、ZB、UB、6E、6J、6B、6A、6C、ZC、ZS、ZW），费率为近似值。
-请在账户的 `margin_config.future_specs` 中按品种设置真实数值，例如
-`{"ZN": {"root": "ZN", "multiplier": 1000, "tick_size": 0.015625, "maintenance_margin": 2100}}`；没有规格的品种会被拒单。
-`GET /v1/sessions/{id}/state` 的 `futures_specs` 列出会话中各合约的规格和按当前价格计算的每手保证金。
+请在开户时（*模拟交易 → 开立账户 → 期货保证金*）或在 `margin_config.future_specs` 中按品种设置真实数值：
+只替换给出的字段，例如 `{"ZN": {"maintenance_margin": 2100}}`（不在内置列表中的品种至少要给出 `multiplier`）。
+没有规格的品种会被拒单。`GET /v1/futures/specs` 列出内置规格；`GET /v1/sessions/{id}/state` 的 `futures_specs`
+列出会话中各合约的规格和按当前价格计算的每手保证金。账户的股票杠杆决定购买力：`权益 / stock_initial − 初始保证金`（Reg-T 50% 即 2 倍）。
 
 暂未模拟：合约到期与移仓（主力连续序列不会到期）、交易所结算价（目前用时段最后成交价），以及跨品种价差的保证金减免。
 

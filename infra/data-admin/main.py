@@ -302,6 +302,18 @@ def coverage_cell(ticker: str = Query(...), date: str = Query(...)) -> dict:
     return out
 
 
+@app.get("/coverage/days")
+def coverage_days(start: str = Query(...), end: str = Query(...)) -> dict:
+    from qfinzero.admin import coverage
+    return {"days": coverage.days(start, end)}
+
+
+@app.get("/coverage/day")
+def coverage_day(date: str = Query(...)) -> dict:
+    from qfinzero.admin import coverage
+    return coverage.day(date)
+
+
 @app.get("/coverage/suggest")
 def coverage_suggest(q: str = "", limit: int = 20) -> dict:
     from qfinzero.admin import coverage

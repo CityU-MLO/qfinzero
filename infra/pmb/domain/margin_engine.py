@@ -127,8 +127,13 @@ class MarginEngine:
                     total += mv * self._config.option_short_b
         return total
 
+    @property
+    def leverage(self) -> float:
+        """Stock buying power per dollar of equity: 1 / initial margin (Reg-T 50% -> 2x)."""
+        return 1.0 / self._config.stock_initial if self._config.stock_initial > 0 else 1.0
+
     def buying_power(self, equity: float, initial_margin: float) -> float:
-        return max(0.0, equity * 2 - initial_margin)
+        return max(0.0, equity * self.leverage - initial_margin)
 
     def check_maintenance(
         self, equity: float, positions: dict[str, Position]

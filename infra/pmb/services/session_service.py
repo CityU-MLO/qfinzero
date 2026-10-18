@@ -756,6 +756,7 @@ class SessionService:
             maintenance_margin_req=mm,
             margin_status=state.margin_engine.margin_status,
             open_orders=open_orders_data,
+            leverage=state.margin_engine.leverage,
         )
 
         snapshot_event = EventEnvelope(
@@ -1312,7 +1313,7 @@ class SessionService:
             for o in state.order_manager.get_open_orders()
         ]
         snapshot = state.ledger.get_snapshot(
-            im, mm, state.margin_engine.margin_status, open_orders
+            im, mm, state.margin_engine.margin_status, open_orders, leverage=state.margin_engine.leverage
         )
 
         return {

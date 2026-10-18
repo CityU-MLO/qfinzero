@@ -3,6 +3,13 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter(tags=["market"])
 
 
+@router.get("/v1/futures/specs")
+async def futures_specs():
+    """Built-in futures contract specs (override per root in margin_config.future_specs)."""
+    from domain.futures import DEFAULT_SPECS
+    return {"specs": [s.model_dump() for s in DEFAULT_SPECS.values()]}
+
+
 @router.get("/v1/sessions/{session_id}/market")
 async def get_market_snapshot(session_id: str, request: Request):
     session_svc = request.app.state.session_service
