@@ -503,6 +503,126 @@ def upq_future_quote(
         return json.dumps(client.future_quote(tickers, start, end, roots=roots, limit=limit, as_of=as_of))
 
 
+
+@mcp.tool()
+def upq_crypto_minute(
+    tickers: list[str],
+    start: str,
+    end: str,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Crypto minute bars (massive global crypto, e.g. BTC-USD, ETH-USD, SOL-USD).
+
+    Rows: ticker, base, quote, window_start (ns since epoch), open, high, low,
+    close, volume (in the base coin), transactions.
+
+    Args:
+        tickers: Pairs, e.g. ["BTC-USD", "ETH-USD"]
+        start: ISO datetime (UTC), e.g. "2026-02-24T00:00:00"
+        end: ISO datetime (UTC)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.crypto_minute(tickers, start, end, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
+def upq_crypto_daily(
+    tickers: list[str],
+    start: str,
+    end: str,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Crypto daily bars by UTC day; day D is final at 00:00 UTC on D+1.
+
+    Args:
+        tickers: Pairs, e.g. ["BTC-USD"]
+        start: Date "YYYY-MM-DD"
+        end: Date "YYYY-MM-DD"
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.crypto_daily(tickers, start, end, as_of=as_of))
+
+
+@mcp.tool()
+def upq_fx_minute(
+    tickers: list[str],
+    start: str,
+    end: str,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """FX minute bars (massive global forex, about 1,200 pairs: EUR-USD, USD-JPY, ...).
+
+    Rows: ticker, base, quote, window_start (ns), open, high, low, close,
+    volume (the number of quotes in the minute), transactions.
+
+    Args:
+        tickers: Pairs, e.g. ["EUR-USD", "USD-JPY"]
+        start: ISO datetime (UTC)
+        end: ISO datetime (UTC)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.fx_minute(tickers, start, end, limit=limit, as_of=as_of))
+
+
+@mcp.tool()
+def upq_fx_daily(
+    tickers: list[str],
+    start: str,
+    end: str,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """FX daily bars by UTC day; day D is final at 00:00 UTC on D+1.
+
+    Args:
+        tickers: Pairs, e.g. ["EUR-USD"]
+        start: Date "YYYY-MM-DD"
+        end: Date "YYYY-MM-DD"
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.fx_daily(tickers, start, end, as_of=as_of))
+
+
+@mcp.tool()
+def upq_fx_quote(
+    tickers: list[str],
+    start: str,
+    end: str,
+    limit: int = 10000,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """FX bid and ask. Each row is the last quote of the minute ``window_start``;
+    minutes without a row keep the previous quote (the store may also be sampled
+    every 5-60 minutes). massive FX quotes carry no sizes.
+
+    Args:
+        tickers: Pairs, e.g. ["EUR-USD"]
+        start: ISO datetime (UTC)
+        end: ISO datetime (UTC)
+        limit: Max rows (default 10000)
+        session_id: Optional PMB session to time-lock this query to.
+    """
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        return json.dumps(client.fx_quote(tickers, start, end, limit=limit, as_of=as_of))
+
+
 @mcp.tool()
 def upq_option_quote(
     contract: str,

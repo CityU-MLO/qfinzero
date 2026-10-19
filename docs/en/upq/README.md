@@ -34,6 +34,14 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 | `/stock/quote` | GET | Stock minute NBBO (bid/ask price and size) |
 | `/option/quote` | GET | Option contract minute NBBO |
 | `/option/chain_snapshot` | GET | Intraday option chain at a moment: last trade, volume so far, bid/ask/mid, Greeks |
+| `/future` | GET | Futures minute bars (contracts or roots) |
+| `/future/daily` | GET | Futures daily bars per CME session, with `settle` |
+| `/future/quote` | GET | Futures minute top of book |
+| `/crypto` | GET | Crypto minute bars (`BTC-USD`, UTC) |
+| `/crypto/daily` | GET | Crypto daily bars by UTC day |
+| `/fx` | GET | FX minute bars (`EUR-USD`, UTC) |
+| `/fx/daily` | GET | FX daily bars by UTC day |
+| `/fx/quote` | GET | FX minute bid/ask |
 | `/health/freshness` | GET | Latest partition and row counts per store |
 
 Every data endpoint also takes `as_of` (ISO datetime or nanoseconds) and

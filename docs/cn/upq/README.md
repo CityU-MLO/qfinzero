@@ -33,6 +33,14 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 | `/stock/quote` | GET | 股票分钟 NBBO（买卖价和数量） |
 | `/option/quote` | GET | 期权合约分钟 NBBO |
 | `/option/chain_snapshot` | GET | 某一时刻的日内期权链：最近成交、当日成交量、买卖价/中间价、Greeks |
+| `/future` | GET | 期货分钟线（合约或品种） |
+| `/future/daily` | GET | 按 CME 交易时段的期货日线，含 `settle` |
+| `/future/quote` | GET | 期货分钟最优买卖价 |
+| `/crypto` | GET | 加密货币分钟线（`BTC-USD`，UTC） |
+| `/crypto/daily` | GET | 按 UTC 日的加密货币日线 |
+| `/fx` | GET | 外汇分钟线（`EUR-USD`，UTC） |
+| `/fx/daily` | GET | 按 UTC 日的外汇日线 |
+| `/fx/quote` | GET | 外汇分钟买卖价 |
 | `/health/freshness` | GET | 各存储的最新分区和行数 |
 
 所有数据接口都接受 `as_of`（ISO 时间或纳秒），只返回该时刻已经确定的数据。服务级上限用 `UPQ_AS_OF` 设置，详见[平台指南](../platform-guide.md#1-时间锁)。

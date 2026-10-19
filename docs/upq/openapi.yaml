@@ -742,8 +742,349 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/QuoteRecord'}
+  /crypto:
+    get:
+      summary: Crypto Minute Bars
+      description: |
+        Minute bars of crypto pairs (massive global crypto). Days are UTC days.
+      operationId: getCryptoMinute
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.
+          schema:
+            type: string
+            example: "BTC-USD,ETH-USD"
+        - name: start
+          in: query
+          required: true
+          description: Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T00:00:00"
+        - name: end
+          in: query
+          required: true
+          description: End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T01:00:00"
+        - name: limit
+          in: query
+          required: false
+          description: Max rows (1-100000, default 10000)
+          schema:
+            type: integer
+            default: 10000
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated columns to return
+          schema:
+            type: string
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows ordered by pair and time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PairBar'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /crypto/daily:
+    get:
+      summary: Crypto Daily Bars
+      description: |
+        Daily bars of crypto pairs by UTC day; volume is in the base coin.
+      operationId: getCryptoDaily
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.
+          schema:
+            type: string
+            example: "BTC-USD"
+        - name: start
+          in: query
+          required: true
+          description: Start, Date (YYYY-MM-DD, UTC day)
+          schema:
+            type: string
+            format: date
+            example: "2026-02-02"
+        - name: end
+          in: query
+          required: true
+          description: End, Date (YYYY-MM-DD, UTC day)
+          schema:
+            type: string
+            format: date
+            example: "2026-02-24"
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated columns to return
+          schema:
+            type: string
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows ordered by pair and time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PairDailyBar'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /fx:
+    get:
+      summary: FX Minute Bars
+      description: |
+        Minute bars of FX pairs (massive global forex, about 1,200 pairs). Volume counts the quotes in the minute.
+      operationId: getFxMinute
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.
+          schema:
+            type: string
+            example: "EUR-USD,USD-JPY"
+        - name: start
+          in: query
+          required: true
+          description: Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T00:00:00"
+        - name: end
+          in: query
+          required: true
+          description: End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T01:00:00"
+        - name: limit
+          in: query
+          required: false
+          description: Max rows (1-100000, default 10000)
+          schema:
+            type: integer
+            default: 10000
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated columns to return
+          schema:
+            type: string
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows ordered by pair and time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PairBar'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /fx/daily:
+    get:
+      summary: FX Daily Bars
+      description: |
+        Daily bars of FX pairs by UTC day.
+      operationId: getFxDaily
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.
+          schema:
+            type: string
+            example: "EUR-USD"
+        - name: start
+          in: query
+          required: true
+          description: Start, Date (YYYY-MM-DD, UTC day)
+          schema:
+            type: string
+            format: date
+            example: "2026-02-02"
+        - name: end
+          in: query
+          required: true
+          description: End, Date (YYYY-MM-DD, UTC day)
+          schema:
+            type: string
+            format: date
+            example: "2026-02-24"
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated columns to return
+          schema:
+            type: string
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows ordered by pair and time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PairDailyBar'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /fx/quote:
+    get:
+      summary: FX Quotes
+      description: |
+        FX bid and ask at the end of each kept minute; minutes without a row keep the previous quote. massive FX quotes carry no sizes.
+      operationId: getFxQuote
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.
+          schema:
+            type: string
+            example: "EUR-USD"
+        - name: start
+          in: query
+          required: true
+          description: Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T00:00:00"
+        - name: end
+          in: query
+          required: true
+          description: End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)
+          schema:
+            type: string
+            format: date-time
+            example: "2026-02-24T01:00:00"
+        - name: limit
+          in: query
+          required: false
+          description: Max rows (1-100000, default 10000)
+          schema:
+            type: integer
+            default: 10000
+        - name: fields
+          in: query
+          required: false
+          description: Comma-separated columns to return
+          schema:
+            type: string
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows ordered by pair and time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FxQuote'
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
+    PairBar:
+      type: object
+      properties:
+        ticker: {type: string, example: BTC-USD}
+        base: {type: string, example: BTC}
+        quote: {type: string, example: USD}
+        window_start: {type: integer, format: int64, description: Minute start, ns since the Unix epoch (UTC), example: 1771891200000000000}
+        open: {type: number, example: 64624.1}
+        high: {type: number, example: 64650.0}
+        low: {type: number, example: 64600.2}
+        close: {type: number, example: 64640.5}
+        volume: {type: number, example: 12.84}
+        transactions: {type: integer, example: 311}
+    PairDailyBar:
+      type: object
+      properties:
+        ticker: {type: string, example: BTC-USD}
+        base: {type: string, example: BTC}
+        quote: {type: string, example: USD}
+        date: {type: string, format: date, example: "2026-02-24"}
+        open: {type: number, example: 64624.1}
+        high: {type: number, example: 65094.0}
+        low: {type: number, example: 62500.0}
+        close: {type: number, example: 64061.9}
+        volume: {type: number, example: 20134.07}
+        transactions: {type: integer, example: 930852}
+    FxQuote:
+      type: object
+      properties:
+        ticker: {type: string, example: EUR-USD}
+        base: {type: string, example: EUR}
+        quote: {type: string, example: USD}
+        window_start: {type: integer, format: int64, example: 1771804800000000000}
+        bid_price: {type: number, example: 1.183}
+        ask_price: {type: number, example: 1.18308}
     FutureMinuteRecord:
       type: object
       properties:

@@ -28,7 +28,7 @@ def default_quote_intervals() -> dict[str, int]:
     """Quote sampling per asset: ``QFZ_{STOCK,OPTION,FUTURE}_QUOTE_INTERVAL`` or
     the data setup setting (``quotes.<asset>_interval_min``), else 1 minute.
     Persisted so scheduled updates keep the interval a store was built with."""
-    out = {"stock": 1, "option": 1, "future": 1}
+    out = {"stock": 1, "option": 1, "future": 1, "fx": 1}
     try:
         from qfinzero.admin import config_store
         q = config_store.load().get("quotes", {}) or {}
@@ -76,7 +76,7 @@ class Converter:
 
     # ── per-date massive stores (stock/option day & minute) ─────────────
 
-    def _convert_dated(self, store, root, sql_fn, start, end, force) -> ConvertResult:
+    def _convert_dated(self, store, root, sql_fn, start, end, force, refilter=True) -> ConvertResult:
         res = ConvertResult(store)
         refiltered = 0
         for f in massive.list_dated_files(root, start, end):
@@ -87,7 +87,7 @@ class Converter:
             rows = copy_to_parquet(self.con, sql_fn(f.path, f.trade_date), out)
             self.manifest.record(store, f.trade_date, f.path, rows)
             # keep Databento fill-only: drop tickers this vendor now covers
-            if databento.refilter_part(self.con, out.parent) is not None:
+            if refilter and databento.refilter_part(self.con, out.parent) is not None:
                 refiltered += 1
             res.partitions += 1
             res.rows += rows
@@ -110,6 +110,61 @@ class Converter:
     def convert_us_option_minute(self, start=None, end=None, force=False) -> ConvertResult:
         return self._convert_dated("option_minute", self.p.massive_option_minute,
                                    massive.option_minute_sql, start, end, force)
+
+    # ── crypto and FX (massive global flat files, UTC days) ─────────────
+
+    # First conversions of the large stores keep to recent history unless a
+    # start is given (``qfz-data convert --asset fx --resolution minute --start 2014-01-01``).
+    RECENT_DAYS = {"crypto_minute": 400, "fx_minute": 400, "fx_quote_minute": 60}
+
+    def _recent(self, store: str, root, start):
+        if start or store not in self.RECENT_DAYS:
+            return start
+        files = massive.list_dated_files(root, None, None)
+        if not files:
+            return start
+        from datetime import date, timedelta
+        return (date.fromisoformat(files[-1].trade_date) - timedelta(days=self.RECENT_DAYS[store])).isoformat()
+
+    def convert_crypto_daily(self, start=None, end=None, force=False) -> ConvertResult:
+        return self._convert_dated("crypto_daily", self.p.massive_crypto_day, massive.pair_daily_sql,
+                                   start, end, force, refilter=False)
+
+    def convert_crypto_minute(self, start=None, end=None, force=False) -> ConvertResult:
+        root = self.p.massive_crypto_minute
+        return self._convert_dated("crypto_minute", root, massive.pair_minute_sql,
+                                   self._recent("crypto_minute", root, start), end, force, refilter=False)
+
+    def convert_fx_daily(self, start=None, end=None, force=False) -> ConvertResult:
+        return self._convert_dated("fx_daily", self.p.massive_fx_day, massive.pair_daily_sql,
+                                   start, end, force, refilter=False)
+
+    def convert_fx_minute(self, start=None, end=None, force=False) -> ConvertResult:
+        root = self.p.massive_fx_minute
+        return self._convert_dated("fx_minute", root, massive.pair_minute_sql,
+                                   self._recent("fx_minute", root, start), end, force, refilter=False)
+
+    def convert_fx_quotes(self, start=None, end=None, force=False, interval: int | None = None) -> ConvertResult:
+        """massive FX quotes -> ``fx_quote_minute``, sampled every ``interval``
+        minutes (the ``fx`` quote interval, default 1)."""
+        store, root = "fx_quote_minute", self.p.massive_fx_quotes
+        interval = databento.check_interval(interval or default_quote_intervals().get("fx", 1))
+        res = ConvertResult(store)
+        for f in massive.list_dated_files(root, self._recent(store, root, start), end):
+            fp = databento.fingerprint([f.path]) + f"|q{interval}m"
+            mkey = f"massive:{store}/{f.trade_date}"
+            if not force and self.manifest.fp_current(mkey, fp):
+                res.skipped += 1
+                continue
+            out = self.p.partition(store, f.trade_date) / "part-0000.parquet"
+            rows = copy_to_parquet(self.con, massive.fx_quote_sql(f.path, f.trade_date, interval), out)
+            self.manifest.put(mkey, {"fp": fp, "rows": rows, "inputs": 1, "trade_date": f.trade_date,
+                                     "store": store, "interval_min": interval})
+            res.partitions += 1
+            res.rows += rows
+        if interval != 1:
+            res.notes.append(f"sampled every {interval} min")
+        return res
 
     def convert_us_quotes(self, asset: str, start=None, end=None, force=False,
                           interval: int | None = None) -> ConvertResult:

@@ -240,7 +240,7 @@ export function streamJobLogs(
 // ── data setup utility ─────────────────────────────────────────────────────
 
 export type Vendor = "databento" | "massive";
-export type QuoteIntervals = { stock: number; option: number; future: number };
+export type QuoteIntervals = { stock: number; option: number; future: number; fx?: number };
 export const QUOTE_INTERVALS = [1, 5, 15, 30, 60] as const;
 
 export type SetupStatus = {

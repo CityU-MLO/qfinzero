@@ -125,6 +125,24 @@ pub fn session_date_bounds(start_ns: i64, end_ns: i64) -> Option<(String, String
     )
 }
 
+/// UTC calendar date of a timestamp.
+pub fn utc_date(ns: i64) -> Option<NaiveDate> {
+    DateTime::from_timestamp(ns.div_euclid(1_000_000_000), 0).map(|d| d.date_naive())
+}
+
+/// UTC date strings bounding a window: crypto and FX partitions are UTC days.
+pub fn utc_date_bounds(start_ns: i64, end_ns: i64) -> Option<(String, String)> {
+    let a = utc_date(start_ns)?;
+    let b = utc_date(end_ns)?;
+    Some((a.format("%Y-%m-%d").to_string(), b.format("%Y-%m-%d").to_string()))
+}
+
+/// Last UTC day whose daily bar is final at `as_of` (the day before `as_of`'s
+/// UTC date: day D closes at 00:00 UTC of D+1).
+pub fn utc_daily_cap_date(as_of: i64) -> Option<NaiveDate> {
+    utc_date(as_of)?.checked_sub_signed(Duration::days(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

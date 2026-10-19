@@ -410,6 +410,40 @@ class UPQClient:
         return self._get("/future/quote", self._future_params(tickers, roots, start, end, limit=limit,
                                                               as_of=as_of))
 
+    # ── Crypto and FX (UTC days; pairs like "BTC-USD", "EUR-USD") ─────────
+
+    @staticmethod
+    def _pair_params(tickers, start, end, **extra) -> dict:
+        params = {"tickers": ",".join(tickers) if isinstance(tickers, (list, tuple)) else tickers,
+                  "start": start, "end": end}
+        params.update({k: v for k, v in extra.items() if v is not None})
+        return params
+
+    def crypto_minute(self, tickers: list[str], start: str, end: str, fields: str = None,
+                      limit: int = None, as_of: str = None) -> list[dict]:
+        """Crypto minute bars: ticker, base, quote, window_start (ns), OHLCV, transactions."""
+        return self._get("/crypto", self._pair_params(tickers, start, end, fields=fields, limit=limit, as_of=as_of))
+
+    def crypto_daily(self, tickers: list[str], start: str, end: str, fields: str = None,
+                     as_of: str = None) -> list[dict]:
+        """Crypto daily bars by UTC day (final at 00:00 UTC of the next day)."""
+        return self._get("/crypto/daily", self._pair_params(tickers, start, end, fields=fields, as_of=as_of))
+
+    def fx_minute(self, tickers: list[str], start: str, end: str, fields: str = None,
+                  limit: int = None, as_of: str = None) -> list[dict]:
+        """FX minute bars (mid prices; volume counts quotes)."""
+        return self._get("/fx", self._pair_params(tickers, start, end, fields=fields, limit=limit, as_of=as_of))
+
+    def fx_daily(self, tickers: list[str], start: str, end: str, fields: str = None,
+                 as_of: str = None) -> list[dict]:
+        """FX daily bars by UTC day."""
+        return self._get("/fx/daily", self._pair_params(tickers, start, end, fields=fields, as_of=as_of))
+
+    def fx_quote(self, tickers: list[str], start: str, end: str, limit: int = None,
+                 as_of: str = None) -> list[dict]:
+        """FX bid/ask at the end of each kept minute (carry the previous row forward)."""
+        return self._get("/fx/quote", self._pair_params(tickers, start, end, limit=limit, as_of=as_of))
+
     # ── Utilities ─────────────────────────────────────────────────
 
     @staticmethod

@@ -110,6 +110,20 @@ def _do_convert(args) -> int:
                                                         intervals["option"]))
             if want_asset("rates"):
                 results.append(cv.convert_rates(args.force))
+        if market in (None, "global") and "massive" in vendors:
+            if want_asset("crypto"):
+                if args.resolution in (None, "daily"):
+                    results.append(cv.convert_crypto_daily(args.start, args.end, args.force))
+                if args.resolution in (None, "minute"):
+                    results.append(cv.convert_crypto_minute(args.start, args.end, args.force))
+            if want_asset("fx"):
+                if args.resolution in (None, "daily"):
+                    results.append(cv.convert_fx_daily(args.start, args.end, args.force))
+                if args.resolution in (None, "minute"):
+                    results.append(cv.convert_fx_minute(args.start, args.end, args.force))
+                if args.resolution in (None, "quotes"):
+                    results.append(cv.convert_fx_quotes(args.start, args.end, args.force,
+                                                        args.fx_quote_interval or args.quote_interval))
         if market in (None, "us") and "databento" in vendors:
             # Databento fills tickers massive did not write, so it runs after it.
             # ``--vendor databento`` alone means "all Databento assets".
@@ -330,14 +344,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=_print_status)
 
     c = sub.add_parser("convert", help="convert raw data into UPQ storage")
-    c.add_argument("--market", choices=["us", "cn"], default=None)
-    c.add_argument("--asset", choices=["stock", "option", "future", "rates", "corp"], default=None)
+    c.add_argument("--market", choices=["us", "cn", "global"], default=None)
+    c.add_argument("--asset", choices=["stock", "option", "future", "crypto", "fx", "rates", "corp"], default=None)
     c.add_argument("--resolution", choices=["daily", "minute", "quotes"], default=None)
     c.add_argument("--quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None,
                    help="keep one NBBO per N minutes in the quote stores (default 1)")
     c.add_argument("--stock-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
     c.add_argument("--option-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
     c.add_argument("--future-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
+    c.add_argument("--fx-quote-interval", type=int, choices=[1, 5, 15, 30, 60], default=None)
     c.add_argument("--start", help="YYYY-MM-DD inclusive")
     c.add_argument("--end", help="YYYY-MM-DD inclusive")
     c.add_argument("--all", action="store_true", help="convert all assets for the market(s)")

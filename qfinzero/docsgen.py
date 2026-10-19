@@ -34,9 +34,10 @@ SERVICES: dict[str, dict[str, Any]] = {
     "upq": {
         "title": {"en": "Market data (UPQ)", "zh": "行情数据（UPQ）"},
         "base": "/svc/upq", "scope": "market-data",
-        "summary": {"en": "Bars, quotes, option chains, futures, rates and dividends from the QFZ store.",
-                    "zh": "来自 QFZ 存储的 K 线、报价、期权链、期货、利率和分红。"},
+        "summary": {"en": "Bars, quotes, option chains, futures, crypto, FX, rates and dividends from the QFZ store.",
+                    "zh": "来自 QFZ 存储的 K 线、报价、期权链、期货、加密货币、外汇、利率和分红。"},
         "groups": [("Stocks", ("/stock",)), ("Options", ("/option",)), ("Futures", ("/future",)),
+                   ("Crypto", ("/crypto",)), ("FX", ("/fx",)),
                    ("Rates and dividends", ("/rates", "/dividends")), ("Service", ("/health",))],
     },
     "esp": {
@@ -57,7 +58,7 @@ SERVICES: dict[str, dict[str, Any]] = {
     },
 }
 
-MCP_GROUPS = [("upq_", "Market data"), ("research_", "Research"), ("esp_", "Events and news"),
+MCP_GROUPS = [("upq_crypto", "Crypto"), ("upq_fx", "FX"), ("upq_", "Market data"), ("research_", "Research"), ("esp_", "Events and news"),
               ("pmb_", "Paper broker")]
 
 METHODS = ("get", "post", "put", "patch", "delete")

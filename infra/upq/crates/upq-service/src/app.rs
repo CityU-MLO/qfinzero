@@ -201,6 +201,11 @@ pub fn build_router_with_storage_root(storage_root: impl Into<PathBuf>) -> Route
         .route("/future", get(future_minute))
         .route("/future/daily", get(future_daily))
         .route("/future/quote", get(future_quote))
+        .route("/crypto", get(crypto_minute))
+        .route("/crypto/daily", get(crypto_daily))
+        .route("/fx", get(fx_minute))
+        .route("/fx/daily", get(fx_daily))
+        .route("/fx/quote", get(fx_quote))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO))
@@ -1610,6 +1615,189 @@ async fn future_daily(
         Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
         Err(error) => internal_error(error),
     }
+}
+
+// ── crypto and FX pairs ───────────────────────────────────────────────────
+//
+// `crypto_*` and `fx_*` hold massive's global flat files: pairs stored as
+// `BTC-USD` / `EUR-USD` (with `base` and `quote`), partitioned by the UTC day
+// because both markets trade around the clock. A UTC day's daily bar is final
+// at 00:00 UTC of the next day.
+
+#[derive(Debug, Deserialize)]
+struct PairQuery {
+    tickers: String,
+    start: String,
+    end: String,
+    fields: Option<String>,
+    limit: Option<usize>,
+    as_of: Option<String>,
+}
+
+/// `BTC-USD`, `btcusd`, `X:BTC-USD`, `EUR/USD`, `EURUSD` -> `BTC-USD` / `EUR-USD`.
+fn normalize_pair(raw: &str) -> String {
+    let mut t = raw.trim().to_ascii_uppercase();
+    if t.len() > 2 && t.as_bytes()[1] == b':' {
+        t = t[2..].to_string();
+    }
+    let t = t.replace(['/', '_'], "-");
+    if !t.contains('-') && t.len() == 6 && t.chars().all(|c| c.is_ascii_alphabetic()) {
+        return format!("{}-{}", &t[..3], &t[3..]);
+    }
+    t
+}
+
+fn pair_filter(tickers: &str) -> Result<String, &'static str> {
+    let list: Vec<String> = parse_csv_list(tickers).iter().map(|t| normalize_pair(t)).collect();
+    if list.is_empty() {
+        return Err("tickers must not be empty");
+    }
+    Ok(format!(
+        "ticker IN ({})",
+        list.iter().map(|x| sql_quote(x)).collect::<Vec<_>>().join(", ")
+    ))
+}
+
+async fn pair_series(
+    state: &AppState,
+    params: &PairQuery,
+    store: &str,
+    projection: &str,
+) -> axum::response::Response {
+    let limit = match future_limit(params.limit) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let symbols = match pair_filter(&params.tickers) {
+        Ok(f) => f,
+        Err(m) => return invalid_argument(m),
+    };
+    let (start_ns, end_ns, start_date, end_date) = match window_with(
+        state,
+        &params.start,
+        &params.end,
+        params.as_of.as_deref(),
+        as_of::utc_date_bounds,
+    ) {
+        Ok(Some(w)) => w,
+        Ok(None) => return (StatusCode::OK, Json(json!([]))).into_response(),
+        Err(response) => return response,
+    };
+    let dataset_dir = state.storage_root.join(store);
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let sql = format!(
+        "SELECT {projection} FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
+         AND {symbols} AND window_start >= {start_ns} AND window_start <= {end_ns} \
+         ORDER BY ticker, window_start LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+const PAIR_BAR_DEFAULT: [&str; 10] = [
+    "ticker", "base", "quote", "window_start", "open", "high", "low", "close", "volume", "transactions",
+];
+const PAIR_BAR_ALLOW: [&str; 11] = [
+    "ticker", "base", "quote", "window_start", "open", "high", "low", "close", "volume", "transactions",
+    "trade_date",
+];
+
+async fn pair_minute(state: &AppState, params: &PairQuery, store: &str) -> axum::response::Response {
+    let projection = match parse_projection(params.fields.as_deref(), &PAIR_BAR_DEFAULT, &PAIR_BAR_ALLOW) {
+        Ok(p) => p,
+        Err(m) => return invalid_argument(m),
+    };
+    pair_series(state, params, store, &projection).await
+}
+
+async fn pair_daily(state: &AppState, params: &PairQuery, store: &str) -> axum::response::Response {
+    if validate_date(&params.start).is_err() || validate_date(&params.end).is_err() {
+        return invalid_argument("start/end must be date: YYYY-MM-DD");
+    }
+    let limit = match future_limit(params.limit) {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let symbols = match pair_filter(&params.tickers) {
+        Ok(f) => f,
+        Err(m) => return invalid_argument(m),
+    };
+    let allow = [
+        "ticker", "base", "quote", "trade_date", "date", "open", "high", "low", "close", "volume", "transactions",
+    ];
+    let fields = match params.fields.as_deref().map(parse_csv_list) {
+        Some(f) if !f.is_empty() => f,
+        _ => ["ticker", "base", "quote", "date", "open", "high", "low", "close", "volume", "transactions"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    };
+    let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
+    if validate_fields(&refs, &allow).is_err() {
+        return invalid_argument("fields contains unsupported column");
+    }
+    let projection = refs
+        .iter()
+        .map(|f| if *f == "date" { "trade_date AS date".to_string() } else { (*f).to_string() })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let cap = match request_cap(state, params.as_of.as_deref()) {
+        Ok(cap) => cap,
+        Err(response) => return response,
+    };
+    let end = clamp_date(&params.end, cap.and_then(as_of::utc_daily_cap_date));
+    if end.as_str() < params.start.as_str() {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let dataset_dir = state.storage_root.join(store);
+    if !has_any_parquet_file(&dataset_dir) {
+        return (StatusCode::OK, Json(json!([]))).into_response();
+    }
+    let path = dataset_dir.join("trade_date=*").join("*.parquet");
+    let sql = format!(
+        "SELECT {projection} FROM read_parquet('{path}') \
+         WHERE trade_date >= DATE '{start}' AND trade_date <= DATE '{end}' AND {symbols} \
+         ORDER BY ticker, trade_date LIMIT {limit}",
+        path = sql_escape_literal(&path.to_string_lossy()),
+        start = sql_escape_literal(&params.start),
+        end = sql_escape_literal(&end),
+    );
+    match run_sql_json_async(sql).await {
+        Ok(rows) => (StatusCode::OK, Json(Value::Array(rows))).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// Crypto minute bars (UTC); a bar is visible once its minute has closed.
+async fn crypto_minute(State(state): State<AppState>, Query(params): Query<PairQuery>) -> axum::response::Response {
+    pair_minute(&state, &params, "crypto_minute").await
+}
+
+/// Crypto daily bars by UTC day.
+async fn crypto_daily(State(state): State<AppState>, Query(params): Query<PairQuery>) -> axum::response::Response {
+    pair_daily(&state, &params, "crypto_daily").await
+}
+
+/// FX minute bars (UTC).
+async fn fx_minute(State(state): State<AppState>, Query(params): Query<PairQuery>) -> axum::response::Response {
+    pair_minute(&state, &params, "fx_minute").await
+}
+
+/// FX daily bars by UTC day.
+async fn fx_daily(State(state): State<AppState>, Query(params): Query<PairQuery>) -> axum::response::Response {
+    pair_daily(&state, &params, "fx_daily").await
+}
+
+/// FX bid/ask at the end of each kept minute (carry it forward between rows).
+async fn fx_quote(State(state): State<AppState>, Query(params): Query<PairQuery>) -> axum::response::Response {
+    pair_series(&state, &params, "fx_quote_minute", "ticker, base, quote, window_start, bid_price, ask_price").await
 }
 
 async fn stock_quote(

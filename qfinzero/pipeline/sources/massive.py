@@ -3,6 +3,8 @@
 Raw layout (read in place):
   us_stocks_sip/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.parquet
   us_options_opra/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.parquet
+  global_crypto/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz   (X:BTC-USD)
+  global_forex/{day,minute}_aggs_v1, quotes_v1/...csv.gz           (C:EUR-USD)
   economy/treasury_yields.jsonl
   corporate_actions/{splits,dividends}/<TICKER>.jsonl
 
@@ -20,7 +22,7 @@ from pathlib import Path
 from .. import schema
 from ..engine import _lit
 
-_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.parquet$")
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.(?:parquet|csv\.gz)$")
 
 # OPRA contract: O:{ROOT}{YYMMDD}{C|P}{strike*1000, 8 digits}
 # (same parse as upq-ingest; ROOT may carry up to 2 trailing digits we ignore).
@@ -35,9 +37,11 @@ class DatedFile:
 
 
 def list_dated_files(root: Path, start: str | None, end: str | None) -> list[DatedFile]:
-    """Enumerate ``YYYY-MM-DD.parquet`` files under ``root`` within [start, end]."""
-    out: list[DatedFile] = []
-    for p in root.rglob("*.parquet"):
+    """Enumerate ``YYYY-MM-DD.parquet`` (or ``.csv.gz``, as massive ships the
+    global flat files) under ``root`` within [start, end]; parquet wins when a
+    day has both."""
+    out: dict[str, DatedFile] = {}
+    for p in sorted(root.rglob("*"), key=lambda x: x.suffix == ".parquet"):
         m = _DATE_RE.search(p.name)
         if not m:
             continue
@@ -46,9 +50,70 @@ def list_dated_files(root: Path, start: str | None, end: str | None) -> list[Dat
             continue
         if end and d > end:
             continue
-        out.append(DatedFile(d, p))
-    out.sort(key=lambda f: f.trade_date)
-    return out
+        out[d] = DatedFile(d, p)
+    return [out[d] for d in sorted(out)]
+
+
+def read_src(src: Path) -> str:
+    """DuckDB relation for one raw day file, parquet or gzip CSV."""
+    if src.name.endswith(".csv.gz"):
+        return f"read_csv('{_lit(src)}', header=true, auto_detect=true)"
+    return f"read_parquet('{_lit(src)}')"
+
+
+def _pair(col: str = "ticker") -> str:
+    """``X:BTC-USD`` / ``C:EUR-USD`` -> ticker, base, quote."""
+    t = f"regexp_replace(CAST({col} AS VARCHAR), '^[A-Z]:', '')"
+    return f"{t} AS ticker, split_part({t}, '-', 1) AS base, split_part({t}, '-', 2) AS quote"
+
+
+def pair_daily_sql(src: Path, trade_date: str) -> str:
+    return f"""
+        SELECT {_pair()}, DATE '{trade_date}' AS trade_date,
+            CAST(open AS DOUBLE) AS open, CAST(high AS DOUBLE) AS high,
+            CAST(low AS DOUBLE) AS low, CAST(close AS DOUBLE) AS close,
+            CAST(volume AS DOUBLE) AS volume, CAST(transactions AS BIGINT) AS transactions
+        FROM {read_src(src)}
+        ORDER BY ticker
+    """
+
+
+def pair_minute_sql(src: Path, trade_date: str) -> str:
+    return f"""
+        SELECT {_pair()}, CAST(window_start AS BIGINT) AS window_start,
+            CAST(open AS DOUBLE) AS open, CAST(high AS DOUBLE) AS high,
+            CAST(low AS DOUBLE) AS low, CAST(close AS DOUBLE) AS close,
+            CAST(volume AS DOUBLE) AS volume, CAST(transactions AS BIGINT) AS transactions,
+            DATE '{trade_date}' AS trade_date
+        FROM {read_src(src)}
+        ORDER BY ticker, window_start
+    """
+
+
+def fx_quote_sql(src: Path, trade_date: str, interval: int = 1) -> str:
+    """Last FX quote of each minute (or ``interval``-minute bucket) per pair,
+    within the UTC day of the file."""
+    from .databento import NS_PER_MIN, check_interval, sample_sql
+    return f"""
+        WITH t AS (
+            SELECT CAST(ticker AS VARCHAR) AS raw, CAST(participant_timestamp AS BIGINT) AS ts,
+                   CAST(bid_price AS DOUBLE) AS bid, CAST(ask_price AS DOUBLE) AS ask
+            FROM {read_src(src)} WHERE participant_timestamp IS NOT NULL
+        ),
+        m1 AS (
+            SELECT raw, ts // {NS_PER_MIN} * {NS_PER_MIN} AS window_start,
+                   arg_max(bid, ts) AS bid_price, arg_max(ask, ts) AS ask_price
+            FROM t GROUP BY 1, 2
+        ),
+        m2 AS (
+            SELECT {_pair("raw")}, window_start, bid_price, ask_price FROM m1
+            WHERE CAST(to_timestamp(window_start // 1000000000) AT TIME ZONE 'UTC' AS DATE) = DATE '{trade_date}'
+        ),
+        q AS ({sample_sql("m2", check_interval(interval))})
+        SELECT ticker, base, quote, window_start, bid_price, ask_price, DATE '{trade_date}' AS trade_date
+        FROM q ORDER BY ticker, window_start
+    """
+
 
 
 # ── per-store SELECT builders (one source file -> one partition) ─────────

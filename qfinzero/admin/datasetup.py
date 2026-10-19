@@ -121,10 +121,12 @@ def _massive_index(path: Path) -> Optional[str]:
     """Library index of a massive file; every quote flavour maps to ``quotes_v1``."""
     parts = path.parts
     for i in range(len(parts) - 1):
-        if parts[i] in ("us_stocks_sip", "us_options_opra"):
+        if parts[i] in ("us_stocks_sip", "us_options_opra", "global_crypto", "global_forex"):
             if parts[i + 1] in ("day_aggs_v1", "minute_aggs_v1"):
                 return f"{parts[i]}/{parts[i + 1]}"
-            if parts[i + 1] in QUOTE_DIRS:
+            if parts[i + 1] == "quotes_v1" and parts[i] == "global_forex":
+                return "global_forex/quotes_v1"
+            if parts[i + 1] in QUOTE_DIRS and parts[i].startswith("us_"):
                 return f"{parts[i]}/quotes_v1"
     return None
 
@@ -169,7 +171,7 @@ def _massive_files(paths: list[Path]) -> tuple[dict[str, list[tuple[str, Path]]]
         if not idx:
             ignored += 1
             continue
-        if idx.endswith("quotes_v1"):
+        if idx.endswith("quotes_v1") and not idx.startswith("global_"):
             dates = _ANY_DATE.findall(f.name)
             if not dates or _quote_kind(f) is None:
                 ignored += 1
@@ -251,7 +253,7 @@ def inspect(vendor: str, paths: list[str]) -> dict[str, Any]:
                  "csv": sum(1 for _, f in files if f.name.endswith(".csv.gz")),
                  "bytes": sum(f.stat().st_size for _, f in files),
                  "start": dates[0], "end": dates[-1]}
-            if res == "quotes":
+            if res == "quotes" and not idx.startswith("global_"):
                 kinds: dict[str, int] = {}
                 for _, f in files:
                     k = _quote_kind(f) or "?"
@@ -300,7 +302,7 @@ def set_quote_intervals(intervals: Optional[dict[str, int]]) -> dict[str, int]:
     from qfinzero.pipeline.convert import default_quote_intervals
     from qfinzero.pipeline.sources.databento import check_interval
     if intervals:
-        clean = {f"{a}_interval_min": check_interval(v) for a, v in intervals.items() if a in ("stock", "option", "future") and v}
+        clean = {f"{a}_interval_min": check_interval(v) for a, v in intervals.items() if a in ("stock", "option", "future", "fx") and v}
         if clean:
             config_store.update({"quotes": clean})
     return default_quote_intervals()
@@ -319,12 +321,26 @@ def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = N
     say(f"[import] {vendor}: {len(sel)} selection(s) -> raw library {lib}")
     plans: list[dict[str, Any]] = []
     if vendor == "massive":
-        from .massive_dl import INDICES, csv_to_parquet
+        from .massive_dl import INDICES, KEEP_CSV, csv_to_parquet
         groups, ignored = _massive_files(sel)
         if ignored:
             say(f"  {ignored} files are not massive day/minute aggregates and are skipped")
         for idx, files in sorted(groups.items()):
             asset, res = INDICES[idx]
+            if idx.startswith(KEEP_CSV):
+                # crypto and FX stay gzip CSV in the library (the converter reads them as is)
+                linked = kept = 0
+                for d, f in files:
+                    dst = lib / idx / d[:4] / d[5:7] / f.name
+                    if f.resolve().is_relative_to(lib_real) or not _link(f, dst):
+                        kept += 1
+                    else:
+                        linked += 1
+                dates = sorted(d for d, _ in files)
+                say(f"  {idx}: {len(files)} days {dates[0]}..{dates[-1]}  linked={linked} already={kept}")
+                plans.append({"vendor": "massive", "asset": asset, "resolution": res,
+                              "start": dates[0], "end": dates[-1]})
+                continue
             if res == "quotes":
                 written = 0
                 for d, f in files:
@@ -383,9 +399,10 @@ def run_convert(plan: dict[str, Any], *, on_line: Optional[OnLine] = None, jobs:
     iv = default_quote_intervals()
     cmd = [sys.executable, "-m", "qfinzero.pipeline.cli",
            "--massive", d.get("raw_massive", ""), "--databento", d.get("raw_databento", ""),
-           "--storage", d.get("storage_root", ""), "convert", "--vendor", plan["vendor"], "--market", "us",
+           "--storage", d.get("storage_root", ""), "convert", "--vendor", plan["vendor"],
+           "--market", "global" if plan.get("asset") in ("crypto", "fx") else "us",
            "--stock-quote-interval", str(iv["stock"]), "--option-quote-interval", str(iv["option"]),
-           "--future-quote-interval", str(iv["future"])]
+           "--future-quote-interval", str(iv["future"]), "--fx-quote-interval", str(iv.get("fx", 1))]
     if plan["vendor"] == "massive":
         cmd += ["--asset", plan["asset"], "--resolution", plan["resolution"],
                 "--start", plan["start"], "--end", plan["end"]]

@@ -45,6 +45,32 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 1. 所有分片的列名、顺序和类型必须一致。测试 `test_parts_match_upq_storage_schema_exactly` 会检查 Databento 适配器。
 2. 同一分区里两个分片若有同一代码，它的K线会出现两次。会重叠的适配器必须约定优先级，规则见下文。
 
+## 加密货币与外汇（massive 全球 flat files）
+
+massive 的 `global_crypto` 和 `global_forex` flat files 转换成五个存储，直接从 `RAW_MASSIVE_DIR` 读取 massive 原样的 gzip CSV：
+
+| 原始数据 | 存储 | 说明 |
+|---|---|---|
+| `global_crypto/day_aggs_v1` | `crypto_daily` | 每天约 400 个交易对（`BTC-USD`、`ETH-USD` 等） |
+| `global_crypto/minute_aggs_v1` | `crypto_minute` | |
+| `global_forex/day_aggs_v1` | `fx_daily` | 约 1,200 个货币对（`EUR-USD`、`USD-JPY` 等） |
+| `global_forex/minute_aggs_v1` | `fx_minute` | volume 是该分钟的报价笔数 |
+| `global_forex/quotes_v1` | `fx_quote_minute` | 每分钟（或每 5–60 分钟，`--fx-quote-interval`）最后的买卖价；没有挂单量 |
+
+`trades_v1`（加密货币逐笔成交）不转换。
+
+- massive 的 `X:BTC-USD` / `C:EUR-USD` 存为 `BTC-USD` / `EUR-USD`，并拆出 `base`、`quote` 两列。UPQ 也接受 `BTCUSD`、`X:BTC-USD`、`BTC/USD`；可用性地图里写作 `X:BTC-USD` 和 `C:EUR-USD`。
+- 两个市场都是 24 小时交易：`trade_date` 是 **UTC** 日，某天的日线在次日 00:00 UTC 确定（`as_of`）。
+- `volume` 是 `DOUBLE`（加密货币成交量有小数）。
+- 日线转换全部历史。大存储首次转换只取最近的数据：`crypto_minute` 和 `fx_minute` 取原始库最近 400 天，`fx_quote_minute` 取最近 60 天。需要更早的历史时指定起始日：
+
+```bash
+qfz-data convert --vendor massive --market global --asset fx --resolution minute --start 2014-01-01
+qfz-data convert --vendor massive --market global --asset fx --resolution quotes --start 2025-01-01 --fx-quote-interval 5
+```
+
+UPQ 的接口是 `/crypto`、`/crypto/daily`、`/fx`、`/fx/daily` 和 `/fx/quote`，MCP 工具是 `upq_crypto_minute`、`upq_crypto_daily`、`upq_fx_minute`、`upq_fx_daily` 和 `upq_fx_quote`。数据导入中的下载和“更新”在 massive key 覆盖这些产品时也会获取它们。
+
 ## 新增一家供应商
 
 1. 在 `qfinzero/pipeline/sources/<vendor>.py` 写读取器，为每个存储生成符合上述列和类型的 SELECT。

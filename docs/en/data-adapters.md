@@ -28,6 +28,9 @@ Everything an adapter must produce lives under `STORAGE_ROOT`
 | `future_daily` | `trade_date=YYYY-MM-DD/` | `ticker, root, trade_date, open, high, low, close, settle, volume, transactions` |
 | `future_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, open, high, low, close, volume, transactions, trade_date` |
 | `future_quote_minute` | `trade_date=YYYY-MM-DD/` | `ticker, root, window_start, bid_price, ask_price, bid_size, ask_size, trade_date` |
+| `crypto_daily`, `fx_daily` | `trade_date=YYYY-MM-DD/` (UTC) | `ticker, base, quote, trade_date, open, high, low, close, volume, transactions` |
+| `crypto_minute`, `fx_minute` | `trade_date=YYYY-MM-DD/` (UTC) | `ticker, base, quote, window_start, open, high, low, close, volume, transactions, trade_date` |
+| `fx_quote_minute` | `trade_date=YYYY-MM-DD/` (UTC) | `ticker, base, quote, window_start, bid_price, ask_price, trade_date` |
 
 The types are fixed in [`qfinzero/pipeline/schema.py`](../../qfinzero/pipeline/schema.py):
 `VARCHAR` for text, `DATE` for dates, `DOUBLE` for prices and strikes, and
@@ -38,7 +41,8 @@ Conventions every adapter follows:
 - `window_start` is the bar start in nanoseconds since the Unix epoch, UTC.
   On `option_day` it is 00:00 US/Eastern of the trade date.
 - `trade_date` is the US/Eastern calendar date for US markets. For futures it
-  is the CME session: 18:00 ET the evening before to 17:00 ET.
+  is the CME session: 18:00 ET the evening before to 17:00 ET. For crypto and
+  FX, which trade around the clock, it is the UTC day.
 - Prices are raw, as traded. Splits and dividends live in
   `corporate_actions/` and UPQ applies them on read.
 - Option tickers use `O:{ROOT}{YYMMDD}{C|P}{strike×1000, 8 digits}`, for example
@@ -55,6 +59,43 @@ glob. Two consequences follow:
 2. If two parts in one partition hold the same ticker, its bars appear twice.
    Adapters that overlap must agree on a precedence rule. The rule is described
    below.
+
+## Crypto and FX (massive global flat files)
+
+massive's `global_crypto` and `global_forex` flat files convert into five
+stores. They are read in place as massive ships them (gzip CSV) from
+`RAW_MASSIVE_DIR`:
+
+| raw | store | notes |
+|---|---|---|
+| `global_crypto/day_aggs_v1` | `crypto_daily` | about 400 pairs a day (`BTC-USD`, `ETH-USD`, …) |
+| `global_crypto/minute_aggs_v1` | `crypto_minute` | |
+| `global_forex/day_aggs_v1` | `fx_daily` | about 1,200 pairs (`EUR-USD`, `USD-JPY`, …) |
+| `global_forex/minute_aggs_v1` | `fx_minute` | volume is the number of quotes in the minute |
+| `global_forex/quotes_v1` | `fx_quote_minute` | last bid/ask of each minute, or of each 5–60 minutes (`--fx-quote-interval`); no sizes |
+
+`trades_v1` (crypto trades) is not converted.
+
+- massive's `X:BTC-USD` / `C:EUR-USD` are stored as `BTC-USD` / `EUR-USD` with
+  `base` and `quote` columns. UPQ accepts `BTCUSD`, `X:BTC-USD` and `BTC/USD`
+  too; the coverage map writes them `X:BTC-USD` and `C:EUR-USD`.
+- Both markets trade around the clock: `trade_date` is the **UTC** day, and a
+  day's daily bar is final at 00:00 UTC the next day (`as_of`).
+- `volume` is a `DOUBLE` (crypto volume is fractional).
+- The daily stores convert all history. The first conversion of the large
+  stores keeps to recent history: `crypto_minute` and `fx_minute` the last 400
+  days of the raw library, `fx_quote_minute` the last 60. Reach further back
+  with a start date:
+
+```bash
+qfz-data convert --vendor massive --market global --asset fx --resolution minute --start 2014-01-01
+qfz-data convert --vendor massive --market global --asset fx --resolution quotes --start 2025-01-01 --fx-quote-interval 5
+```
+
+UPQ serves them at `/crypto`, `/crypto/daily`, `/fx`, `/fx/daily` and
+`/fx/quote`, and the MCP tools are `upq_crypto_minute`, `upq_crypto_daily`,
+`upq_fx_minute`, `upq_fx_daily` and `upq_fx_quote`. Downloads and *Update*
+in data setup fetch these products too when the massive key covers them.
 
 ## Adding a vendor
 

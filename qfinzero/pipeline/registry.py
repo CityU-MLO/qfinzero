@@ -40,6 +40,11 @@ def scan_raw(p: PipelinePaths, con=None) -> dict:
     out["massive"]["stock_minute"] = _dated_range(p.massive_stock_minute)
     out["massive"]["option_day"] = _dated_range(p.massive_option_day)
     out["massive"]["option_minute"] = _dated_range(p.massive_option_minute)
+    out["massive"]["crypto_daily"] = _dated_range(p.massive_crypto_day)
+    out["massive"]["crypto_minute"] = _dated_range(p.massive_crypto_minute)
+    out["massive"]["fx_daily"] = _dated_range(p.massive_fx_day)
+    out["massive"]["fx_minute"] = _dated_range(p.massive_fx_minute)
+    out["massive"]["fx_quote_minute"] = _dated_range(p.massive_fx_quotes)
     out["massive"]["rates"] = {"present": p.massive_treasury.exists()}
     out["massive"]["splits_files"] = _count_files(p.massive_splits, "*.jsonl")
     out["massive"]["dividends_files"] = _count_files(p.massive_dividends, "*.jsonl")
@@ -111,7 +116,8 @@ def scan_storage(p: PipelinePaths) -> dict:
     out: dict = {"root": str(p.storage)}
     for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
                   "stock_quote_minute", "option_quote_minute",
-                  "future_daily", "future_minute", "future_quote_minute"):
+                  "future_daily", "future_minute", "future_quote_minute",
+                  "crypto_daily", "crypto_minute", "fx_daily", "fx_minute", "fx_quote_minute"):
         d = p.store(store)
         parts = sorted(
             x.name[len("trade_date="):]

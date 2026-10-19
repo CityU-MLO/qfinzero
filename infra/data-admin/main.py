@@ -415,7 +415,9 @@ def coverage_extent() -> dict:
     from qfinzero.admin import coverage
     start, end = coverage.default_range()
     return {"stores": coverage.extent(), "default": {"start": start, "end": end},
-            "suggested": coverage.suggest(limit=12), "suggested_futures": coverage.suggest_futures()}
+            "suggested": coverage.suggest(limit=12), "suggested_futures": coverage.suggest_futures(),
+            "suggested_crypto": coverage.suggest_pairs("crypto", limit=6),
+            "suggested_fx": coverage.suggest_pairs("fx", limit=6)}
 
 
 @app.get("/coverage/matrix")

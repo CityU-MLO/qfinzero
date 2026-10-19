@@ -8,8 +8,8 @@
     "zh": "行情数据（UPQ）"
    },
    "summary": {
-    "en": "Bars, quotes, option chains, futures, rates and dividends from the QFZ store.",
-    "zh": "来自 QFZ 存储的 K 线、报价、期权链、期货、利率和分红。"
+    "en": "Bars, quotes, option chains, futures, crypto, FX, rates and dividends from the QFZ store.",
+    "zh": "来自 QFZ 存储的 K 线、报价、期权链、期货、加密货币、外汇、利率和分红。"
    },
    "base": "/svc/upq",
    "scope": "market-data",
@@ -874,6 +874,396 @@
          "ticker": "AAPL"
         }
        ]
+      }
+     ],
+     "deprecated": false
+    },
+    {
+     "id": "get-crypto",
+     "method": "GET",
+     "path": "/crypto",
+     "group": "Crypto",
+     "summary": "Crypto Minute Bars",
+     "description": "Minute bars of crypto pairs (massive global crypto). Days are UTC days.",
+     "params": [
+      {
+       "name": "tickers",
+       "type": "string",
+       "required": true,
+       "description": "Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.",
+       "in": "query",
+       "example": "BTC-USD,ETH-USD"
+      },
+      {
+       "name": "start",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T00:00:00"
+      },
+      {
+       "name": "end",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T01:00:00"
+      },
+      {
+       "name": "limit",
+       "type": "integer",
+       "required": false,
+       "description": "Max rows (1-100000, default 10000)",
+       "in": "query",
+       "default": 10000
+      },
+      {
+       "name": "fields",
+       "type": "string",
+       "required": false,
+       "description": "Comma-separated columns to return",
+       "in": "query"
+      },
+      {
+       "name": "as_of",
+       "type": "string",
+       "required": false,
+       "description": "Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.",
+       "in": "query"
+      }
+     ],
+     "body": null,
+     "responses": [
+      {
+       "status": "200",
+       "description": "Rows ordered by pair and time",
+       "example": [
+        {
+         "ticker": "BTC-USD",
+         "base": "BTC",
+         "quote": "USD",
+         "window_start": 1771891200000000000,
+         "open": 64624.1,
+         "high": 64650.0,
+         "low": 64600.2,
+         "close": 64640.5,
+         "volume": 12.84,
+         "transactions": 311
+        }
+       ]
+      },
+      {
+       "status": "400",
+       "description": "Invalid parameters"
+      }
+     ],
+     "deprecated": false
+    },
+    {
+     "id": "get-crypto-daily",
+     "method": "GET",
+     "path": "/crypto/daily",
+     "group": "Crypto",
+     "summary": "Crypto Daily Bars",
+     "description": "Daily bars of crypto pairs by UTC day; volume is in the base coin.",
+     "params": [
+      {
+       "name": "tickers",
+       "type": "string",
+       "required": true,
+       "description": "Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.",
+       "in": "query",
+       "example": "BTC-USD"
+      },
+      {
+       "name": "start",
+       "type": "string (date)",
+       "required": true,
+       "description": "Start, Date (YYYY-MM-DD, UTC day)",
+       "in": "query",
+       "example": "2026-02-02"
+      },
+      {
+       "name": "end",
+       "type": "string (date)",
+       "required": true,
+       "description": "End, Date (YYYY-MM-DD, UTC day)",
+       "in": "query",
+       "example": "2026-02-24"
+      },
+      {
+       "name": "fields",
+       "type": "string",
+       "required": false,
+       "description": "Comma-separated columns to return",
+       "in": "query"
+      },
+      {
+       "name": "as_of",
+       "type": "string",
+       "required": false,
+       "description": "Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.",
+       "in": "query"
+      }
+     ],
+     "body": null,
+     "responses": [
+      {
+       "status": "200",
+       "description": "Rows ordered by pair and time",
+       "example": [
+        {
+         "ticker": "BTC-USD",
+         "base": "BTC",
+         "quote": "USD",
+         "date": "2026-02-24",
+         "open": 64624.1,
+         "high": 65094.0,
+         "low": 62500.0,
+         "close": 64061.9,
+         "volume": 20134.07,
+         "transactions": 930852
+        }
+       ]
+      },
+      {
+       "status": "400",
+       "description": "Invalid parameters"
+      }
+     ],
+     "deprecated": false
+    },
+    {
+     "id": "get-fx",
+     "method": "GET",
+     "path": "/fx",
+     "group": "FX",
+     "summary": "FX Minute Bars",
+     "description": "Minute bars of FX pairs (massive global forex, about 1,200 pairs). Volume counts the quotes in the minute.",
+     "params": [
+      {
+       "name": "tickers",
+       "type": "string",
+       "required": true,
+       "description": "Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.",
+       "in": "query",
+       "example": "EUR-USD,USD-JPY"
+      },
+      {
+       "name": "start",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T00:00:00"
+      },
+      {
+       "name": "end",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T01:00:00"
+      },
+      {
+       "name": "limit",
+       "type": "integer",
+       "required": false,
+       "description": "Max rows (1-100000, default 10000)",
+       "in": "query",
+       "default": 10000
+      },
+      {
+       "name": "fields",
+       "type": "string",
+       "required": false,
+       "description": "Comma-separated columns to return",
+       "in": "query"
+      },
+      {
+       "name": "as_of",
+       "type": "string",
+       "required": false,
+       "description": "Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.",
+       "in": "query"
+      }
+     ],
+     "body": null,
+     "responses": [
+      {
+       "status": "200",
+       "description": "Rows ordered by pair and time",
+       "example": [
+        {
+         "ticker": "BTC-USD",
+         "base": "BTC",
+         "quote": "USD",
+         "window_start": 1771891200000000000,
+         "open": 64624.1,
+         "high": 64650.0,
+         "low": 64600.2,
+         "close": 64640.5,
+         "volume": 12.84,
+         "transactions": 311
+        }
+       ]
+      },
+      {
+       "status": "400",
+       "description": "Invalid parameters"
+      }
+     ],
+     "deprecated": false
+    },
+    {
+     "id": "get-fx-daily",
+     "method": "GET",
+     "path": "/fx/daily",
+     "group": "FX",
+     "summary": "FX Daily Bars",
+     "description": "Daily bars of FX pairs by UTC day.",
+     "params": [
+      {
+       "name": "tickers",
+       "type": "string",
+       "required": true,
+       "description": "Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.",
+       "in": "query",
+       "example": "EUR-USD"
+      },
+      {
+       "name": "start",
+       "type": "string (date)",
+       "required": true,
+       "description": "Start, Date (YYYY-MM-DD, UTC day)",
+       "in": "query",
+       "example": "2026-02-02"
+      },
+      {
+       "name": "end",
+       "type": "string (date)",
+       "required": true,
+       "description": "End, Date (YYYY-MM-DD, UTC day)",
+       "in": "query",
+       "example": "2026-02-24"
+      },
+      {
+       "name": "fields",
+       "type": "string",
+       "required": false,
+       "description": "Comma-separated columns to return",
+       "in": "query"
+      },
+      {
+       "name": "as_of",
+       "type": "string",
+       "required": false,
+       "description": "Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.",
+       "in": "query"
+      }
+     ],
+     "body": null,
+     "responses": [
+      {
+       "status": "200",
+       "description": "Rows ordered by pair and time",
+       "example": [
+        {
+         "ticker": "BTC-USD",
+         "base": "BTC",
+         "quote": "USD",
+         "date": "2026-02-24",
+         "open": 64624.1,
+         "high": 65094.0,
+         "low": 62500.0,
+         "close": 64061.9,
+         "volume": 20134.07,
+         "transactions": 930852
+        }
+       ]
+      },
+      {
+       "status": "400",
+       "description": "Invalid parameters"
+      }
+     ],
+     "deprecated": false
+    },
+    {
+     "id": "get-fx-quote",
+     "method": "GET",
+     "path": "/fx/quote",
+     "group": "FX",
+     "summary": "FX Quotes",
+     "description": "FX bid and ask at the end of each kept minute; minutes without a row keep the previous quote. massive FX quotes carry no sizes.",
+     "params": [
+      {
+       "name": "tickers",
+       "type": "string",
+       "required": true,
+       "description": "Comma-separated pairs. BTC-USD, BTCUSD, X:BTC-USD and BTC/USD are the same pair.",
+       "in": "query",
+       "example": "EUR-USD"
+      },
+      {
+       "name": "start",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "Start, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T00:00:00"
+      },
+      {
+       "name": "end",
+       "type": "string (date-time)",
+       "required": true,
+       "description": "End, ISO datetime, UTC (YYYY-MM-DDTHH:MM:SS)",
+       "in": "query",
+       "example": "2026-02-24T01:00:00"
+      },
+      {
+       "name": "limit",
+       "type": "integer",
+       "required": false,
+       "description": "Max rows (1-100000, default 10000)",
+       "in": "query",
+       "default": 10000
+      },
+      {
+       "name": "fields",
+       "type": "string",
+       "required": false,
+       "description": "Comma-separated columns to return",
+       "in": "query"
+      },
+      {
+       "name": "as_of",
+       "type": "string",
+       "required": false,
+       "description": "Point-in-time cap (ISO datetime or nanoseconds). Minute rows are visible once their minute has closed; a UTC day's daily bar at 00:00 UTC of the next day.",
+       "in": "query"
+      }
+     ],
+     "body": null,
+     "responses": [
+      {
+       "status": "200",
+       "description": "Rows ordered by pair and time",
+       "example": [
+        {
+         "ticker": "EUR-USD",
+         "base": "EUR",
+         "quote": "USD",
+         "window_start": 1771804800000000000,
+         "bid_price": 1.183,
+         "ask_price": 1.18308
+        }
+       ]
+      },
+      {
+       "status": "400",
+       "description": "Invalid parameters"
       }
      ],
      "deprecated": false
@@ -3866,6 +4256,232 @@
   }
  ],
  "mcp": [
+  {
+   "name": "upq_crypto_daily",
+   "group": "Crypto",
+   "summary": "Crypto daily bars by UTC day; day D is final at 00:00 UTC on D+1.",
+   "description": "",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Pairs, e.g. [\"BTC-USD\"]"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "Date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "Date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "upq_crypto_minute",
+   "group": "Crypto",
+   "summary": "Crypto minute bars (massive global crypto, e.g. BTC-USD, ETH-USD, SOL-USD).",
+   "description": "Rows: ticker, base, quote, window_start (ns since epoch), open, high, low,\n    close, volume (in the base coin), transactions.",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Pairs, e.g. [\"BTC-USD\", \"ETH-USD\"]"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC), e.g. \"2026-02-24T00:00:00\""
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC)"
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "description": "Max rows (default 10000)",
+     "default": 10000
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "upq_fx_daily",
+   "group": "FX",
+   "summary": "FX daily bars by UTC day; day D is final at 00:00 UTC on D+1.",
+   "description": "",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Pairs, e.g. [\"EUR-USD\"]"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "Date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "Date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "upq_fx_minute",
+   "group": "FX",
+   "summary": "FX minute bars (massive global forex, about 1,200 pairs: EUR-USD, USD-JPY, ...).",
+   "description": "Rows: ticker, base, quote, window_start (ns), open, high, low, close,\n    volume (the number of quotes in the minute), transactions.",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Pairs, e.g. [\"EUR-USD\", \"USD-JPY\"]"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC)"
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC)"
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "description": "Max rows (default 10000)",
+     "default": 10000
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "upq_fx_quote",
+   "group": "FX",
+   "summary": "FX bid and ask. Each row is the last quote of the minute ``window_start``;     minutes without a row keep the previous quote (the store may also be sampled     every 5-60 minutes). massive FX quotes carry no sizes.",
+   "description": "",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Pairs, e.g. [\"EUR-USD\"]"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC)"
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "ISO datetime (UTC)"
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "description": "Max rows (default 10000)",
+     "default": 10000
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
   {
    "name": "upq_chain_snapshot",
    "group": "Market data",

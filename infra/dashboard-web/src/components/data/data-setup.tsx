@@ -153,6 +153,7 @@ function IntervalPicker({ value, onChange }: { value: QuoteIntervals; onChange: 
       {sel("stock", t("stocks", "股票"))}
       {sel("option", t("options", "期权"))}
       {sel("future", t("futures", "期货"))}
+      {sel("fx", t("FX", "外汇"))}
     </div>
   );
 }
@@ -583,7 +584,7 @@ export function DataSetup() {
       {tab === "local" && (
         <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
           <FileBrowser selected={selected} onToggle={toggle} />
-          <ImportPanel vendor={vendor} selected={selected} intervals={s?.quote_intervals ?? { stock: 1, option: 1, future: 1 }}
+          <ImportPanel vendor={vendor} selected={selected} intervals={s?.quote_intervals ?? { stock: 1, option: 1, future: 1, fx: 1 }}
             onRemove={toggle} onClear={() => setSelected([])}
             onJob={(j) => { setFocus(j.id); setSelected([]); }} />
         </div>

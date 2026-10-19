@@ -22,6 +22,13 @@ Added:
 - API key distribution: scopes, read-only keys, expiry, per-key rate limits
   and daily usage; admins issue keys to other users; MCP tool calls are
   checked against the key's scopes; `qfz-auth create-key --scopes …`.
+- Crypto and FX from massive's global flat files: `crypto_daily`,
+  `crypto_minute`, `fx_daily`, `fx_minute` and `fx_quote_minute` (FX bid/ask),
+  on UTC days; UPQ `/crypto`, `/crypto/daily`, `/fx`, `/fx/daily`,
+  `/fx/quote`; five MCP tools; coverage map groups (`X:BTC-USD`, `C:EUR-USD`);
+  downloads and *Update* for the global products.
+- *Update* also fills gaps inside the last 120 days, and massive entitlement
+  is checked by downloading (HEAD), not by listing.
 - A new documentation hub: home page, guides with a live table of contents,
   ⌘K search over guides, endpoints and tools, an API reference for UPQ, ESP
   and PMB with code samples and in-page requests, and an MCP tool reference,

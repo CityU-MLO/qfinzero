@@ -34,8 +34,8 @@ LAYOUT_VERSION = 1
 
 # vendor -> (config key, sub-directories created at init, what it holds)
 RAW = {
-    "massive": ("raw_massive", ["us_stocks_sip", "us_options_opra"],
-                "massive flat files: <index>/YYYY/MM/YYYY-MM-DD.parquet"),
+    "massive": ("raw_massive", ["us_stocks_sip", "us_options_opra", "global_crypto", "global_forex"],
+                "massive flat files: <index>/YYYY/MM/YYYY-MM-DD.parquet (global_*: .csv.gz)"),
     "databento": ("raw_databento", ["imports"],
                   "Databento DBN: <dataset>/<schema>/<symbol>/<date>.dbn.zst; imports/ holds links"),
     "tushare": ("raw_tushare", [], "Tushare dumps"),
@@ -45,6 +45,7 @@ QFZ_STORES = [
     "stock_daily", "stock_minute", "stock_quote_minute",
     "option_day", "option_minute", "option_quote_minute",
     "future_daily", "future_minute", "future_quote_minute",
+    "crypto_daily", "crypto_minute", "fx_daily", "fx_minute", "fx_quote_minute",
     "corporate_actions", "dividends", "rates",
 ]
 

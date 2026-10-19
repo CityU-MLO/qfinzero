@@ -127,6 +127,53 @@ FUTURE_QUOTE_MINUTE = {
     "trade_date": "DATE",
 }
 
+# Crypto and FX pairs (massive ``X:BTC-USD`` / ``C:EUR-USD``) are stored as
+# ``BTC-USD`` / ``EUR-USD`` with the two legs split out. Both trade around the
+# clock: ``trade_date`` is the UTC day of ``window_start``. Volume is
+# fractional (coins, or the number of FX quotes for massive's FX bars).
+PAIR_DAILY = {
+    "ticker": "VARCHAR",
+    "base": "VARCHAR",
+    "quote": "VARCHAR",
+    "trade_date": "DATE",
+    "open": "DOUBLE",
+    "high": "DOUBLE",
+    "low": "DOUBLE",
+    "close": "DOUBLE",
+    "volume": "DOUBLE",
+    "transactions": "BIGINT",
+}
+
+PAIR_MINUTE = {
+    "ticker": "VARCHAR",
+    "base": "VARCHAR",
+    "quote": "VARCHAR",
+    "window_start": "BIGINT",
+    "open": "DOUBLE",
+    "high": "DOUBLE",
+    "low": "DOUBLE",
+    "close": "DOUBLE",
+    "volume": "DOUBLE",
+    "transactions": "BIGINT",
+    "trade_date": "DATE",
+}
+
+CRYPTO_DAILY = dict(PAIR_DAILY)
+CRYPTO_MINUTE = dict(PAIR_MINUTE)
+FX_DAILY = dict(PAIR_DAILY)
+FX_MINUTE = dict(PAIR_MINUTE)
+
+# Last FX quote of each minute (massive FX quotes carry no sizes).
+FX_QUOTE_MINUTE = {
+    "ticker": "VARCHAR",
+    "base": "VARCHAR",
+    "quote": "VARCHAR",
+    "window_start": "BIGINT",
+    "bid_price": "DOUBLE",
+    "ask_price": "DOUBLE",
+    "trade_date": "DATE",
+}
+
 RATES = {
     "date": "DATE",
     "yield_1_month": "DOUBLE",

@@ -14,19 +14,22 @@ import { cn } from "@/lib/utils";
 // ── types of /api/coverage/* ──────────────────────────────────────────────
 
 type LevelId = "daily" | "minute" | "quotes" | "options_eod" | "options_minute" | "options_quotes"
-  | "futures_daily" | "futures_minute" | "futures_quotes";
+  | "futures_daily" | "futures_minute" | "futures_quotes"
+  | "crypto_daily" | "crypto_minute" | "fx_daily" | "fx_minute" | "fx_quotes";
+type Kind = "stock" | "future" | "crypto" | "fx";
 type CellLevels = Partial<Record<LevelId, number>> & { contracts?: number; sessions?: Record<string, number> };
 interface Earnings { date: string; time_utc: string; title: string; status?: string; actual_eps?: number | null; estimated_eps?: number | null }
 interface Macro { date: string; time_utc: string; title: string; importance?: string; actual?: string | null; consensus?: string | null }
 interface Events { news: Record<string, Record<string, number>>; earnings: Record<string, Earnings[]>; macro: Macro[]; notes: string[] }
-interface Matrix { tickers: string[]; days: string[]; levels: LevelId[]; cells: Record<string, Record<string, CellLevels>>; events?: Events; kinds?: Record<string, "stock" | "future"> }
-interface Extent { stores: Record<LevelId, { start: string; end: string; days: number } | null>; default: { start: string; end: string }; suggested: { ticker: string }[]; suggested_futures?: string[] }
+interface Matrix { tickers: string[]; days: string[]; levels: LevelId[]; cells: Record<string, Record<string, CellLevels>>; events?: Events; kinds?: Record<string, Kind> }
+interface Extent { stores: Record<LevelId, { start: string; end: string; days: number } | null>; default: { start: string; end: string }; suggested: { ticker: string }[]; suggested_futures?: string[];
+  suggested_crypto?: string[]; suggested_fx?: string[] }
 interface CellDetail {
   ticker: string;
   date: string;
   levels: Record<LevelId, { rows: number; contracts?: number; volume?: number; sessions?: Record<string, number> } | null>;
   daily_bar: { open: number; high: number; low: number; close: number; volume: number; settle?: number } | null;
-  kind?: "stock" | "future";
+  kind?: Kind;
   minute_span: { first_ns: number; last_ns: number } | null;
   quote_span: { first_ns: number; last_ns: number } | null;
   option_expiries: { expiry: string; contracts: number; volume: number }[];
@@ -44,6 +47,11 @@ const LEVELS: { id: LevelId; en: string; zh: string; short: string }[] = [
   { id: "futures_daily", en: "Futures daily", zh: "期货日线", short: "FD" },
   { id: "futures_minute", en: "Futures minute", zh: "期货分钟线", short: "FM" },
   { id: "futures_quotes", en: "Futures quotes", zh: "期货报价", short: "FQ" },
+  { id: "crypto_daily", en: "Crypto daily", zh: "加密货币日线", short: "CD" },
+  { id: "crypto_minute", en: "Crypto minute", zh: "加密货币分钟线", short: "CM" },
+  { id: "fx_daily", en: "FX daily", zh: "外汇日线", short: "XD" },
+  { id: "fx_minute", en: "FX minute", zh: "外汇分钟线", short: "XM" },
+  { id: "fx_quotes", en: "FX quotes (BBO)", zh: "外汇报价（BBO）", short: "XQ" },
 ];
 const SESSIONS = [
   { id: "overnight", en: "Overnight", zh: "夜盘", minutes: 480 },
@@ -109,7 +117,7 @@ function TickerInput({ value, onChange }: { value: string[]; onChange: (v: strin
             if ((e.key === "Enter" || e.key === ",") && text.trim()) { e.preventDefault(); add(text); }
             if (e.key === "Backspace" && !text && value.length) onChange(value.slice(0, -1));
           }}
-          placeholder={value.length ? "" : t("Add tickers, e.g. SPY QQQ, or /CL for a future", "添加代码，例如 SPY QQQ，期货加 /，如 /CL")}
+          placeholder={value.length ? "" : t("Add tickers: SPY, /CL (future), X:BTC-USD (crypto), C:EUR-USD (FX)", "添加代码：SPY，期货 /CL，加密货币 X:BTC-USD，外汇 C:EUR-USD")}
           className="min-w-[8rem] flex-1 bg-transparent px-1 py-0.5 font-mono text-[13px] outline-none"
         />
       </div>
@@ -121,7 +129,8 @@ function TickerInput({ value, onChange }: { value: string[]; onChange: (v: strin
                 className="flex w-full justify-between px-2.5 py-1 hover:bg-accent">
                 <span className="font-mono">{s.ticker}</span>
                 <span className="text-xs tabular-nums text-muted-foreground">
-                  {s.ticker.startsWith("/") ? t("future", "期货") : `$${(s.dollar_volume / 1e6).toFixed(0)}M`}</span>
+                  {s.ticker.startsWith("/") ? t("future", "期货") : s.ticker.startsWith("X:") ? t("crypto", "加密货币")
+                    : s.ticker.startsWith("C:") ? t("FX", "外汇") : `$${(s.dollar_volume / 1e6).toFixed(0)}M`}</span>
               </button>
             </li>
           ))}
@@ -136,6 +145,13 @@ function TickerInput({ value, onChange }: { value: string[]; onChange: (v: strin
 const STOCK_LEVELS: LevelId[] = ["daily", "minute", "quotes"];
 const OPTION_LEVELS: LevelId[] = ["options_eod", "options_minute", "options_quotes"];
 const FUTURE_LEVELS: LevelId[] = ["futures_daily", "futures_minute", "futures_quotes"];
+const CRYPTO_LEVELS: LevelId[] = ["crypto_daily", "crypto_minute"];
+const FX_LEVELS: LevelId[] = ["fx_daily", "fx_minute", "fx_quotes"];
+const KIND_LEVELS: Record<Kind, LevelId[]> = {
+  stock: [...STOCK_LEVELS, ...OPTION_LEVELS], future: FUTURE_LEVELS, crypto: CRYPTO_LEVELS, fx: FX_LEVELS,
+};
+const MINUTE_LEVELS: LevelId[] = ["minute", "futures_minute", "crypto_minute", "fx_minute"];
+const QUOTE_LEVELS: LevelId[] = ["quotes", "futures_quotes", "fx_quotes"];
 
 /** Every calendar day in [start, end]: the map is a continuous time axis. */
 function calendar(start: string, end: string): string[] {
@@ -146,8 +162,8 @@ function calendar(start: string, end: string): string[] {
 const isWeekend = (d: string) => [0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay());
 
 type Row =
-  | { kind: "group"; key: string; label: string; count: number; group: "stock" | "future" }
-  | { kind: "ticker"; key: string; ticker: string; group: "stock" | "future"; levels: LevelId[] }
+  | { kind: "group"; key: string; label: string; count: number; group: Kind }
+  | { kind: "ticker"; key: string; ticker: string; group: Kind; levels: LevelId[] }
   | { kind: "sub"; key: string; ticker: string; label: string; levels?: LevelId[]; layer?: "news" | "earnings" };
 
 /** The overview of the whole history with a window you drag to pick the range. */
@@ -257,7 +273,7 @@ function AssetPanel({ ticker, range, onClose, onAdd }: {
   const q = useQuery({
     queryKey: ["coverage", "asset", ticker, range.start, range.end],
     queryFn: () => getJson<{
-      ticker: string; kind: "stock" | "future"; levels: Record<LevelId, { first: string; last: string; days: number } | null>;
+      ticker: string; kind: Kind; levels: Record<LevelId, { first: string; last: string; days: number } | null>;
       series: { date: string; close: number | null; volume: number }[]; related: string[];
     }>(`/api/coverage/asset?ticker=${encodeURIComponent(ticker)}&start=${range.start}&end=${range.end}`),
   });
@@ -267,14 +283,14 @@ function AssetPanel({ ticker, range, onClose, onAdd }: {
   const span = calendar(range.start, range.end);
   const x = (d: string) => (Math.max(0, span.indexOf(d)) / Math.max(1, span.length - 1)) * 100;
   const y = (v: number) => 90 - ((v - lo) / Math.max(1e-9, hi - lo)) * 80;
-  const shown = a ? LEVELS.filter((lv) => (a.kind === "future" ? FUTURE_LEVELS : [...STOCK_LEVELS, ...OPTION_LEVELS]).includes(lv.id)) : [];
+  const shown = a ? LEVELS.filter((lv) => KIND_LEVELS[a.kind].includes(lv.id)) : [];
   return (
     <aside className="fixed bottom-0 right-0 top-12 z-30 flex w-full max-w-lg flex-col border-l bg-card" aria-label={t("Asset", "资产")}>
       <div className="flex items-start justify-between border-b px-4 py-3">
         <div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-base font-semibold">{ticker}</span>
-            {a && <Badge variant="secondary">{a.kind === "future" ? t("Future", "期货") : t("Stock", "股票")}</Badge>}
+            {a && <Badge variant="secondary">{({ stock: t("Stock", "股票"), future: t("Future", "期货"), crypto: t("Crypto", "加密货币"), fx: t("FX", "外汇") })[a.kind]}</Badge>}
           </div>
           <div className="text-xs text-muted-foreground">{range.start} → {range.end}</div>
         </div>
@@ -362,7 +378,8 @@ export function CoverageMap() {
     if (!extent.data) return;
     if (!range) setRange(extent.data.default);
     if (!tickers.length) setTickers([...extent.data.suggested.map((s) => s.ticker).slice(0, 10),
-      ...(extent.data.suggested_futures ?? []).slice(0, 6)]);
+      ...(extent.data.suggested_futures ?? []).slice(0, 6), ...(extent.data.suggested_crypto ?? []).slice(0, 3),
+      ...(extent.data.suggested_fx ?? []).slice(0, 3)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extent.data]);
 
@@ -436,15 +453,14 @@ export function CoverageMap() {
 
   const rows: Row[] = React.useMemo(() => {
     if (!data) return [];
-    const stocks = data.tickers.filter((tk) => (data.kinds?.[tk] ?? "stock") === "stock");
-    const futures = data.tickers.filter((tk) => data.kinds?.[tk] === "future");
+    const of = (k: Kind) => data.tickers.filter((tk) => (data.kinds?.[tk] ?? "stock") === k);
     const out: Row[] = [];
-    const group = (g: "stock" | "future", list: string[], label: string) => {
+    const group = (g: Kind, list: string[], label: string) => {
       if (!list.length) return;
       out.push({ kind: "group", key: `g-${g}`, label, count: list.length, group: g });
       if (folded.has(g)) return;
       for (const tk of list) {
-        const levels = g === "future" ? FUTURE_LEVELS : [...STOCK_LEVELS, ...OPTION_LEVELS];
+        const levels = KIND_LEVELS[g];
         out.push({ kind: "ticker", key: tk, ticker: tk, group: g, levels });
         if (!open.has(tk)) continue;
         if (g === "stock") {
@@ -453,15 +469,17 @@ export function CoverageMap() {
           if (show.news) out.push({ kind: "sub", key: `${tk}-news`, ticker: tk, label: t("News", "新闻"), layer: "news" });
           if (show.earnings) out.push({ kind: "sub", key: `${tk}-earn`, ticker: tk, label: t("Company events", "公司事件"), layer: "earnings" });
         } else {
-          for (const lv of FUTURE_LEVELS) {
+          for (const lv of KIND_LEVELS[g]) {
             const meta = LEVELS.find((x) => x.id === lv)!;
             out.push({ kind: "sub", key: `${tk}-${lv}`, ticker: tk, label: L(meta), levels: [lv] });
           }
         }
       }
     };
-    group("stock", stocks, t("Stocks", "个股"));
-    group("future", futures, t("Futures", "期货"));
+    group("stock", of("stock"), t("Stocks", "个股"));
+    group("future", of("future"), t("Futures", "期货"));
+    group("crypto", of("crypto"), t("Crypto", "加密货币"));
+    group("fx", of("fx"), t("FX", "外汇"));
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, open, folded, show.news, show.earnings, locale]);
@@ -483,7 +501,7 @@ export function CoverageMap() {
   function cellTitle(tk: string, d: string, c: CellLevels | undefined, levels: LevelId[], news: number, earn?: Earnings) {
     const parts = LEVELS.filter((lv) => levels.includes(lv.id) && (c?.[lv.id] ?? 0) > 0).map((lv) =>
       lv.id === "options_eod" && c?.contracts ? `${L(lv)} (${c.contracts} ${t("contracts", "个合约")})` :
-      lv.id === "minute" || lv.id === "futures_minute" ? `${L(lv)} (${c?.[lv.id]})` : L(lv));
+      MINUTE_LEVELS.includes(lv.id) ? `${L(lv)} (${c?.[lv.id]})` : L(lv));
     const lines = [`${tk} · ${d}`, parts.length ? parts.join(", ") : t("no data", "无数据")];
     if (news) lines.push(t(`${news} news`, `${news} 条新闻`));
     if (earn) lines.push(`${t("Earnings", "财报")}: ${earn.title}`);
@@ -763,10 +781,9 @@ function CellPanel({ ticker, date, onClose }: { ticker: string; date: string; on
             <section>
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">{t("Data levels", "数据层")}</h3>
               <ul className="divide-y rounded-md border">
-                {LEVELS.filter((lv) => (c.kind === "future") === lv.id.startsWith("futures_")).map((lv) => {
+                {LEVELS.filter((lv) => KIND_LEVELS[c.kind ?? "stock"].includes(lv.id)).map((lv) => {
                   const info = c.levels[lv.id];
-                  const span = lv.id === "minute" || lv.id === "futures_minute" ? c.minute_span
-                    : lv.id === "quotes" || lv.id === "futures_quotes" ? c.quote_span : null;
+                  const span = MINUTE_LEVELS.includes(lv.id) ? c.minute_span : QUOTE_LEVELS.includes(lv.id) ? c.quote_span : null;
                   return (
                     <li key={lv.id} className="flex items-center gap-2 px-3 py-2">
                       {info ? <Check className="h-4 w-4 text-success" /> : <Minus className="h-4 w-4 text-muted-foreground/60" />}

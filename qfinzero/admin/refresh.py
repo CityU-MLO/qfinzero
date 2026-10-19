@@ -23,6 +23,11 @@ FEEDS: dict[str, str] = {
     "us_stock_minute": "us_stocks_sip/minute_aggs_v1",
     "us_option_day": "us_options_opra/day_aggs_v1",
     "us_option_minute": "us_options_opra/minute_aggs_v1",
+    "crypto_daily": "global_crypto/day_aggs_v1",
+    "crypto_minute": "global_crypto/minute_aggs_v1",
+    "fx_daily": "global_forex/day_aggs_v1",
+    "fx_minute": "global_forex/minute_aggs_v1",
+    "fx_quotes": "global_forex/quotes_v1",
 }
 # sources that have a vendor but are not fetched automatically, and why
 MANUAL = {

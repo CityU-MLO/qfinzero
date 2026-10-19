@@ -28,6 +28,12 @@ OPTION_QUOTE_MINUTE = "option_quote_minute"
 FUTURE_DAILY = "future_daily"
 FUTURE_MINUTE = "future_minute"
 FUTURE_QUOTE_MINUTE = "future_quote_minute"
+# 24-hour markets from massive global flat files; trade_date is the UTC day
+CRYPTO_DAILY = "crypto_daily"
+CRYPTO_MINUTE = "crypto_minute"
+FX_DAILY = "fx_daily"
+FX_MINUTE = "fx_minute"
+FX_QUOTE_MINUTE = "fx_quote_minute"
 RATES = "rates"
 CORPORATE_ACTIONS = "corporate_actions"
 DIVIDENDS = "dividends"  # back-compat store for option Greeks / /dividends/query
@@ -56,6 +62,26 @@ class PipelinePaths:
     @property
     def massive_option_minute(self) -> Path:
         return self.massive / "us_options_opra" / "minute_aggs_v1"
+
+    @property
+    def massive_crypto_day(self) -> Path:
+        return self.massive / "global_crypto" / "day_aggs_v1"
+
+    @property
+    def massive_crypto_minute(self) -> Path:
+        return self.massive / "global_crypto" / "minute_aggs_v1"
+
+    @property
+    def massive_fx_day(self) -> Path:
+        return self.massive / "global_forex" / "day_aggs_v1"
+
+    @property
+    def massive_fx_minute(self) -> Path:
+        return self.massive / "global_forex" / "minute_aggs_v1"
+
+    @property
+    def massive_fx_quotes(self) -> Path:
+        return self.massive / "global_forex" / "quotes_v1"
 
     @property
     def massive_treasury(self) -> Path:

@@ -187,7 +187,9 @@ def test_select_all_and_prices():
     assert {s.id for s in prices} == {
         "us_stock_daily", "us_stock_minute", "us_option_day",
         "us_option_minute", "us_databento", "cn_stock_daily", "rates", "corp_actions",
+        "crypto_daily", "crypto_minute", "fx_daily", "fx_minute", "fx_quotes",
     }
+    assert {s.id for s in select("prices", market="global")} >= {"crypto_daily", "fx_quotes", "rates"}
 
 
 def test_select_market_filter():

@@ -34,7 +34,14 @@ INDICES = {
     # to the quote stores at the chosen sampling interval.
     "us_options_opra/quotes_v1": ("option", "quotes"),
     "us_stocks_sip/quotes_v1": ("stock", "quotes"),
+    # 24-hour markets; kept as gzip CSV (the converter reads it directly)
+    "global_crypto/day_aggs_v1": ("crypto", "daily"),
+    "global_crypto/minute_aggs_v1": ("crypto", "minute"),
+    "global_forex/day_aggs_v1": ("fx", "daily"),
+    "global_forex/minute_aggs_v1": ("fx", "minute"),
+    "global_forex/quotes_v1": ("fx", "quotes"),
 }
+KEEP_CSV = ("global_crypto/", "global_forex/")
 _DATE = re.compile(r"(\d{4}-\d{2}-\d{2})\.csv\.gz$")
 
 
@@ -87,9 +94,11 @@ def plan(s3, index: str, start: date, end: date, root: Path) -> list[dict[str, A
                 if not m or not (start.isoformat() <= m.group(1) <= end.isoformat()):
                     continue
                 d = m.group(1)
-                path = root / index / d[:4] / d[5:7] / f"{d}.parquet"
+                base = root / index / d[:4] / d[5:7]
+                path = base / (f"{d}.csv.gz" if index.startswith(KEEP_CSV) else f"{d}.parquet")
+                have = path.exists() or (base / f"{d}.parquet").exists() or (base / f"{d}.csv.gz").exists()
                 out.append({"key": obj["Key"], "date": d, "size": int(obj["Size"]),
-                            "path": str(path), "exists": path.exists()})
+                            "path": str(path), "exists": have})
     out.sort(key=lambda x: x["date"])
     return out
 
@@ -155,7 +164,7 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
             say("[massive] stopped by the user")
             break
         target = Path(f["path"])
-        tmp = target.with_suffix(".csv.gz.part")
+        tmp = target.with_name(f"{f['date']}.csv.gz.part")
         target.parent.mkdir(parents=True, exist_ok=True)
         prog(stage="downloading", current=f["date"])
 
@@ -168,8 +177,11 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
             except TypeError:          # a client without transfer callbacks
                 s3.download_file(BUCKET, f["key"], str(tmp))
                 got[0] += f["size"]
-            prog(stage="converting", current=f["date"])
-            csv_to_parquet(tmp, target)
+            if target.name.endswith(".csv.gz"):
+                tmp.replace(target)          # the library keeps these as massive ships them
+            else:
+                prog(stage="converting", current=f["date"])
+                csv_to_parquet(tmp, target)
             done += 1
             say(f"  [{done}/{len(todo)}] {f['date']}  {f['size'] / 1e6:.1f} MB")
         except Exception as e:  # noqa: BLE001 — report and continue with the next day
