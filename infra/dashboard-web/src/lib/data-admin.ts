@@ -46,6 +46,11 @@ export type Source = {
   last_run?: { status?: string; reason?: string; last_run_ts?: string; rows?: number; fetched_days?: number } | null;
 };
 
+export type RatesRange = { start: string; end: string; dates: number; tenors: Record<string, number> } | null;
+export type RatesStatus = { store: RatesRange; loaded: RatesRange };
+export type RatesFile = { file: string; dates: number; start: string; end: string; tenors: string[];
+  ignored_columns: string[]; bad_dates: number; sample: [string, Record<string, number>][] };
+
 /** What updating a source would do: fetch vendor days (massive), convert local days, or nothing. */
 export type RefreshItem = {
   id: string;
@@ -154,6 +159,12 @@ export const dataAdmin = {
   putConfig: (patch: Partial<Config>) => j<Config>("data/config", { method: "PUT", body: JSON.stringify(patch) }),
   scan: (provider: string) => j<ScanResult>("data/scan", { method: "POST", body: JSON.stringify({ provider }) }),
   sources: () => j<{ sources: Source[] }>("data/status"),
+  ratesStatus: () => j<RatesStatus>("setup/rates"),
+  ratesPreview: (files: { name: string; content: string }[]) =>
+    j<{ files: RatesFile[] }>("setup/rates/preview", { method: "POST", body: JSON.stringify({ files }) }),
+  ratesApply: (files: { name: string; content: string }[], replace = false) =>
+    j<{ ok: boolean; loaded_dates: number; new_dates: number; status: RatesStatus }>("setup/rates/apply",
+      { method: "POST", body: JSON.stringify({ files, replace }) }),
   refreshPlan: (source: string) =>
     j<{ items: RefreshItem[] }>("data/refresh/plan", { method: "POST", body: JSON.stringify({ source }) }),
   startUpdate: (body: { source?: string; market?: string | null; dry_run?: boolean; force?: boolean; fetch?: boolean }) =>

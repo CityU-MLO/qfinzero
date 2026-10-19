@@ -3,6 +3,30 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
+## Unreleased: QFZView and the broker
+
+Added:
+
+- QFZView (`/view`): a TradingView-style viewer over the store for stocks,
+  futures, crypto, FX and option contracts, with 1-minute to daily intervals,
+  zoom and pan, paged history, MA/EMA/Bollinger/VWAP and a bid/ask overlay.
+- The broker's chart uses the same component: history from before the session
+  (time-locked), zoom, intervals, fill markers, working-order and average-price
+  lines. Orders report their outcome, including fills on later bars.
+- Live Greeks in the broker's option chain (IV, delta, gamma, theta, vega at the
+  session clock from `/option/chain_snapshot`) and real bid/ask instead of a
+  synthetic spread.
+- Settings → Rates: load U.S. Treasury or FRED rate files; they are kept across
+  updates and laid over the massive rates.
+
+Changed:
+
+- UPQ shares one DuckDB database through a connection pool; a full queue
+  answers 503 instead of failing with 500 (`UPQ_POOL_SIZE`,
+  `UPQ_DUCKDB_THREADS`, `UPQ_QUEUE_TIMEOUT_S`).
+- Greeks use the latest yield curve on or before the date instead of none.
+- Day suggestions in the broker's date picker rank by traded value.
+
 ## Unreleased: data utility
 
 Added:

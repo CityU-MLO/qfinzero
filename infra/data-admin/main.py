@@ -91,6 +91,48 @@ def _refresh_plan(source: str, market=None) -> list[dict]:
     return refresh.plan(ids, rows)
 
 
+# ── interest-rate files (Settings → Rates) ──
+
+def _storage_root():
+    from pathlib import Path
+    return Path(config_store.dirs()["storage_root"])
+
+
+def _parse_rate_files(body: dict) -> list[dict]:
+    from qfinzero.admin import rates_loader
+    files = (body or {}).get("files") or []
+    if not files:
+        raise HTTPException(422, "no files")
+    out = []
+    for f in files[:20]:
+        try:
+            out.append(rates_loader.parse(str(f.get("content", "")), str(f.get("name", ""))))
+        except ValueError as e:
+            raise HTTPException(422, f"{f.get('name', 'file')}: {e}") from e
+    return out
+
+
+@app.get("/setup/rates")
+def rates_status() -> dict:
+    from qfinzero.admin import rates_loader
+    return rates_loader.status(_storage_root())
+
+
+@app.post("/setup/rates/preview")
+def rates_preview(body: dict = Body(default={})) -> dict:
+    parsed = _parse_rate_files(body)
+    return {"files": [{k: v for k, v in p.items() if k != "rows"} | {"sample": sorted(p["rows"].items())[-3:]}
+                      for p in parsed]}
+
+
+@app.post("/setup/rates/apply")
+def rates_apply(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import rates_loader
+    parsed = _parse_rate_files(body)
+    res = rates_loader.apply(_storage_root(), parsed, replace=bool((body or {}).get("replace")))
+    return {**res, "status": rates_loader.status(_storage_root())}
+
+
 @app.post("/data/refresh/plan")
 def refresh_plan(body: dict = Body(default={})) -> dict:
     """What an update would do per source: vendor days to fetch (massive),

@@ -194,6 +194,23 @@ class UPQClient:
         return [Quote(window_start_ns=r["window_start"], bid=r.get("bid_price"), ask=r.get("ask_price"),
                       bid_size=r.get("bid_size") or 0, ask_size=r.get("ask_size") or 0) for r in rows]
 
+    async def chain_snapshot(self, underlying: str, at: str, expiry: str | None = None,
+                             strike_min: float | None = None, strike_max: float | None = None) -> list[dict]:
+        """GET /option/chain_snapshot — the chain as it stood at ``at`` (UTC ISO):
+        last trade, volume so far, the latest bid/ask/mid and Greeks from the
+        underlying's minute close at that time. Only data final at ``at`` is used."""
+        params: dict = {"underlying": underlying, "at": at, "include_greeks": "true"}
+        if expiry:
+            params["expiry_min"] = expiry
+            params["expiry_max"] = expiry
+        if strike_min is not None:
+            params["strike_min"] = strike_min
+        if strike_max is not None:
+            params["strike_max"] = strike_max
+        resp = await self._client.get("/option/chain_snapshot", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
     async def option_chain(self, underlying: str, date: str, expiry_min: str | None = None) -> list[dict]:
         """GET /option/chain_query — the day's option chain (strikes, greeks) for an underlying."""
         params = {

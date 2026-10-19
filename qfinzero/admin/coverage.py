@@ -205,12 +205,22 @@ def day(d: str, top: int = 12, root: Optional[Path] = None) -> dict[str, Any]:
     and the most traded ones."""
     root = root or _storage()
     out: dict[str, Any] = {"date": d, "levels": {}}
+    # rank every level by the day's traded value from its kind's daily bars:
+    # share volume alone puts penny stocks on top of the minute and option levels
+    value: dict[str, dict[str, float]] = {}
     for level, store in LEVELS:
         if not _partition(store, d, root).is_dir():
             out["levels"][level] = None
             continue
+        kind = level_kind(level)
+        if kind not in value:
+            daily = KIND_STORES[kind][0]
+            ds = day_summary(daily, d, root) if _partition(daily, d, root).is_dir() else {}
+            value[kind] = {t: float(v.get("dollar_volume") or 0) for t, v in ds.items()}
         s = day_summary(store, d, root)
-        ranked = sorted(s.items(), key=lambda kv: -(kv[1].get("dollar_volume") or kv[1].get("volume") or kv[1]["rows"]))
+        dv = value[kind]
+        ranked = sorted(s.items(), key=lambda kv: (-dv.get(kv[0], 0.0),
+                                                   -(kv[1].get("dollar_volume") or kv[1].get("volume") or kv[1]["rows"])))
         out["levels"][level] = {"tickers": len(s), "top": [t for t, _ in ranked[:top]]}
     return out
 

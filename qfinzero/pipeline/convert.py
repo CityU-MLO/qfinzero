@@ -449,6 +449,12 @@ class Converter:
         res.partitions = 1
         res.rows = rows
         res.notes.append("only 1Y/5Y/10Y populated (massive source limitation)")
+        # rate files loaded in Settings stay on top of the massive base
+        from qfinzero.admin import rates_loader
+        if (self.p.state_dir / "rates_loaded.parquet").exists():
+            ov = rates_loader.overlay(self.p.storage)
+            res.rows = ov["dates"]
+            res.notes.append(f"{ov['overlaid']} loaded date(s) laid over")
         return res
 
     # ── corporate actions (+ back-compat dividends store) ───────────────

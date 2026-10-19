@@ -1245,26 +1245,44 @@ class SessionService:
 
         marks = state.cache.get_option_bars_at(ts_ns) if ts_ns is not None else {}
 
+        # 4. The chain as it stood at this bar (time-locked): real bid/ask when
+        #    the store has option quotes, the last trade, the day's volume so far
+        #    and Greeks from the underlying's minute close at the same moment.
+        snap: dict[str, dict] = {}
+        if ts_ns is not None and strikes:
+            at = ns_to_iso(ts_ns + 60_000_000_000)[:19]   # the current bar is final at its close
+            try:
+                for x in await self._upq.chain_snapshot(underlying, at, expiry, strikes[0], strikes[-1]):
+                    if x.get("ticker"):
+                        snap[x["ticker"]] = x
+            except Exception:  # noqa: BLE001 - fall back to the day skeleton
+                snap = {}
+
         def leg(strike: float, typ: str) -> dict | None:
             r = by_key.get((strike, typ))
             if r is None:
                 return None
             contract = r.get("ticker")
             mb = marks.get(contract)
-            last = mb.close if mb is not None else r.get("close")
-            vol = mb.volume if mb is not None else r.get("volume")
-            spread = 0.03  # synthetic bid/ask around the mark
-            bid = round(last * (1 - spread), 2) if last else None
-            ask = round(last * (1 + spread), 2) if last else None
+            sx = snap.get(contract) or {}
+            last = sx.get("last") if sx.get("last") is not None else (mb.close if mb is not None else r.get("close"))
+            vol = sx.get("volume") if sx.get("volume") is not None else (mb.volume if mb is not None else r.get("volume"))
+            greeks = sx if sx.get("greek_status") == "ok" else {}
             return {
                 "contract": contract,
                 "last": last,
-                "bid": bid,
-                "ask": ask,
+                "bid": sx.get("bid"),
+                "ask": sx.get("ask"),
+                "mid": sx.get("mid"),
                 "volume": vol,
-                "iv": r.get("iv"),
-                "delta": r.get("delta"),
-                "live": mb is not None,
+                "iv": greeks.get("iv", r.get("iv")),
+                "delta": greeks.get("delta", r.get("delta")),
+                "gamma": greeks.get("gamma", r.get("gamma")),
+                "theta": greeks.get("theta", r.get("theta")),
+                "vega": greeks.get("vega", r.get("vega")),
+                "greeks": "live" if greeks else ("day" if r.get("delta") is not None else "none"),
+                "greek_status": sx.get("greek_status"),
+                "live": mb is not None or bool(sx),
             }
 
         out_rows = []

@@ -309,6 +309,13 @@ export interface ChainLeg {
   volume: number | null;
   iv: number | null;
   delta: number | null;
+  gamma?: number | null;
+  theta?: number | null;
+  vega?: number | null;
+  mid?: number | null;
+  /** live = computed at this bar; day = the day's close values; none */
+  greeks?: "live" | "day" | "none";
+  greek_status?: string | null;
   live: boolean;
 }
 

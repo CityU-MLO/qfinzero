@@ -35,7 +35,8 @@ import {
   type Position,
 } from "./api";
 import { PriceChart, type PricePoint } from "./price-chart";
-import { CandleChart, type Candle } from "./candle-chart";
+import { type Candle } from "./candle-chart";
+import { BrokerChart } from "./broker-chart";
 import { ClockBar } from "./clock-bar";
 import { OptionChain } from "./option-chain";
 import { AccountPanel } from "./account-panel";
@@ -117,7 +118,16 @@ export function Terminal({
   const [equityHist, setEquityHist] = useState<PricePoint[]>([]);
   const [centerView, setCenterView] = useState<"chart" | "options">("chart");
   const [showAccount, setShowAccount] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: "up" | "down" | "info" } | null>(null);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notify = useCallback((text: string, tone: "up" | "down" | "info" = "info") => {
+    setToast({ text, tone });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
+  }, []);
+  // orders placed here and not filled yet: announce their fills as the clock runs
+  const pending = useRef<Map<string, { symbol: string; side: string }>>(new Map());
   const t = useT();
 
   // Order ticket
@@ -171,6 +181,25 @@ export function Terminal({
     }
   }, []);
 
+  // fills of orders placed here, as they happen
+  useEffect(() => {
+    if (!state || !pending.current.size) return;
+    for (const [oid, o] of [...pending.current]) {
+      const fills = state.trades.filter((x) => x.order_id === oid);
+      if (!fills.length) continue;
+      const stillOpen = state.open_orders.some((x) => x.order_id === oid);
+      if (!stillOpen) pending.current.delete(oid);
+      const q = fills.reduce((a, x) => a + Number(x.qty ?? 0), 0);
+      const px = fills.reduce((a, x) => a + Number(x.price ?? 0) * Number(x.qty ?? 0), 0) / Math.max(1, q);
+      const verb = o.side === "BUY" ? t("Bought", "买入") : t("Sold", "卖出");
+      notify(t(`Filled: ${verb} ${q} ${o.symbol} @ ${px.toFixed(2)}`, `已成交：${verb} ${q} ${o.symbol} @ ${px.toFixed(2)}`),
+        o.side === "BUY" ? "up" : "down");
+      setTab("trades");
+      setHighlight(String(fills[fills.length - 1].trade_id ?? oid));
+      setTimeout(() => setHighlight(null), 2500);
+    }
+  }, [state, notify, t]);
+
   // initial load
   useEffect(() => {
     (async () => {
@@ -201,9 +230,8 @@ export function Terminal({
         const fresh = (s.futures_activity?.settlements.length ?? 0) - before;
         if (fresh > 0) {
           const total = s.futures_activity!.settlements.slice(0, fresh).reduce((a, x) => a + x.amount, 0);
-          setToast(t(`Futures settled: ${total >= 0 ? "+" : ""}${money(total)} variation margin`,
-            `期货结算：变动保证金 ${total >= 0 ? "+" : ""}${money(total)}`));
-          setTimeout(() => setToast(null), 3500);
+          notify(t(`Futures settled: ${total >= 0 ? "+" : ""}${money(total)} variation margin`,
+            `期货结算：变动保证金 ${total >= 0 ? "+" : ""}${money(total)}`), total >= 0 ? "up" : "down");
         }
         if (s.clock.is_done) {
           playingRef.current = false;
@@ -215,7 +243,7 @@ export function Terminal({
         busyRef.current = false;
       }
     },
-    [sessionId, apply, initialEquity, t],
+    [sessionId, apply, initialEquity, t, notify],
   );
 
   const loop = useCallback(() => {
@@ -288,7 +316,7 @@ export function Terminal({
   const submitOrder = useCallback(async () => {
     setErr(null);
     try {
-      await placeOrder({
+      const placed = await placeOrder({
         session_id: sessionId,
         account_id: accountId,
         symbol: selected,
@@ -300,10 +328,32 @@ export function Terminal({
       });
       const s = await getState(sessionId);
       apply(s, true);
+      // say what happened: filled (and at what price), working, or rejected
+      const fills = s.trades.filter((x) => x.order_id === placed.order_id);
+      const working = s.open_orders.find((o) => o.order_id === placed.order_id);
+      const verb = side === "BUY" ? t("Bought", "买入") : t("Sold", "卖出");
+      if (fills.length) {
+        const q = fills.reduce((a, x) => a + Number(x.qty ?? 0), 0);
+        const px = fills.reduce((a, x) => a + Number(x.price ?? 0) * Number(x.qty ?? 0), 0) / Math.max(1, q);
+        notify(t(`${verb} ${q} ${selected} @ ${px.toFixed(2)}`, `已成交：${verb} ${q} ${selected} @ ${px.toFixed(2)}`), side === "BUY" ? "up" : "down");
+        setTab("trades");
+        setHighlight(String(fills[fills.length - 1].trade_id ?? placed.order_id));
+      } else if (working) {
+        pending.current.set(placed.order_id, { symbol: selected, side });
+        notify(orderType === "LIMIT"
+          ? t(`Working: ${side} ${qty} ${selected} @ ${limit}`, `已挂单：${side === "BUY" ? "买入" : "卖出"} ${qty} ${selected} @ ${limit}`)
+          : t(`Sent: ${side} ${qty} ${selected} at market, fills on the next bar`, `已提交市价单：${side === "BUY" ? "买入" : "卖出"} ${qty} ${selected}，下一根 K 线成交`));
+        setTab("orders");
+        setHighlight(placed.order_id);
+      } else {
+        notify(t(`Order ${placed.status.toLowerCase()}`, `委托${placed.status === "REJECTED" ? "被拒绝" : `状态：${placed.status}`}`), "down");
+      }
+      setTimeout(() => setHighlight(null), 2500);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+      notify(e instanceof Error ? e.message : String(e), "down");
     }
-  }, [sessionId, accountId, selected, side, qty, orderType, limit, futs, apply]);
+  }, [sessionId, accountId, selected, side, qty, orderType, limit, futs, apply, notify, t]);
 
   const tradeContract = useCallback(
     async (contract: string, oside: "BUY" | "SELL") => {
@@ -319,15 +369,13 @@ export function Terminal({
         });
         const s = await getState(sessionId);
         apply(s, true);
-        setToast(
-          t(`${oside} ${contract} submitted`, `${oside === "BUY" ? "买入" : "卖出"} ${contract} 已提交`),
-        );
-        setTimeout(() => setToast(null), 2500);
+        notify(t(`${oside} ${contract} submitted`, `${oside === "BUY" ? "买入" : "卖出"} ${contract} 已提交`),
+          oside === "BUY" ? "up" : "down");
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     },
-    [sessionId, accountId, qty, apply, t],
+    [sessionId, accountId, qty, apply, t, notify],
   );
 
   const addSymbol = useCallback(async () => {
@@ -413,15 +461,14 @@ export function Terminal({
         const s = await getState(sessionId);
         apply(s, true);
         const inst = instName(p.instrument_id);
-        setToast(t(`Flatten ${inst} submitted`, `平仓 ${inst} 已提交`));
-        setTimeout(() => setToast(null), 2500);
+        notify(t(`Flatten ${inst} submitted`, `平仓 ${inst} 已提交`));
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       } finally {
         busy2Ref.current = false;
       }
     },
-    [sessionId, accountId, apply, t],
+    [sessionId, accountId, apply, t, notify],
   );
 
   const closeAll = useCallback(async () => {
@@ -688,7 +735,8 @@ export function Terminal({
           <div className="min-h-0 flex-1 px-3 pb-2 pt-1">
             {centerView === "chart" ? (
               chartKind === "candles" ? (
-                <CandleChart symbol={selected} data={selCandles} />
+                <BrokerChart symbol={selected} isFuture={selFut} candles={selCandles} startTs={state?.clock.start_ts}
+                             trades={state?.trades ?? []} orders={state?.open_orders ?? []} positions={state?.positions ?? []} />
               ) : (
                 <PriceChart symbol={selected} data={selHist} up={selUp} />
               )
@@ -742,9 +790,9 @@ export function Terminal({
                 <PositionsTable positions={state?.positions ?? []} onFlatten={flatten} />
               )}
               {tab === "orders" && (
-                <OrdersTable orders={state?.open_orders ?? []} onCancel={doCancel} />
+                <OrdersTable orders={state?.open_orders ?? []} onCancel={doCancel} highlight={highlight} />
               )}
-              {tab === "trades" && <TradesTable trades={state?.trades ?? []} />}
+              {tab === "trades" && <TradesTable trades={state?.trades ?? []} highlight={highlight} />}
             </div>
           </div>
         </div>
@@ -967,8 +1015,9 @@ export function Terminal({
       />
 
       {toast && (
-        <div className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-muted px-4 py-2 text-sm text-foreground">
-          {toast}
+        <div role="status" className={`pointer-events-none absolute right-6 top-16 z-30 rounded-lg border px-4 py-2.5 text-sm font-medium shadow-lg ${
+          toast.tone === "up" ? "border-up/30 bg-card text-up" : toast.tone === "down" ? "border-down/30 bg-card text-down" : "border-border bg-card text-foreground"}`}>
+          {toast.text}
         </div>
       )}
 
@@ -1064,9 +1113,11 @@ function PositionsTable({
 function OrdersTable({
   orders,
   onCancel,
+  highlight,
 }: {
   orders: FullState["open_orders"];
   onCancel: (id: string) => void;
+  highlight?: string | null;
 }) {
   const t = useT();
   if (!orders.length)
@@ -1086,7 +1137,7 @@ function OrdersTable({
       </thead>
       <tbody>
         {orders.map((o) => (
-          <tr key={o.order_id} className="border-t border-border">
+          <tr key={o.order_id} className={`border-t border-border transition-colors ${highlight === o.order_id ? "bg-primary/15" : ""}`}>
             <td className="py-1 text-foreground">{instName(o.instrument_id)}</td>
             <td className={o.side === "BUY" ? "text-up" : "text-down"}>{enumLabel(t, o.side)}</td>
             <td className="text-muted-foreground">{enumLabel(t, o.order_type)}</td>
@@ -1105,7 +1156,7 @@ function OrdersTable({
   );
 }
 
-function TradesTable({ trades }: { trades: FullState["trades"] }) {
+function TradesTable({ trades, highlight }: { trades: FullState["trades"]; highlight?: string | null }) {
   const t = useT();
   if (!trades.length)
     return <div className="py-6 text-center text-muted-foreground">{t("No fills yet.", "暂无成交。")}</div>;
@@ -1128,7 +1179,7 @@ function TradesTable({ trades }: { trades: FullState["trades"] }) {
             const inst = instName(String(tr.instrument_id ?? tr.symbol ?? ""));
             const s = String(tr.side ?? "");
             return (
-              <tr key={i} className="border-t border-border">
+              <tr key={i} className={`border-t border-border transition-colors ${highlight && highlight === String(tr.trade_id) ? "bg-primary/15" : ""}`}>
                 <td className="py-1 text-muted-foreground">{tr.ts ? fmtET(String(tr.ts)) : "—"}</td>
                 <td className="py-1 text-foreground">{inst}</td>
                 <td className={s === "BUY" ? "text-up" : "text-down"}>{enumLabel(t, s)}</td>

@@ -16,6 +16,8 @@ import {
   type ApiType, type Imported, type ModelGroup, type ModelSettings,
 } from "@/lib/model-groups";
 import { cn } from "@/lib/utils";
+import { RatesPanel } from "@/components/settings/rates-panel";
+import { useMe } from "@/components/user-menu";
 
 const inputCls =
   "w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
@@ -152,6 +154,7 @@ function GroupCard({
 }
 
 export default function SettingsPage() {
+  const { data: me } = useMe();
   const t = useT();
   const [s, setS] = useState<ModelSettings>(emptySettings());
   const [loaded, setLoaded] = useState(false);
@@ -287,6 +290,8 @@ export default function SettingsPage() {
             onChange={(e) => commit({ ...s, proxy: e.target.value.trim() })} />
         </CardContent>
       </Card>
+
+      {me?.role === "admin" && <RatesPanel />}
 
       {importOpen && (
         <ImportDialog

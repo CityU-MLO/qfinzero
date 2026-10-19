@@ -28,6 +28,7 @@ export function OptionChain({
   const reloadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [flash, setFlash] = useState<Record<string, "up" | "down">>({});
   const [poll, setPoll] = useState(0);
+  const [greeks, setGreeks] = useState(true);
 
   // Re-fetch on underlying/expiry change and every clock step (flash). Skips if a
   // request is in flight, so it self-throttles to backend latency. When the
@@ -79,6 +80,7 @@ export function OptionChain({
   );
 
   const rows = chain?.rows ?? [];
+  const missingRate = rows.some((r) => r.call?.greek_status === "missing_rate" || r.put?.greek_status === "missing_rate");
   const spot = chain?.spot ?? undefined;
   const atmStrike =
     spot != null && rows.length
@@ -114,7 +116,17 @@ export function OptionChain({
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-up" /> {t("live · minute", "实时 · 分钟")}
         </span>
         {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        <button onClick={() => setGreeks(!greeks)}
+                className={`ml-auto rounded-md border px-2 py-0.5 text-[11px] ${greeks ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"}`}>
+          Greeks
+        </button>
       </div>
+      {greeks && missingRate && (
+        <div className="border-b border-border bg-warning/10 px-4 py-1.5 text-[11px] text-warning">
+          {t("No interest rate for this date, so Greeks cannot be computed. ", "此日期没有利率数据，无法计算 Greeks。")}
+          <a href="/settings#rates" className="font-medium underline">{t("Load a rate file in Settings", "到设置中加载利率文件")}</a>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto font-mono text-xs">
         {err && <div className="p-4 text-down">{err}</div>}
@@ -125,16 +137,17 @@ export function OptionChain({
           <table className="w-full">
             <thead className="sticky top-0 z-10 bg-background text-[10px] text-muted-foreground">
               <tr>
-                <th className="py-1 text-center text-up" colSpan={5}>
+                <th className="py-1 text-center text-up" colSpan={greeks ? 10 : 5}>
                   {t("Calls", "看涨")}
                 </th>
                 <th className="py-1 text-center">{t("Strike", "行权价")}</th>
-                <th className="py-1 text-center text-down" colSpan={5}>
+                <th className="py-1 text-center text-down" colSpan={greeks ? 10 : 5}>
                   {t("Puts", "看跌")}
                 </th>
               </tr>
               <tr className="text-right text-muted-foreground">
                 <th className="px-1"></th>
+                {greeks && ["ν", "Θ", "Γ", "Δ", "IV"].map((g) => <th key={`c${g}`} className="px-1">{g}</th>)}
                 <th className="px-1">{t("Bid", "买价")}</th>
                 <th className="px-1">{t("Ask", "卖价")}</th>
                 <th className="px-1">{t("Last", "最新价")}</th>
@@ -144,6 +157,7 @@ export function OptionChain({
                 <th className="px-1">{t("Bid", "买价")}</th>
                 <th className="px-1">{t("Ask", "卖价")}</th>
                 <th className="px-1">{t("Vol", "成交量")}</th>
+                {greeks && ["IV", "Δ", "Γ", "Θ", "ν"].map((g) => <th key={`p${g}`} className="px-1">{g}</th>)}
                 <th className="px-1"></th>
               </tr>
             </thead>
@@ -152,11 +166,11 @@ export function OptionChain({
                 const atm = r.strike === atmStrike;
                 return (
                   <tr key={r.strike} className={atm ? "bg-muted" : "hover:bg-muted"}>
-                    <Side leg={r.call} side="call" flash={flash} onTrade={onTrade} />
+                    <Side leg={r.call} side="call" flash={flash} onTrade={onTrade} greeks={greeks} />
                     <td className={`px-2 py-1 text-center font-semibold ${atm ? "text-warning" : "text-foreground"}`}>
                       {num(r.strike)}
                     </td>
-                    <Side leg={r.put} side="put" flash={flash} onTrade={onTrade} />
+                    <Side leg={r.put} side="put" flash={flash} onTrade={onTrade} greeks={greeks} />
                   </tr>
                 );
               })}
@@ -173,17 +187,19 @@ function Side({
   side,
   flash,
   onTrade,
+  greeks,
 }: {
   leg: ChainLeg | null;
   side: "call" | "put";
   flash: Record<string, "up" | "down">;
   onTrade: (contract: string, s: "BUY" | "SELL") => void;
+  greeks: boolean;
 }) {
   const t = useT();
   if (!leg) {
     return (
       <>
-        {Array.from({ length: 5 }).map((_, i) => (
+        {Array.from({ length: greeks ? 10 : 5 }).map((_, i) => (
           <td key={i} className="px-1 py-1 text-right text-muted-foreground">
             —
           </td>
@@ -243,6 +259,19 @@ function Side({
       {bs}
     </td>
   );
-  // Call: [BS] Bid Ask Last Vol  ·  Put: Last Bid Ask Vol [BS]
-  return <>{side === "call" ? [trade, cBid, cAsk, cLast, cVol] : [cLast, cBid, cAsk, cVol, trade]}</>;
+  const g = (key: string, v: number | null | undefined, f: (x: number) => string) => (
+    <td key={key} title={leg.greeks === "day" ? t("Day close value (no live Greeks at this bar)", "当日收盘值（此刻无实时 Greeks）") : undefined}
+        className={`px-1 py-1 text-right ${leg.greeks === "live" ? "text-foreground" : "text-muted-foreground/60"}`}>
+      {v != null ? f(v) : "—"}
+    </td>
+  );
+  const gIv = g("iv", leg.iv, (x) => `${(x * 100).toFixed(1)}%`);
+  const gD = g("delta", leg.delta, (x) => x.toFixed(2));
+  const gG = g("gamma", leg.gamma, (x) => x.toFixed(4));
+  const gT = g("theta", leg.theta, (x) => x.toFixed(2));
+  const gV = g("vega", leg.vega, (x) => x.toFixed(2));
+  // Call: [BS] (ν Θ Γ Δ IV) Bid Ask Last Vol  ·  Put: Last Bid Ask Vol (IV Δ Γ Θ ν) [BS]
+  const callCells = greeks ? [trade, gV, gT, gG, gD, gIv, cBid, cAsk, cLast, cVol] : [trade, cBid, cAsk, cLast, cVol];
+  const putCells = greeks ? [cLast, cBid, cAsk, cVol, gIv, gD, gG, gT, gV, trade] : [cLast, cBid, cAsk, cVol, trade];
+  return <>{side === "call" ? callCells : putCells}</>;
 }

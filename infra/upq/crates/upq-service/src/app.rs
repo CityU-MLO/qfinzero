@@ -2789,13 +2789,16 @@ fn fetch_spot_daily(storage_root: &Path, ticker: &str, date: &str) -> Option<f64
 }
 
 /// Fetch the full rates row for a given date from rates.parquet.
+/// The yield curve in force on `date`: that day's row, else the latest earlier
+/// one (rates are published on business days and the store can lag behind the
+/// prices; load newer rates in Settings to keep Greeks current).
 fn fetch_rates_row(storage_root: &Path, date: &str) -> Option<Value> {
     let rates_path = storage_root.join("rates").join("rates.parquet");
     if !rates_path.exists() {
         return None;
     }
     let sql = format!(
-        "SELECT * FROM read_parquet('{path}') WHERE date = DATE '{date}' LIMIT 1",
+        "SELECT * FROM read_parquet('{path}') WHERE date <= DATE '{date}' ORDER BY date DESC LIMIT 1",
         path = sql_escape_literal(&rates_path.to_string_lossy()),
         date = sql_escape_literal(date),
     );

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, CalendarDays, Database, Grid3x3, LineChart, MessageSquare, Newspaper, Settings } from "lucide-react";
+import { BookOpen, CalendarDays, CandlestickChart, Database, Grid3x3, LineChart, MessageSquare, Newspaper, Settings } from "lucide-react";
 
 import { useLegacySkin } from "@/components/app-providers";
 import { LanguageToggle, useT } from "@/components/locale-provider";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/chat", label: ["Chat", "对话"], icon: MessageSquare, admin: false },
+  { href: "/view", label: ["QFZView", "QFZView"], icon: CandlestickChart, admin: false },
   { href: "/broker", label: ["Broker", "模拟交易"], icon: LineChart, admin: false },
   { href: "/news", label: ["News", "新闻"], icon: Newspaper, admin: false },
   { href: "/calendar", label: ["Calendar", "日历"], icon: CalendarDays, admin: false },

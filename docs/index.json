@@ -17,6 +17,7 @@
         { "slug": "chat", "title": { "en": "Chat", "zh": "对话" }, "en": "docs/en/chat.md", "zh": "docs/cn/chat.md" },
         { "slug": "agent-market-data", "title": { "en": "Market data for agents", "zh": "Agent 行情工具" }, "en": "docs/en/upq/agent-guide.md", "zh": "docs/cn/upq/agent-guide.md" },
         { "slug": "agent-trading", "title": { "en": "Trading for agents", "zh": "Agent 交易工具" }, "en": "docs/en/pmb/agent-guide.md", "zh": "docs/cn/pmb/agent-guide.md" },
+        { "slug": "qfzview", "title": { "en": "QFZView", "zh": "QFZView" }, "en": "docs/en/qfzview.md", "zh": "docs/cn/qfzview.md" },
         { "slug": "broker-terminal", "title": { "en": "Broker terminal", "zh": "交易终端" }, "en": "docs/en/pmb/broker-terminal.md", "zh": "docs/cn/pmb/broker-terminal.md" },
         { "slug": "benchmark", "title": { "en": "Agent benchmark", "zh": "Agent 基准测试" }, "en": "docs/en/bench.md", "zh": "docs/cn/bench.md" },
         { "slug": "sample-data", "title": { "en": "Sample dataset", "zh": "样本数据集" }, "en": "docs/en/sample-data.md", "zh": "docs/cn/sample-data.md" },
