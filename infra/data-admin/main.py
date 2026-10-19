@@ -340,6 +340,23 @@ def setup_test_key(vendor: str, key_id: str) -> dict:
         raise HTTPException(422, str(e))
 
 
+@app.post("/setup/compact")
+def setup_compact(body: dict = Body(default={})) -> dict:
+    """Archive compression of the QFZ store; ``dry_run`` answers at once."""
+    from pathlib import Path
+    from qfinzero.admin import config_store
+    from qfinzero.pipeline.compact import compact
+    storage = Path(config_store.dirs().get("storage_root", ""))
+    days = int(body.get("older_than_days", 30))
+    if body.get("dry_run", True):
+        return compact(storage, older_than_days=days, dry_run=True)
+
+    def _task(job):
+        return compact(storage, older_than_days=days, on_line=job.log,
+                       on_progress=job.update, should_stop=job.cancelled)
+    return registry.submit("compact", f"compact QFZ store (older than {days} days)", _task).snapshot()
+
+
 @app.get("/setup/spend")
 def setup_spend(month: str | None = None) -> dict:
     from qfinzero.admin import vendor_keys

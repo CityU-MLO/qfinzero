@@ -107,6 +107,51 @@ function DirCard({ title, info, icon: Icon, edit, onEdit }: {
   );
 }
 
+function Compaction() {
+  const t = useT();
+  const [days, setDays] = React.useState(30);
+  const [plan, setPlan] = React.useState<{ files?: number; bytes?: number; cutoff?: string } | null>(null);
+  const [jobId, setJobId] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const job = useQuery({
+    queryKey: ["setup", "job", jobId], queryFn: () => dataAdmin.job(jobId!), enabled: Boolean(jobId),
+    refetchInterval: (q) => (q.state.data && ["queued", "running"].includes(q.state.data.status) ? 1500 : false),
+  });
+  const estimate = async () => {
+    setBusy(true);
+    try { setPlan(await dataAdmin.compact(days, true)); } finally { setBusy(false); }
+  };
+  const run = async () => {
+    setBusy(true);
+    try { setJobId((await dataAdmin.compact(days, false)).id); } finally { setBusy(false); }
+  };
+  const running = job.data && ["queued", "running"].includes(job.data.status);
+  return (
+    <div className="space-y-2 border-t pt-2">
+      <div className="font-medium">{t("Archive compression", "归档压缩")}</div>
+      <p className="text-[11.5px] text-muted-foreground">
+        {t("Measured on real partitions: rewriting history at zstd 9 saves 3-6% and reads at the same speed; larger row groups would slow single-ticker queries 2-4x, so they are not used. New data stays at zstd 3.",
+          "在真实分区上测得：把历史分区重写为 zstd 9 可节省 3–6%，读取速度不变；更大的行组会让单代码查询慢 2–4 倍，因此不采用。新数据仍使用 zstd 3。")}
+      </p>
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        {t("Older than", "早于")}
+        <input type="number" min={0} className="h-8 w-20 rounded-md border border-input bg-card px-2" value={days}
+          onChange={(e) => { setDays(Number(e.target.value) || 0); setPlan(null); }} />
+        {t("days", "天")}
+        <Button size="sm" variant="outline" onClick={estimate} disabled={busy}>{t("Estimate", "估算")}</Button>
+        <Button size="sm" onClick={run} disabled={busy || !plan?.files || Boolean(running)}>{t("Compress", "压缩")}</Button>
+      </div>
+      {plan && <div className="text-[12px] text-muted-foreground">
+        {t(`${plan.files} files, ${fmtBytes(plan.bytes)} before ${plan.cutoff}.`, `${plan.cutoff} 之前共 ${plan.files} 个文件，${fmtBytes(plan.bytes)}。`)}
+      </div>}
+      {job.data && <JobProgressView p={job.data.progress} running={Boolean(running)} />}
+      {job.data?.status === "done" && (job.data.lines ?? []).slice(-1).map((l) => (
+        <div key={l} className="font-mono text-[11.5px] text-success">{l}</div>
+      ))}
+    </div>
+  );
+}
+
 export function LayoutPanel() {
   const t = useT();
   const qc = useQueryClient();
@@ -178,6 +223,7 @@ export function LayoutPanel() {
                     </div>
                   )}
                   <div className="pt-1 text-[11px] text-muted-foreground">{t("Config file", "配置文件")}: <span className="font-mono">{L.config_file}</span></div>
+                  <Compaction />
                 </div>
               </div>
             </div>

@@ -157,6 +157,9 @@ export const dataAdmin = {
     j<{ ok: boolean; created: string[]; skipped: { path: string; config_key: string; reason: string }[]; layout: Layout }>(
       "setup/layout/init", { method: "POST", body: JSON.stringify({ paths }) }),
   keys: () => j<KeysView>("setup/keys"),
+  compact: (older_than_days: number, dry_run: boolean) =>
+    j<Job & { files?: number; bytes?: number; cutoff?: string; ok?: boolean }>("setup/compact", {
+      method: "POST", body: JSON.stringify({ older_than_days, dry_run }) }),
   saveKey: (vendor: Vendor, key: Partial<VendorKey> & Record<string, unknown>) =>
     j<VendorKey>(`setup/keys/${vendor}`, { method: "POST", body: JSON.stringify(key) }),
   deleteKey: (vendor: Vendor, id: string) => j<{ ok: boolean }>(`setup/keys/${vendor}/${id}`, { method: "DELETE" }),

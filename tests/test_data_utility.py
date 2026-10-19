@@ -211,3 +211,22 @@ def test_jobs_progress_cancel_and_persistence(env, tmp_path):
     assert reg2.get("download-1").status == "cancelled"
     assert reg2.get("download-9").status == "interrupted"
     assert reg2.submit("download", "next", lambda j: {"ok": True}).id == "download-10"
+
+
+def test_compact_rewrites_old_partitions_once(env):
+    import duckdb
+    from qfinzero.pipeline.compact import compact
+    from qfinzero.pipeline.engine import copy_to_parquet, parquet_options
+    store = Path(env) / "qfz" / "upq"
+    con = duckdb.connect()
+    for d in ("2020-01-02", "2099-01-02"):
+        copy_to_parquet(con, "SELECT 'X' AS ticker, range AS window_start, random() AS close FROM range(50000)",
+                        store / "stock_minute" / f"trade_date={d}" / "part-0000.parquet")
+    assert "COMPRESSION_LEVEL 3" in parquet_options() and "COMPRESSION_LEVEL 9" in parquet_options("archive")
+    plan = compact(store, older_than_days=30, dry_run=True)
+    assert plan["files"] == 1                                    # the 2099 partition is too new
+    r = compact(store, older_than_days=30)
+    assert r["ok"] and r["files"] == 1 and r["after"] <= r["before"]
+    assert compact(store, older_than_days=30, dry_run=True)["files"] == 0      # remembered
+    n = con.execute(f"SELECT count(*) FROM read_parquet('{store}/stock_minute/trade_date=2020-01-02/*.parquet')").fetchone()[0]
+    assert n == 50000

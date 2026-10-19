@@ -59,7 +59,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from ..engine import _lit
+from ..engine import _lit, parquet_options
 
 # ── constants ────────────────────────────────────────────────────────────
 
@@ -1315,7 +1315,7 @@ def refilter_part(con, partition_dir: Path) -> Optional[int]:
         cond = _excluded(sibs)
     con.execute(
         f"COPY (SELECT z.* FROM read_parquet('{_lit(ours)}') z WHERE TRUE{cond}) "
-        f"TO '{_lit(tmp)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        f"TO '{_lit(tmp)}' ({parquet_options()})")
     n = con.execute(f"SELECT count(*) FROM read_parquet('{_lit(tmp)}')").fetchone()[0]
     if n == 0:
         tmp.unlink(missing_ok=True)

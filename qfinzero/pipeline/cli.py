@@ -137,6 +137,14 @@ def _do_convert(args) -> int:
     return 0
 
 
+def _do_compact(args) -> int:
+    from .compact import compact
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
+    stores = [x.strip() for x in args.stores.split(",")] if args.stores else None
+    res = compact(paths.storage, stores=stores, older_than_days=args.older_than, dry_run=args.dry_run, on_line=print)
+    return 0 if res.get("ok") else 1
+
+
 def _do_validate(args) -> int:
     from .engine import _lit, connect
     paths = resolve(args.massive, args.tushare, args.storage, args.databento)
@@ -402,6 +410,13 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--end", help="YYYY-MM-DD")
     ex.add_argument("--json", action="store_true", default=True, help=argparse.SUPPRESS)
     ex.set_defaults(func=_do_explore)
+
+    # ── maintenance: archive compression ──
+    cp = sub.add_parser("compact", help="rewrite partitions older than N days at zstd level 9 (3-6%% smaller)")
+    cp.add_argument("--older-than", type=int, default=30, help="days (default 30)")
+    cp.add_argument("--stores", default=None, help="comma-separated stores (default: all price stores)")
+    cp.add_argument("--dry-run", action="store_true")
+    cp.set_defaults(func=_do_compact)
 
     # ── admin: setup-state ──
     ss = sub.add_parser("setup-state", help="first-run setup state (wizard vs status)")
