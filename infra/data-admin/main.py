@@ -91,6 +91,65 @@ def _refresh_plan(source: str, market=None) -> list[dict]:
     return refresh.plan(ids, rows)
 
 
+# ── news storage (Data setup → News) ──
+
+@app.get("/setup/news")
+def news_usage() -> dict:
+    from qfinzero.admin import news_store
+    return news_store.usage()
+
+
+@app.post("/setup/news/test")
+def news_test(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import news_store
+    return news_store.test((body or {}).get("mongo_uri"), (body or {}).get("mongo_db"))
+
+
+@app.put("/setup/news")
+def news_save(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import news_store
+    try:
+        return news_store.save(body or {})
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.post("/setup/news/split")
+def news_split(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import news_store
+
+    def _task(job):
+        return news_store.split(on_line=job.log, on_progress=job.update, should_stop=job.cancelled,
+                                sources=(body or {}).get("sources"))
+    return registry.submit("news", "split news by vendor", _task, meta={"kind": "news-split"}).snapshot()
+
+
+@app.post("/setup/news/import")
+def news_import(body: dict = Body(default={})) -> dict:
+    """Load Benzinga news files (``YYYY-MM.jsonl[.gz]``, folders of them or a
+    Benzinga ``.zip`` archive) from the server into the news store."""
+    from qfinzero.admin import datasetup
+    from qfinzero.update.loaders import news as news_loader
+    paths = list((body or {}).get("paths") or [])
+    if not paths:
+        raise HTTPException(422, "choose news files, folders or archives")
+    try:
+        for p in paths:
+            datasetup._allowed(datasetup.Path(p))
+    except PermissionError as e:
+        _setup_error(e)
+
+    def _task(job):
+        files = news_loader.unpack(paths, on_line=job.log)
+        if not files:
+            raise ValueError("no YYYY-MM.jsonl[.gz] files in the selection")
+        job.update(stage="loading", files_total=len(files), files_done=0)
+        res = news_loader.load(files=files, on_line=job.log)
+        job.update(files_done=len(files))
+        return {"ok": True, **res}
+    return registry.submit("news", f"import news ({len(paths)} path(s))", _task, meta={"kind": "news-import"}).snapshot()
+
+
 # ── interest-rate files (Settings → Rates) ──
 
 def _storage_root():

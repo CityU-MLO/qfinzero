@@ -76,7 +76,9 @@ ESP 读取带 `ESP_` 前缀的设置。
 | `ESP_NEWS_BACKEND` | `auto` | `auto` 在 `NEWS_DB` 文件存在时使用它，否则用 MongoDB；`sqlite` 或 `mongo` 强制指定 |
 | `ESP_MONGO_URI` 或 `MONGO_URI` | `mongodb://localhost:27018` | 存放新闻集合的 MongoDB |
 | `ESP_MONGO_DB` 或 `MONGO_DB` | `market_news` | 数据库 |
-| `ESP_MONGO_COLLECTION` 或 `MONGO_COLLECTION` | `ticker_news` | 集合 |
+| `ESP_MONGO_COLLECTION` 或 `MONGO_COLLECTION` | `ticker_news` | 共享集合 |
+
+设置 → 新闻存储 会覆盖 `MONGO_*`，并选择读取共享集合还是每个数据商一个集合（见 [ESP](esp/README.md#新闻存储)）；显式设置的 `ESP_MONGO_*` 仍然优先。
 | `ESP_DEFAULT_PAGE_SIZE`、`ESP_MAX_PAGE_SIZE` | `50`、`500` | 分页限制 |
 | `ESP_LOG_LEVEL` | `INFO` | 日志级别 |
 

@@ -118,23 +118,28 @@ def _month_files(since: str | None, until: str | None) -> list[Path]:
     return sorted(out)
 
 
-def _collection():
-    from pymongo import MongoClient
-    client = MongoClient(config.MONGO_URI, serverSelectionTimeoutMS=4000)
-    return client, client[config.MONGO_DB][config.MONGO_COLLECTION]
+def _collection(name: str | None = None):
+    """Client and the collection Benzinga news goes to: ``news_benzinga`` once
+    news is split by vendor, the shared collection before (Data setup -> News)."""
+    from qfinzero.admin import news_store
+    s = news_store.settings()
+    client = news_store.client(s["mongo_uri"])
+    return client, client[s["mongo_db"]][name or news_store.write_target("benzinga", s)]
 
 
-def load(since: str | None = None, until: str | None = None, batch: int = 2000) -> dict:
+def load(since: str | None = None, until: str | None = None, batch: int = 2000,
+         collection: str | None = None, files: list[Path] | None = None, on_line=None) -> dict:
     from pymongo import UpdateOne
 
-    files = _month_files(since, until)
+    from qfinzero.admin import news_store
+    files = files if files is not None else _month_files(since, until)
     if not files:
         return {"files": 0, "upserts": 0, "note": f"no news files in {_news_dir()}"}
 
-    client, coll = _collection()
-    # indexes ESP queries on (idempotent)
-    coll.create_index([("published_utc", -1)])
-    coll.create_index([("tickers", 1)])
+    client, coll = _collection(collection)
+    say = on_line or (lambda _l: None)
+    say(f"[news] {len(files)} file(s) -> {coll.database.name}.{coll.name}")
+    news_store.ensure_indexes(coll.database, coll.name)   # the indexes ESP queries on (idempotent)
 
     total = upserts = skipped = 0
     ops: list = []
@@ -166,9 +171,52 @@ def load(since: str | None = None, until: str | None = None, batch: int = 2000) 
 
     count = coll.estimated_document_count()
     client.close()
+    say(f"[news] read {total:,}, written {upserts:,}, skipped {skipped:,}; {coll.name} holds {count:,}")
     return {"files": len(files), "read": total, "upserts": upserts,
-            "skipped": skipped, "collection_count": count,
+            "skipped": skipped, "collection": coll.name, "collection_count": count,
             "range": [since or "*", until or "*"]}
+
+
+def unpack(paths: list[str], on_line=None) -> list[Path]:
+    """Month files from ``paths`` (``.jsonl``, ``.jsonl.gz`` or a Benzinga
+    archive ``.zip`` with ``data/YYYY-MM.jsonl.gz`` and ``manifest.json``).
+    Archives are checked against their manifest's SHA-256 and their month
+    files copied into the raw news library."""
+    import hashlib
+    import zipfile
+    say = on_line or (lambda _l: None)
+    out: list[Path] = []
+    for raw in paths:
+        p = Path(raw)
+        if p.is_dir():
+            out += sorted(x for x in p.rglob("*.jsonl*") if _MONTH_RE.search(x.name))
+            continue
+        if p.suffix != ".zip":
+            if not _MONTH_RE.search(p.name):
+                raise ValueError(f"{p.name}: expected YYYY-MM.jsonl[.gz]")
+            out.append(p)
+            continue
+        with zipfile.ZipFile(p) as z:
+            manifest = json.loads(z.read("manifest.json")) if "manifest.json" in z.namelist() else {}
+            sums = {f["file"]: f.get("file_sha256") for f in manifest.get("files", [])}
+            for name in z.namelist():
+                m = _MONTH_RE.search(Path(name).name)
+                if not m or name.endswith("/"):
+                    continue
+                data = z.read(name)
+                want = sums.get(name)
+                if want and hashlib.sha256(data).hexdigest() != want:
+                    raise ValueError(f"{p.name}:{name}: SHA-256 does not match the manifest")
+                dst = _news_dir() / m.group(1) / Path(name).name
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists() or dst.read_bytes() != data:
+                    dst.write_bytes(data)
+                say(f"[news] {p.name}:{name} -> {dst}" + (" (checksum ok)" if want else ""))
+                out.append(dst)
+            if manifest:
+                (_news_dir() / str(manifest.get("month", "x"))[:4] / f"{manifest.get('month')}.manifest.json").write_text(
+                    json.dumps(manifest, indent=2))
+    return out
 
 
 def status() -> dict:
@@ -177,7 +225,7 @@ def status() -> dict:
         n = coll.estimated_document_count()
         latest = coll.find_one(sort=[("published_utc", -1)], projection={"published_utc": 1})
         client.close()
-        return {"mongo": config.MONGO_URI, "collection_count": n,
+        return {"mongo": config.MONGO_URI, "collection": coll.name, "collection_count": n,
                 "latest": latest.get("published_utc").isoformat() if latest and latest.get("published_utc") else None}
     except Exception as e:  # noqa: BLE001
         return {"mongo": config.MONGO_URI, "error": str(e)}

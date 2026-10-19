@@ -16,6 +16,7 @@ import {
   type ApiType, type Imported, type ModelGroup, type ModelSettings,
 } from "@/lib/model-groups";
 import { cn } from "@/lib/utils";
+import { NewsPanel } from "@/components/settings/news-panel";
 import { RatesPanel } from "@/components/settings/rates-panel";
 import { useMe } from "@/components/user-menu";
 
@@ -292,6 +293,7 @@ export default function SettingsPage() {
       </Card>
 
       {me?.role === "admin" && <RatesPanel />}
+      {me?.role === "admin" && <NewsPanel />}
 
       {importOpen && (
         <ImportDialog

@@ -44,23 +44,67 @@ logger = logging.getLogger("esp")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def _news_config() -> dict:
+    """MongoDB news settings from the data configuration (Settings -> News
+    storage), falling back to the ESP environment. ``ESP_MONGO_*`` set
+    explicitly still win, as documented."""
+    try:
+        from qfinzero.admin import news_store
+        s = news_store.settings()
+        targets = news_store.read_targets(s)
+        if os.environ.get("ESP_MONGO_COLLECTION"):
+            targets = [("shared", os.environ["ESP_MONGO_COLLECTION"])]
+        return {"mongo_uri": os.environ.get("ESP_MONGO_URI") or s["mongo_uri"],
+                "mongo_db": os.environ.get("ESP_MONGO_DB") or s["mongo_db"],
+                "collections": targets,
+                "prefixes": {x["id"]: x.get("prefix") or "" for x in s["sources"]}}
+    except Exception as e:  # noqa: BLE001 - no data configuration: the environment
+        logger.debug("news settings unavailable (%s); using ESP_MONGO_*", e)
+        return {"mongo_uri": settings.mongo_uri, "mongo_db": settings.mongo_db,
+                "collections": [("shared", settings.mongo_collection)], "prefixes": {}}
+
+
+async def _watch_news_config(ds, current: dict, interval: float = 15.0):
+    """Swap the news source when its settings change (no restart needed)."""
+    from services.data_sources import MongoNewsSource, MultiMongoNewsSource
+    while True:
+        await asyncio.sleep(interval)
+        if ds.news.kind != "mongo":
+            continue
+        new = _news_config()
+        if new == current:
+            continue
+        if len(new["collections"]) > 1:
+            src = MultiMongoNewsSource(new["mongo_uri"], new["mongo_db"], new["collections"], new["prefixes"])
+        else:
+            src = MongoNewsSource(new["mongo_uri"], new["mongo_db"], new["collections"][0][1])
+        await src.connect()
+        old, ds.news, current = ds.news, src, new
+        await old.close()
+        logger.info("News now reads %s/%s", new["mongo_db"], ", ".join(c for _, c in new["collections"]))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Resolve DB paths relative to repo root
     earnings_path = str(REPO_ROOT / settings.earnings_db)
     econ_path = str(REPO_ROOT / settings.econ_events_db)
 
+    news_cfg = _news_config()
     ds = DataSourceManager(
-        mongo_uri=settings.mongo_uri,
-        mongo_db=settings.mongo_db,
+        mongo_uri=news_cfg["mongo_uri"],
+        mongo_db=news_cfg["mongo_db"],
         mongo_collection=settings.mongo_collection,
         earnings_db=earnings_path,
         econ_events_db=econ_path,
         news_backend=settings.news_backend,
         news_db=str(REPO_ROOT / settings.news_db),
+        news_collections=news_cfg["collections"],
+        news_prefixes=news_cfg["prefixes"],
     )
     await ds.connect()
     reconnect = asyncio.create_task(ds.keep_connected())
+    watcher = asyncio.create_task(_watch_news_config(ds, news_cfg))
 
     event_svc = EventService(ds)
 
@@ -78,6 +122,7 @@ async def lifespan(app: FastAPI):
     yield
 
     reconnect.cancel()
+    watcher.cancel()
     await ds.close()
     logger.info("ESP stopped")
 

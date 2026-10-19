@@ -69,6 +69,31 @@ Sources (RSS, APIs, scrapers)
    Push Service → Agents / DB / Factor Generators
 ```
 
+## News storage
+
+News lives in MongoDB, one collection per vendor:
+
+| vendor | market | collection | id prefix |
+|---|---|---|---|
+| Benzinga | US | `news_benzinga` | `bz_` |
+| Tushare | CN | `news_tushare` | `ts_` |
+
+Older installs keep every vendor in one shared collection (`ticker_news`),
+which other services may also read. QFZ never modifies it: **Settings → News
+storage** copies each vendor out of it (server side; re-running only
+refreshes), shows documents, disk and index size per collection, and switches
+QFZ between the shared collection and the vendor collections. ESP picks up a
+change within 15 seconds and reads the vendor collections as one source
+(results merged in time order, so limits and cursors behave as before). Once
+switched, imports write to the vendor collection only.
+
+The same page imports Benzinga news from a path on the server: a
+`YYYY-MM.jsonl[.gz]` file, a folder of them, or a Benzinga `.zip` archive,
+which is checked against its manifest's SHA-256 before loading.
+
+All times are stored in UTC. Tushare announcements that carry only a date are
+stored as midnight China time (16:00 UTC the day before).
+
 ## Quick Example
 
 ```bash

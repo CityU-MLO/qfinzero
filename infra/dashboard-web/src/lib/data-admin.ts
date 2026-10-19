@@ -51,6 +51,20 @@ export type RatesStatus = { store: RatesRange; loaded: RatesRange };
 export type RatesFile = { file: string; dates: number; start: string; end: string; tenors: string[];
   ignored_columns: string[]; bad_dates: number; sample: [string, Record<string, number>][] };
 
+export type NewsSource = { id: string; vendor: string; market: string; collection: string; prefix: string; enabled: boolean };
+export type NewsSettings = { mongo_uri: string; mongo_db: string; legacy_collection: string; mode: "legacy" | "vendor"; sources: NewsSource[] };
+export type NewsCollUsage = {
+  collection: string; exists: boolean; documents?: number; data_bytes?: number; storage_bytes?: number;
+  index_bytes?: number; avg_doc_bytes?: number; indexes?: string[]; first?: string | null; last?: string | null;
+};
+export type NewsUsage = {
+  ok: boolean; error?: string; version?: string; settings: NewsSettings; read_from?: string[];
+  database?: { name: string; data_bytes: number; storage_bytes: number; index_bytes: number; collections: number;
+    fs_used_bytes?: number | null; fs_total_bytes?: number | null };
+  shared?: NewsCollUsage;
+  sources?: (NewsSource & NewsCollUsage)[];
+};
+
 /** What updating a source would do: fetch vendor days (massive), convert local days, or nothing. */
 export type RefreshItem = {
   id: string;
@@ -165,6 +179,13 @@ export const dataAdmin = {
   ratesApply: (files: { name: string; content: string }[], replace = false) =>
     j<{ ok: boolean; loaded_dates: number; new_dates: number; status: RatesStatus }>("setup/rates/apply",
       { method: "POST", body: JSON.stringify({ files, replace }) }),
+  newsUsage: () => j<NewsUsage>("setup/news"),
+  newsTest: (mongo_uri?: string, mongo_db?: string) =>
+    j<{ ok: boolean; version?: string; database?: string; collections?: string[]; error?: string }>("setup/news/test",
+      { method: "POST", body: JSON.stringify({ mongo_uri, mongo_db }) }),
+  newsSave: (patch: Partial<NewsSettings>) => j<NewsSettings>("setup/news", { method: "PUT", body: JSON.stringify(patch) }),
+  newsSplit: (sources?: string[]) => j<Job>("setup/news/split", { method: "POST", body: JSON.stringify({ sources }) }),
+  newsImport: (paths: string[]) => j<Job>("setup/news/import", { method: "POST", body: JSON.stringify({ paths }) }),
   refreshPlan: (source: string) =>
     j<{ items: RefreshItem[] }>("data/refresh/plan", { method: "POST", body: JSON.stringify({ source }) }),
   startUpdate: (body: { source?: string; market?: string | null; dry_run?: boolean; force?: boolean; fetch?: boolean }) =>

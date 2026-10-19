@@ -21,6 +21,11 @@ Added:
 - Benzinga monthly news archives (`YYYY-MM.jsonl.gz`) load into ESP with the
   teaser, image and full article text; `/esp/news/{id}/body` returns `body` and
   accepts the `news_…` event id of a search result. Titles are HTML-unescaped.
+- Settings → News storage: MongoDB connection and test, documents, disk and
+  index size per collection, one collection per vendor (`news_benzinga`,
+  `news_tushare`) copied out of the shared `ticker_news` (left unchanged), a
+  switch between the two that ESP follows without a restart, and import of
+  Benzinga files or `.zip` archives from the server.
 
 Changed:
 

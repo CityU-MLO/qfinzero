@@ -68,6 +68,26 @@ Sources (RSS, APIs, scrapers)
    Push Service → Agents / DB / Factor Generators
 ```
 
+## 新闻存储
+
+新闻存放在 MongoDB，每个数据商一个集合：
+
+| 数据商 | 市场 | 集合 | id 前缀 |
+|---|---|---|---|
+| Benzinga | 美股 | `news_benzinga` | `bz_` |
+| Tushare | A 股 | `news_tushare` | `ts_` |
+
+旧的安装把所有数据商放在同一个共享集合（`ticker_news`）里，其他服务也可能读取它。
+QFZ 不会修改它：**设置 → 新闻存储** 把各数据商的数据从中复制出来（在 MongoDB
+服务器端执行，重复执行只会刷新），显示每个集合的文档数、磁盘和索引大小，并在共享集合
+与数据商集合之间切换 QFZ 的读取来源。ESP 在 15 秒内生效，把各数据商集合当作一个来源读取
+（结果按时间合并，分页和游标与之前一致）。切换之后，导入只写入数据商集合。
+
+同一页面也可以从服务器上的路径导入 Benzinga 新闻：`YYYY-MM.jsonl[.gz]` 文件、包含这些
+文件的文件夹，或 Benzinga `.zip` 压缩包（加载前对照清单校验 SHA-256）。
+
+所有时间都以 UTC 存储。只有日期的 Tushare 公告存为北京时间午夜（前一天 16:00 UTC）。
+
 ## 快速示例
 
 ```bash

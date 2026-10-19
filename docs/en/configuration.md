@@ -78,7 +78,9 @@ ESP reads settings with the `ESP_` prefix.
 | `ESP_NEWS_BACKEND` | `auto` | `auto` uses `NEWS_DB` when the file exists, else MongoDB; `sqlite` or `mongo` force one |
 | `ESP_MONGO_URI` or `MONGO_URI` | `mongodb://localhost:27018` | MongoDB holding the news collection |
 | `ESP_MONGO_DB` or `MONGO_DB` | `market_news` | database |
-| `ESP_MONGO_COLLECTION` or `MONGO_COLLECTION` | `ticker_news` | collection |
+| `ESP_MONGO_COLLECTION` or `MONGO_COLLECTION` | `ticker_news` | shared collection |
+
+Settings → News storage overrides the `MONGO_*` values and chooses between the shared collection and one collection per vendor (see [ESP](esp/README.md#news-storage)); `ESP_MONGO_*` set explicitly still win.
 | `ESP_DEFAULT_PAGE_SIZE`, `ESP_MAX_PAGE_SIZE` | `50`, `500` | pagination limits |
 | `ESP_LOG_LEVEL` | `INFO` | log level |
 

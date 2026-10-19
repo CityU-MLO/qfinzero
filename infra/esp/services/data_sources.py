@@ -230,7 +230,7 @@ def news_doc_to_event(doc: dict, now_utc: datetime) -> Event:
         importance=Importance.MEDIUM,
         status=EventStatus.OCCURRED,
         tickers=doc.get("tickers") or [],
-        country="US",
+        country="CN" if str(doc.get("market") or "").lower() == "cn" else "US",
         snippet=(doc.get("description") or "")[:200],
         payload={
             "article_url": doc.get("article_url"),
@@ -445,6 +445,120 @@ class MongoNewsSource:
         ]
         return [{"ticker": r["_id"]["t"], "date": r["_id"]["d"], "count": r["n"]}
                 async for r in self._coll.aggregate(pipeline)]
+
+
+class MultiMongoNewsSource:
+    """News spread over one MongoDB collection per vendor (``news_benzinga``,
+    ``news_tushare``…), read as one source: each query runs on every
+    collection and the results are merged in (time, id) order, so limits and
+    cursors behave as with a single collection. A document is found by id
+    through its vendor's prefix (``bz_``, ``ts_``)."""
+
+    kind = "mongo"
+
+    def __init__(self, mongo_uri: str, db_name: str, collections: list[tuple[str, str]],
+                 prefixes: Optional[dict[str, str]] = None):
+        self.collections = collections
+        self._parts = [(sid, MongoNewsSource(mongo_uri, db_name, coll)) for sid, coll in collections]
+        self._prefixes = prefixes or {}
+
+    async def connect(self):
+        for _, p in self._parts:
+            await p.connect()
+
+    async def close(self):
+        for _, p in self._parts:
+            await p.close()
+
+    @property
+    def available(self) -> bool:
+        return any(p.available for _, p in self._parts)
+
+    def _live(self) -> list[MongoNewsSource]:
+        return [p for _, p in self._parts if p.available]
+
+    @staticmethod
+    def _merge(lists: list[list[Event]], limit: int) -> list[Event]:
+        out = [e for lst in lists for e in lst]
+        out.sort(key=lambda e: (e.time_utc, e.event_id))
+        return out[:limit]
+
+    async def get_freshness(self) -> Optional[str]:
+        vals = [v for p in self._live() if (v := await p.get_freshness())]
+        return max(vals) if vals else None
+
+    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc) -> list[Event]:
+        return self._merge([await p.query_window(start_utc, end_utc, tickers, limit, cursor, now_utc)
+                            for p in self._live()], limit)
+
+    async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
+                          now_utc) -> list[Event]:
+        return self._merge([await p.search_news(start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
+                                                now_utc) for p in self._live()], limit)
+
+    async def get_by_id(self, news_id: str) -> Optional[dict]:
+        first = [p for sid, p in self._parts if self._prefixes.get(sid) and news_id.startswith(self._prefixes[sid])]
+        for p in first + [p for _, p in self._parts if p not in first]:
+            if p.available and (doc := await p.get_by_id(news_id)) is not None:
+                return doc
+        return None
+
+    def _to_event(self, doc: dict, now_utc: datetime) -> Event:
+        return news_doc_to_event(doc, now_utc)
+
+    async def info(self) -> dict:
+        parts = [await p.info() for p in self._live()]
+        latest = [x["latest_timestamp"] for x in parts if x["latest_timestamp"]]
+        return {"latest_timestamp": max(latest) if latest else None,
+                "record_count": sum(x["record_count"] for x in parts),
+                "unique_keys": sum(x["unique_keys"] for x in parts),   # tickers rarely span vendors
+                "collections": [c for _, c in self.collections]}
+
+    async def stats(self, since: datetime) -> dict:
+        parts = [await p.stats(since) for p in self._live()]
+        if not parts:
+            return {"total_count": 0, "date_range": {"earliest": None, "latest": None}, "daily_counts": [],
+                    "top_tickers": [], "top_publishers": [], "duplicate_stats": {"by_url": _rate(0, 0), "by_title": _rate(0, 0)}}
+
+        def add(key: str, field: str, limit: Optional[int] = None) -> list[dict]:
+            acc: dict[str, int] = {}
+            for x in parts:
+                for r in x[key]:
+                    acc[r[field]] = acc.get(r[field], 0) + r["count"]
+            rows = [{field: k, "count": v} for k, v in acc.items()]
+            rows.sort(key=(lambda r: r[field]) if limit is None else (lambda r: -r["count"]))
+            return rows if limit is None else rows[:limit]
+
+        firsts = [x["date_range"]["earliest"] for x in parts if x["date_range"]["earliest"]]
+        lasts = [x["date_range"]["latest"] for x in parts if x["date_range"]["latest"]]
+
+        def dup(f: str) -> dict:
+            return _rate(sum(x["duplicate_stats"][f]["total"] for x in parts),
+                         sum(x["duplicate_stats"][f]["unique"] for x in parts))
+
+        return {"total_count": sum(x["total_count"] for x in parts),
+                "date_range": {"earliest": min(firsts) if firsts else None, "latest": max(lasts) if lasts else None},
+                "daily_counts": add("daily_counts", "date"), "top_tickers": add("top_tickers", "ticker", 20),
+                "top_publishers": add("top_publishers", "publisher", 10),
+                "duplicate_stats": {"by_url": dup("by_url"), "by_title": dup("by_title")}}
+
+    async def count(self, start: datetime, end: datetime, tickers: Optional[list[str]]) -> int:
+        return sum([await p.count(start, end, tickers) for p in self._live()])
+
+    async def iter_docs(self, start: datetime, end: datetime, tickers: Optional[list[str]], limit: int):
+        docs = []
+        for p in self._live():
+            docs += [d async for d in p.iter_docs(start, end, tickers, limit)]
+        docs.sort(key=lambda d: (d.get("published_utc") or datetime.min, str(d.get("_id"))))
+        for d in docs[:limit]:
+            yield d
+
+    async def daily_counts(self, start: datetime, end: datetime, tickers: list[str]) -> list[dict]:
+        acc: dict[tuple[str, str], int] = {}
+        for p in self._live():
+            for r in await p.daily_counts(start, end, tickers):
+                acc[(r["ticker"], r["date"])] = acc.get((r["ticker"], r["date"]), 0) + r["count"]
+        return [{"ticker": t, "date": d, "count": n} for (t, d), n in acc.items()]
 
 
 # =====================================================================
@@ -960,6 +1074,8 @@ class DataSourceManager:
         econ_events_db: str,
         news_backend: str = "auto",
         news_db: Optional[str] = None,
+        news_collections: Optional[list[tuple[str, str]]] = None,
+        news_prefixes: Optional[dict[str, str]] = None,
     ):
         """``news_backend``: ``mongo``, ``sqlite`` or ``auto`` (SQLite when
         ``news_db`` exists, MongoDB otherwise)."""
@@ -969,8 +1085,11 @@ class DataSourceManager:
             if not news_db:
                 raise ValueError("news_backend=sqlite needs news_db")
             self.news = SQLiteNewsSource(news_db)
+        elif news_collections and len(news_collections) > 1:
+            self.news = MultiMongoNewsSource(mongo_uri, mongo_db, news_collections, news_prefixes)
         else:
-            self.news = MongoNewsSource(mongo_uri, mongo_db, mongo_collection)
+            coll = news_collections[0][1] if news_collections else mongo_collection
+            self.news = MongoNewsSource(mongo_uri, mongo_db, coll)
         self.earnings = SQLiteEarningsSource(earnings_db)
         self.econ = SQLiteEconEventsSource(econ_events_db)
 
