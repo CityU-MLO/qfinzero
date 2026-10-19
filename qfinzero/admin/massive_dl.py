@@ -51,6 +51,28 @@ def _check(index: str) -> None:
         raise ValueError(f"index must be one of {', '.join(INDICES)}")
 
 
+def can_download(s3, key: str) -> Optional[str]:
+    """``None`` if ``key`` can be fetched, else why not. massive lets a key list
+    every product but only download the subscribed ones (403 on the object)."""
+    try:
+        s3.head_object(Bucket=BUCKET, Key=key)
+        return None
+    except Exception as e:  # noqa: BLE001 - botocore ClientError, network
+        code = str(getattr(e, "response", {}).get("Error", {}).get("Code", "")) or type(e).__name__
+        if code in ("403", "AccessDenied", "Forbidden"):
+            return f"this key can list {key.split('/')[0]}/{key.split('/')[1]} but not download it (403 Forbidden): not in the subscription"
+        return f"{type(e).__name__}: {e}"
+
+
+def latest_key(s3, index: str, year: int) -> Optional[str]:
+    """The newest file of ``index`` in ``year`` (or the year before)."""
+    for y in (year, year - 1):
+        keys = [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{index}/{y}/").get("Contents", [])]
+        if keys:
+            return sorted(keys)[-1]
+    return None
+
+
 def plan(s3, index: str, start: date, end: date, root: Path) -> list[dict[str, Any]]:
     """Remote files of ``index`` in ``[start, end]``: ``{key, date, size, path, exists}``."""
     _check(index)
@@ -115,11 +137,18 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
     result: dict[str, Any] = {"ok": True, "index": index, "files": len(files), "missing": len(todo),
                               "bytes": nbytes, "dry_run": dry_run,
                               "first": files[0]["date"] if files else None,
-                              "last": files[-1]["date"] if files else None}
+                              "last": files[-1]["date"] if files else None,
+                              "missing_dates": [f["date"] for f in todo]}
+    if todo:
+        denied = can_download(s3, todo[0]["key"])
+        if denied:
+            say(f"[massive] {denied}")
+            return {**result, "ok": False, "error": denied}
     prog(stage="planned", files_total=len(todo), files_done=0, bytes_total=nbytes, bytes_done=0)
     if dry_run or not todo:
         return result
     done = failed = 0
+    first_error = ""
     got = [0]
     for f in todo:
         if stop():
@@ -145,6 +174,7 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
             say(f"  [{done}/{len(todo)}] {f['date']}  {f['size'] / 1e6:.1f} MB")
         except Exception as e:  # noqa: BLE001 — report and continue with the next day
             failed += 1
+            first_error = first_error or f"{type(e).__name__}: {e}"
             say(f"  [error] {f['key']}: {type(e).__name__}: {e}")
         finally:
             tmp.unlink(missing_ok=True)
@@ -153,4 +183,6 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
     result.update(downloaded=done, ok=done == len(todo))
     if stopped:
         result["error"] = "stopped by the user"
+    elif failed:
+        result["error"] = f"{failed} of {len(todo)} file(s) failed, first: {first_error}"
     return result

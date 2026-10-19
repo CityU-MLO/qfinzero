@@ -56,7 +56,7 @@ export type RefreshItem = {
   message: string;
   fetch: null | {
     vendor: "massive"; index: string; start: string; end: string;
-    files?: number; bytes?: number; first?: string | null; last?: string | null;
+    files?: number; bytes?: number; first?: string | null; last?: string | null; gaps?: number;
     key?: { id: string; label: string }; error?: string;
   };
 };

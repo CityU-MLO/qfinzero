@@ -2,8 +2,9 @@
 
 The scheduled update (:mod:`qfinzero.update`) only converts raw files already
 on disk. For sources fed by massive flat files, *refresh* first asks massive
-which days exist after the newest local day, downloads the missing ones with
-the matching vendor key, and converts them. Databento is never fetched here:
+which days it has over the last ``LOOKBACK_DAYS`` up to today that the raw
+library lacks (new days and gaps alike), downloads them with the matching
+vendor key into the library, and converts that date range. Databento is never fetched here:
 it bills per request, so it goes through the quote-and-accept download.
 
     plan(["us_stock_daily"])   -> what would be fetched (no download)
@@ -28,6 +29,9 @@ MANUAL = {
     "us_databento": "Databento bills per request: quote and accept it under Download",
     "cn_stock_daily": "Tushare has no downloader here: import the dump under Local files",
 }
+
+
+LOOKBACK_DAYS = 120   # how far back a refresh looks for days missing from the raw library
 
 
 def _today_et() -> date:
@@ -65,7 +69,8 @@ def plan(source_ids: list[str], status: dict[str, dict], *, today: Optional[date
             item["message"] = MANUAL.get(sid, "") if item["action"] == "manual" else ""
             out.append(item)
             continue
-        start = _after(st.get("raw_max")) or _after(st.get("store_max"))
+        newest = max(x for x in (st.get("raw_max"), st.get("store_max"), "") if x is not None) or None
+        start = (_after(newest) - timedelta(days=LOOKBACK_DAYS + 1)) if newest else None
         if start is None:
             item["action"] = "convert" if item["convert_days"] else "manual"
             item["message"] = "no local data yet: choose the first range under Download"
@@ -82,21 +87,24 @@ def plan(source_ids: list[str], status: dict[str, dict], *, today: Optional[date
             if res.get("ok") is False:
                 fetch["error"] = str(res.get("error") or "massive is unreachable")
             else:
+                missing = res.get("missing_dates") or []
                 fetch.update({"files": res.get("missing", 0), "bytes": res.get("bytes", 0),
-                              "first": res.get("first"), "last": res.get("last"), "key": res.get("key")})
+                              "first": missing[0] if missing else None, "last": missing[-1] if missing else None,
+                              "gaps": sum(1 for d in missing if newest and d <= newest[:10]),
+                              "key": res.get("key")})
         else:
             fetch.update({"files": 0, "bytes": 0})
         item["fetch"] = fetch
         if fetch.get("files"):
             item["action"] = "fetch"
-            item["message"] = (f"{fetch['files']} new day(s) on massive ({fetch['first']} .. {fetch['last']}), "
-                               f"{fetch['bytes'] / 1e9:.2f} GB")
+            item["message"] = (f"{fetch['files']} day(s) on massive missing locally ({fetch['first']} .. {fetch['last']}"
+                               + (f", {fetch['gaps']} inside a gap" if fetch["gaps"] else "") + f"), {fetch['bytes'] / 1e9:.2f} GB")
         elif item["convert_days"]:
             item["action"] = "convert"
             item["message"] = "local raw files not converted yet"
         else:
             item["action"] = "none"
-            item["message"] = (fetch.get("error") and f"could not ask massive: {fetch['error']}") or (
+            item["message"] = (fetch.get("error") and f"massive: {fetch['error']}") or (
                 f"up to date: massive has nothing after {st.get('raw_max') or st.get('store_max')}")
         out.append(item)
     return out
@@ -117,7 +125,9 @@ def run(items: list[dict[str, Any]], *, on_line: Optional[Callable[[str], None]]
         if should_stop and should_stop():
             break
         say(f"[refresh] {it['id']}: fetching {f['files']} day(s) of {f['index']} from massive")
-        res = download("massive", {"index": f["index"], "start": f["start"], "end": f["end"]}, dry_run=False,
+        # only the span of the missing days, so conversion covers just that range
+        res = download("massive", {"index": f["index"], "start": f.get("first") or f["start"],
+                                   "end": f.get("last") or f["end"]}, dry_run=False,
                        on_line=say, on_progress=on_progress, should_stop=should_stop)
         results.append({"id": it["id"], "ok": res.get("ok", True), "error": res.get("error"),
                         "files": res.get("missing", 0), "last": res.get("last")})

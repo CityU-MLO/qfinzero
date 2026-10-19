@@ -53,8 +53,10 @@ def _find(vendor: str, key_id: str) -> dict[str, Any]:
 
 def test_key(vendor: str, key_id: str, *, databento_client=None, s3=None) -> dict[str, Any]:
     """Check a key with the vendor. Databento: the key authenticates and lists
-    datasets. massive: which flat-file products the key can list (S3 access is
-    per subscription), so the key can be scoped to exactly those."""
+    datasets. massive: which flat-file products the key can download. Every
+    key can list every product, so each product's newest file is fetched with
+    HEAD; only those the subscription covers answer. The key can then be
+    scoped to exactly those."""
     k = _find(vendor, key_id)
     if vendor == "databento":
         try:
@@ -73,18 +75,22 @@ def test_key(vendor: str, key_id: str, *, databento_client=None, s3=None) -> dic
             s3 = client(k.get("s3_access_key_id", ""), k.get("s3_secret_access_key", ""), endpoint)
     except ModuleNotFoundError:
         return {"ok": False, "error": "boto3 not installed (pip install 'qfinzero[massive]')"}
-    from .massive_dl import BUCKET
+    from datetime import date
+
+    from .massive_dl import can_download, latest_key
     access: dict[str, bool] = {}
     errors: dict[str, str] = {}
     for index, _ in massive_indices():
         try:
-            s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{index}/", MaxKeys=1)
-            access[index] = True
-        except Exception as e:  # noqa: BLE001 - 403 = not subscribed
-            access[index] = False
-            errors[index] = type(e).__name__
+            key = latest_key(s3, index, date.today().year)
+            why = can_download(s3, key) if key else "no files listed"
+        except Exception as e:  # noqa: BLE001 - listing refused
+            why = type(e).__name__
+        access[index] = why is None
+        if why:
+            errors[index] = why
     ok = any(access.values())
-    return {"ok": ok, "access": access, **({"error": "the key can list none of the products"} if not ok else {}),
+    return {"ok": ok, "access": access, **({"error": "the key can download none of the products"} if not ok else {}),
             "errors": errors}
 
 

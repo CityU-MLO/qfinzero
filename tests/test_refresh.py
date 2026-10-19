@@ -16,17 +16,19 @@ from qfinzero.admin import refresh  # noqa: E402
 class FakeDownload:
     """Stands in for datasetup.download: massive has days up to ``last``."""
 
-    def __init__(self, last="2026-10-16", error=None):
-        self.last, self.error, self.calls = last, error, []
+    def __init__(self, last="2026-10-16", error=None, have=("2026-09-01", "2026-09-02", "2026-10-15")):
+        self.last, self.error, self.calls, self.have = last, error, [], set(have)
 
     def __call__(self, vendor, params, dry_run=True, **_kw):
         self.calls.append((vendor, dict(params), dry_run))
         if self.error:
             return {"ok": False, "error": self.error}
-        days = [d for d in ("2026-10-15", "2026-10-16") if params["start"] <= d <= min(params["end"], self.last)]
+        remote = [d for d in ("2026-09-01", "2026-09-02", "2026-10-15", "2026-10-16")
+                  if params["start"] <= d <= min(params["end"], self.last)]
+        days = [d for d in remote if d not in self.have]
         return {"ok": True, "missing": len(days), "bytes": 40_000_000 * len(days),
-                "first": days[0] if days else None, "last": days[-1] if days else None,
-                "key": {"id": "k1", "label": "LUO"}}
+                "first": remote[0] if remote else None, "last": remote[-1] if remote else None,
+                "missing_dates": days, "key": {"id": "k1", "label": "LUO"}}
 
 
 ROWS = {
@@ -44,11 +46,21 @@ def test_plan_fetches_new_massive_days_after_the_newest_local_day():
     d = items["us_stock_daily"]
     assert d["action"] == "fetch" and d["fetch"]["files"] == 1 and d["fetch"]["first"] == "2026-10-16"
     assert d["fetch"]["index"] == "us_stocks_sip/day_aggs_v1" and d["fetch"]["key"]["label"] == "LUO"
-    assert ("massive", {"index": "us_stocks_sip/day_aggs_v1", "start": "2026-10-16", "end": "2026-10-19"}, True) in dl.calls
+    assert ("massive", {"index": "us_stocks_sip/day_aggs_v1", "start": "2026-06-17", "end": "2026-10-19"}, True) in dl.calls
     assert items["us_option_day"]["action"] == "fetch"          # 08-22 onwards exists remotely
     assert items["us_databento"]["action"] == "manual"          # paid: never fetched here
     assert items["us_stock_minute"]["action"] == "manual"       # no local data: first range is a choice
     assert all(c[0] == "massive" and c[2] for c in dl.calls)    # planning never downloads
+
+
+def test_gaps_inside_the_lookback_are_fetched():
+    dl = FakeDownload(have=("2026-10-15", "2026-10-16"))      # September is missing locally
+    it = refresh.plan(["us_stock_daily"], ROWS, today=TODAY, download=dl)[0]
+    assert it["action"] == "fetch" and it["fetch"]["files"] == 2 and it["fetch"]["gaps"] == 2
+    assert (it["fetch"]["first"], it["fetch"]["last"]) == ("2026-09-01", "2026-09-02")
+    dl.calls.clear()
+    refresh.run([it], download=dl)
+    assert dl.calls[0][1]["start"] == "2026-09-01" and dl.calls[0][1]["end"] == "2026-09-02"   # converts only the gap
 
 
 def test_up_to_date_and_errors_are_explained():

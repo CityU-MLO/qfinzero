@@ -69,14 +69,17 @@ function PlanLine({ it, onGoTo }: { it: RefreshItem; onGoTo?: (t: Tab) => void }
   if (it.action === "fetch" && f) {
     return (
       <span>
-        {t(`massive has ${f.files} new trading day(s) (${f.first} – ${f.last}), about ${fmtBytes(f.bytes)}, using key ${f.key?.label ?? "?"}.`,
-          `massive 上有 ${f.files} 个新交易日（${f.first} – ${f.last}），约 ${fmtBytes(f.bytes)}，使用密钥 ${f.key?.label ?? "?"}。`)}
+        {f.gaps
+          ? t(`massive has ${f.files} trading day(s) missing locally (${f.first} – ${f.last}; ${f.gaps} fill a gap), about ${fmtBytes(f.bytes)}, using key ${f.key?.label ?? "?"}.`,
+              `massive 上有 ${f.files} 个本地缺少的交易日（${f.first} – ${f.last}，其中 ${f.gaps} 天是中间的缺口），约 ${fmtBytes(f.bytes)}，使用密钥 ${f.key?.label ?? "?"}。`)
+          : t(`massive has ${f.files} new trading day(s) (${f.first} – ${f.last}), about ${fmtBytes(f.bytes)}, using key ${f.key?.label ?? "?"}.`,
+              `massive 上有 ${f.files} 个新交易日（${f.first} – ${f.last}），约 ${fmtBytes(f.bytes)}，使用密钥 ${f.key?.label ?? "?"}。`)}
       </span>
     );
   }
   if (it.action === "convert") {
     return <span>{t(`${it.convert_days} day(s) of local raw data are not converted yet.`, `有 ${it.convert_days} 天本地原始数据尚未转换。`)}
-      {f?.error && <span className="text-destructive"> {t("Could not ask massive: ", "无法查询 massive：")}{f.error}</span>}</span>;
+      {f?.error && <span className="text-destructive"> {"massive: "}{f.error}</span>}</span>;
   }
   if (it.action === "manual") {
     const text = it.id === "us_databento"
@@ -91,7 +94,7 @@ function PlanLine({ it, onGoTo }: { it: RefreshItem; onGoTo?: (t: Tab) => void }
       </span>
     );
   }
-  if (f?.error) return <span className="text-destructive">{t("Could not ask massive: ", "无法查询 massive：")}{f.error}</span>;
+  if (f?.error) return <span className="text-destructive">{"massive: "}{f.error}</span>;
   const until = it.raw_max ?? it.store_max;
   if (!until) return <span>{t("Nothing to update.", "没有需要更新的内容。")}</span>;
   return f

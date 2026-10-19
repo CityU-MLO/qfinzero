@@ -144,14 +144,22 @@ def test_key_test_and_massive_progress(env):
     db = cs.save_key("databento", {"label": "all", "api_key": "db-x"})
     assert vendor_keys.test_key("databento", db["id"], databento_client=FakeDatabento())["datasets"] == 2
 
+    class Denied(Exception):
+        response = {"Error": {"Code": "403"}}
+
     class S3:
-        def list_objects_v2(self, Bucket, Prefix, MaxKeys):
-            if not Prefix.startswith("us_stocks_sip/"):
-                raise PermissionError("403")
+        """Like massive: every product lists, only stocks download."""
+        def list_objects_v2(self, Bucket, Prefix, MaxKeys=1000):
+            return {"Contents": [{"Key": f"{Prefix}2026-01-0{d}.csv.gz"} for d in (2, 5)]}
+
+        def head_object(self, Bucket, Key):
+            if not Key.startswith("us_stocks_sip/"):
+                raise Denied()
             return {}
     mk = cs.save_key("massive", {"label": "stocks", "s3_access_key_id": "a", "s3_secret_access_key": "b"})
     t = vendor_keys.test_key("massive", mk["id"], s3=S3())
     assert t["ok"] and t["access"]["us_stocks_sip/day_aggs_v1"] and not t["access"]["us_options_opra/day_aggs_v1"]
+    assert "403" in t["errors"]["us_options_opra/day_aggs_v1"]
 
     import gzip
 
@@ -166,6 +174,11 @@ def test_key_test_and_massive_progress(env):
                     yield {"Contents": [{"Key": k, "Size": 100} for k in keys if k.startswith(Prefix)]}
             return P()
 
+        def head_object(self, Bucket, Key):
+            if not Key.startswith("us_stocks_sip/"):
+                raise Denied()
+            return {}
+
         def download_file(self, bucket, key, dest, Callback=None):
             with gzip.open(dest, "wt") as f:
                 f.write("ticker,volume,open,close,high,low,window_start,transactions\nA,1,1,1,1,1,1,1\n")
@@ -179,6 +192,11 @@ def test_key_test_and_massive_progress(env):
     assert r["ok"] and r["downloaded"] == 2
     assert events[0]["bytes_total"] == 200 and any(e.get("bytes_done") == 200 for e in events)
     assert any(e.get("stage") == "converting" for e in events)
+    # a product the key can list but not download is refused at planning time
+    FakeS3.keys = [f"us_options_opra/day_aggs_v1/2025/03/2025-03-0{d}.csv.gz" for d in (3, 4)]
+    r = massive_dl.download({**params, "index": "us_options_opra/day_aggs_v1"}, access_key="", secret_key="",
+                            endpoint="", root=Path(cs.dirs()["raw_massive"]), s3=FakeS3(), dry_run=True)
+    assert r["ok"] is False and "not in the subscription" in r["error"]
 
 
 def test_jobs_progress_cancel_and_persistence(env, tmp_path):

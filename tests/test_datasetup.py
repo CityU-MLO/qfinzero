@@ -125,6 +125,9 @@ class FakeS3:
                 yield {"Contents": [{"Key": k, "Size": 1000} for k in keys if k.startswith(Prefix)]}
         return P()
 
+    def head_object(self, Bucket, Key):      # the subscription covers this product
+        return {}
+
     def download_file(self, bucket, key, dest):
         _csv_gz(Path(dest), key.rsplit("/", 1)[1][:10])
 
