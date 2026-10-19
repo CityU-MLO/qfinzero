@@ -9,7 +9,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
-  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error((data && (data.error || (typeof data.detail === "string" ? data.detail : ""))) || `HTTP ${res.status}`);
   return data as T;
 }
 
@@ -44,15 +44,82 @@ export type Source = {
   last_run?: { status?: string; last_run_ts?: string; rows?: number } | null;
 };
 
+export type JobProgress = {
+  stage?: string;
+  current?: string;
+  files_total?: number;
+  files_done?: number;
+  files_failed?: number;
+  bytes_total?: number;
+  bytes_done?: number;
+  billable_bytes?: number;
+  rate_bps?: number;
+  eta_s?: number;
+  elapsed_s?: number;
+  cost_usd?: number;
+};
+
 export type Job = {
   id: string;
   kind: string;
   label: string;
-  status: "queued" | "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error" | "cancelled" | "interrupted";
   error?: string | null;
+  created_at?: string;
+  started_at?: string | null;
+  ended_at?: string | null;
   n_lines?: number;
   lines?: string[];
   result?: unknown;
+  progress?: JobProgress;
+  meta?: { vendor?: string; product?: string; key_id?: string; key_label?: string; max_cost?: number };
+  cancel_requested?: boolean;
+};
+
+export type VendorKey = {
+  id: string;
+  label?: string;
+  products: string[];
+  note?: string;
+  monthly_budget_usd?: number | null;
+  s3_endpoint?: string;
+  // masked secrets (••••last4) or ""
+  api_key?: string;
+  s3_access_key_id?: string;
+  s3_secret_access_key?: string;
+  rest_api_key?: string;
+};
+
+export type Spend = {
+  month: string;
+  by_key: Record<string, number>;
+  budgets: Record<string, number>;
+  total: number;
+  recent: { ts: string; key_id: string; dataset: string; schema: string; cost_usd: number; files: number; job: string }[];
+};
+
+export type KeysView = {
+  keys: Record<Vendor, VendorKey[]>;
+  catalog: Record<Vendor, { product: string; name: string }[]>;
+  spend: Spend;
+};
+
+export type DirInfo = {
+  path: string;
+  exists: boolean;
+  writable: boolean;
+  free_bytes: number | null;
+  total_bytes: number | null;
+  marker: { kind: string; vendor?: string; layout_version?: number; created_at?: string } | null;
+  config_key: string;
+  holds: string;
+};
+
+export type Layout = {
+  raw: Record<"massive" | "databento" | "tushare", DirInfo>;
+  qfz: DirInfo & { stores?: Record<string, boolean>; format: { compression: string; level: number; row_group_rows: number } };
+  data_root: string;
+  config_file: string;
 };
 
 export type ScanResult = {
@@ -84,6 +151,18 @@ export const dataAdmin = {
   clearSchedule: () => j<{ ok: boolean; error?: string }>("data/schedule/clear", { method: "POST", body: "{}" }),
   explore: () => j<ExploreOverview>("data/explore"),
   // data setup utility
+  cancelJob: (id: string) => j<{ ok: boolean; job: Job }>(`data/jobs/${id}/cancel`, { method: "POST", body: "{}" }),
+  layout: () => j<Layout>("setup/layout"),
+  initLayout: (paths?: Record<string, string>) =>
+    j<{ ok: boolean; created: string[]; skipped: { path: string; config_key: string; reason: string }[]; layout: Layout }>(
+      "setup/layout/init", { method: "POST", body: JSON.stringify({ paths }) }),
+  keys: () => j<KeysView>("setup/keys"),
+  saveKey: (vendor: Vendor, key: Partial<VendorKey> & Record<string, unknown>) =>
+    j<VendorKey>(`setup/keys/${vendor}`, { method: "POST", body: JSON.stringify(key) }),
+  deleteKey: (vendor: Vendor, id: string) => j<{ ok: boolean }>(`setup/keys/${vendor}/${id}`, { method: "DELETE" }),
+  testKey: (vendor: Vendor, id: string) =>
+    j<{ ok: boolean; error?: string; datasets?: number; note?: string; access?: Record<string, boolean> }>(
+      `setup/keys/${vendor}/${id}/test`, { method: "POST", body: "{}" }),
   setupStatus: () => j<SetupStatus>("setup/status"),
   browse: (path?: string | null) => j<BrowseResult>(`setup/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   inspect: (vendor: Vendor, paths: string[]) => j<InspectResult>("setup/inspect", { method: "POST", body: JSON.stringify({ vendor, paths }) }),
@@ -147,6 +226,7 @@ export type SetupStatus = {
   libraries: Record<Vendor, string>;
   roots: string[];
   credentials: Record<Vendor, boolean>;
+  keys?: Record<Vendor, number>;
   massive_endpoint?: string;
   massive_indices: string[];
   quote_intervals: QuoteIntervals;

@@ -264,11 +264,86 @@ def setup_download(body: dict = Body(...)) -> dict:
     convert, jobs = bool(body.get("convert", True)), int(body.get("jobs", 4))
     intervals = body.get("quote_intervals") or None
 
+    key = datasetup.choose_key(vendor, params)
+    product = params.get("dataset") or params.get("index") or ""
+    what = " ".join(str(x) for x in (product, params.get("schema") or "", params.get("start") or "",
+                                     params.get("end") or "") if x)
+
     def _task(job):
         return datasetup.download(vendor, params, dry_run=False, convert=convert, on_line=job.log, jobs=jobs,
-                                  quote_intervals=intervals)
+                                  quote_intervals=intervals, on_progress=job.update,
+                                  should_stop=job.cancelled, job_id=job.id)
 
-    return registry.submit("download", f"download {vendor}", _task).snapshot()
+    meta = {"vendor": vendor, "product": product, "key_id": (key or {}).get("id"),
+            "key_label": (key or {}).get("label"), "max_cost": params.get("max_cost")}
+    return registry.submit("download", f"download {vendor} {what}".strip(), _task, meta=meta).snapshot()
+
+
+@app.post("/data/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    job = registry.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"no job {job_id}")
+    return {"ok": job.cancel(), "job": job.snapshot()}
+
+
+# ── layouts, vendor keys, spend ──────────────────────────────────────────
+
+@app.get("/setup/layout")
+def setup_layout() -> dict:
+    from qfinzero.admin import layout
+    return layout.describe()
+
+
+@app.post("/setup/layout/init")
+def setup_layout_init(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import layout
+    try:
+        return layout.init(body.get("paths") or None)
+    except (ValueError, OSError) as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/setup/keys")
+def setup_keys() -> dict:
+    from qfinzero.admin import config_store, vendor_keys
+    return {"keys": {v: config_store.masked_keys(v) for v in ("databento", "massive")},
+            "catalog": vendor_keys.catalog(), "spend": vendor_keys.spend()}
+
+
+@app.post("/setup/keys/{vendor}")
+def setup_save_key(vendor: str, body: dict = Body(...)) -> dict:
+    from qfinzero.admin import config_store
+    try:
+        return config_store.save_key(vendor, body)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.delete("/setup/keys/{vendor}/{key_id}")
+def setup_delete_key(vendor: str, key_id: str) -> dict:
+    from qfinzero.admin import config_store
+    try:
+        return {"ok": config_store.delete_key(vendor, key_id)}
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.post("/setup/keys/{vendor}/{key_id}/test")
+def setup_test_key(vendor: str, key_id: str) -> dict:
+    from qfinzero.admin import vendor_keys
+    try:
+        return vendor_keys.test_key(vendor, key_id)
+    except KeyError:
+        raise HTTPException(404, f"no {vendor} key {key_id}")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/setup/spend")
+def setup_spend(month: str | None = None) -> dict:
+    from qfinzero.admin import vendor_keys
+    return vendor_keys.spend(month)
 
 
 # ── coverage map (read-only; the hub lets every signed-in user GET it via /api/coverage) ──

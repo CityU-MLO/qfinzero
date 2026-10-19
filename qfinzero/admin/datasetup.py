@@ -399,33 +399,52 @@ def run_convert(plan: dict[str, Any], *, on_line: Optional[OnLine] = None, jobs:
 
 # ── downloads ─────────────────────────────────────────────────────────────
 
+def choose_key(vendor: str, params: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The key a request uses: ``params.key_id`` when given, else the first key
+    whose products cover the dataset (Databento) or index (massive)."""
+    want = str(params.get("key_id") or "")
+    if want:
+        return next((k for k in config_store.vendor_keys(vendor) if k.get("id") == want), None)
+    product = params.get("dataset") if vendor == "databento" else params.get("index")
+    return config_store.pick_key(vendor, str(product) if product else None)
+
+
 def download(vendor: str, params: dict[str, Any], *, dry_run: bool = True, convert: bool = True,
              on_line: Optional[OnLine] = None, jobs: int = 4,
-             quote_intervals: Optional[dict[str, int]] = None) -> dict[str, Any]:
+             quote_intervals: Optional[dict[str, int]] = None,
+             on_progress: Optional[Callable[..., None]] = None,
+             should_stop: Optional[Callable[[], bool]] = None, job_id: str = "") -> dict[str, Any]:
     """Quote (``dry_run``) or download, then convert what arrived."""
     say = on_line or (lambda _l: None)
+    prog = on_progress or (lambda **_k: None)
     if not dry_run:
         set_quote_intervals(quote_intervals)
     lib = library(vendor)
+    key = choose_key(vendor, params)
+    if key is None:
+        product = params.get("dataset") if vendor == "databento" else params.get("index")
+        return {"ok": False, "error": f"no {vendor} key covers {product or 'this request'}: add one under Keys"}
+    say(f"[{vendor}] using key {key.get('label') or key['id']} ({key['id']})")
     if vendor == "databento":
         from . import databento_dl
-        key = config_store.databento_key()
-        if not key:
-            return {"ok": False, "error": "set the Databento API key first"}
-        res = databento_dl.download(params, api_key=key, root=lib, dry_run=dry_run, on_line=say)
+        res = databento_dl.download(params, api_key=key.get("api_key", ""), root=lib, dry_run=dry_run, on_line=say,
+                                    on_progress=prog, should_stop=should_stop, key_id=key["id"], job_id=job_id)
         plan = {"vendor": "databento"}
     elif vendor == "massive":
         from . import massive_dl
-        s3 = config_store.massive_s3()
-        res = massive_dl.download(params, access_key=s3.get("access_key_id", ""),
-                                  secret_key=s3.get("secret_access_key", ""), endpoint=s3.get("endpoint", ""),
-                                  root=lib, dry_run=dry_run, on_line=say)
+        endpoint = key.get("s3_endpoint") or config_store.massive_s3().get("endpoint", "")
+        res = massive_dl.download(params, access_key=key.get("s3_access_key_id", ""),
+                                  secret_key=key.get("s3_secret_access_key", ""), endpoint=endpoint,
+                                  root=lib, dry_run=dry_run, on_line=say, on_progress=prog,
+                                  should_stop=should_stop)
         asset, resolution = massive_dl.INDICES.get(str(params.get("index")), ("stock", "daily"))
         plan = {"vendor": "massive", "asset": asset, "resolution": resolution,
                 "start": str(params.get("start"))[:10], "end": str(params.get("end"))[:10]}
     else:
         raise ValueError(f"vendor must be one of {VENDORS}")
+    res["key"] = {"id": key["id"], "label": key.get("label") or key["id"]}
     if not dry_run and convert and res.get("ok", True):
+        prog(stage="converting", current="QFZ store")
         res["convert"] = run_convert(plan, on_line=say, jobs=jobs)
         res["ok"] = res["convert"]["ok"]
     return res
@@ -443,6 +462,7 @@ def status() -> dict[str, Any]:
             "databento": bool(config_store.databento_key()),
             "massive": bool(s3.get("access_key_id") and s3.get("secret_access_key")),
         },
+        "keys": {v: len(config_store.vendor_keys(v)) for v in VENDORS},
         "massive_endpoint": s3.get("endpoint"),
         "quote_intervals": _intervals(),
         "today": date.today().isoformat(),

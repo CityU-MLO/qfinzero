@@ -160,6 +160,8 @@ def update(patch: dict[str, Any]) -> dict[str, Any]:
     with _LOCK:
         new = _merge(load(), {})
         for section, vals in (patch or {}).items():
+            if section == "keys":          # managed by save_key / delete_key (secrets inside)
+                continue
             if not isinstance(vals, dict):
                 new[section] = vals
                 continue
@@ -182,6 +184,8 @@ def masked(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         if section in out and isinstance(out[section], dict):
             val = str(out[section].get(key, "") or "")
             out[section][key] = (("•" * 4 + val[-4:]) if val else "")
+    if "keys" in out:
+        out["keys"] = {v: masked_keys(v) for v in KEY_SECRETS}
     return out
 
 
@@ -220,13 +224,17 @@ def apply_to_env(cfg: dict[str, Any] | None = None) -> None:
 
 
 # ── typed accessors (used by scan / acquire / scheduler / services) ──────────
-def massive_s3() -> dict[str, str]:
+def massive_s3(index: str | None = None) -> dict[str, str]:
+    """S3 credentials for a massive flat-file index (the first key whose products
+    cover it; without ``index``, the first key)."""
+    k = pick_key("massive", index) or {}
     m = load().get("massive", {}) or {}
     return {
-        "access_key_id": m.get("s3_access_key_id", ""),
-        "secret_access_key": m.get("s3_secret_access_key", ""),
-        "endpoint": m.get("s3_endpoint", "") or "https://files.polygon.io",
+        "access_key_id": k.get("s3_access_key_id", ""),
+        "secret_access_key": k.get("s3_secret_access_key", ""),
+        "endpoint": k.get("s3_endpoint") or m.get("s3_endpoint", "") or "https://files.polygon.io",
         "bucket": m.get("s3_bucket", "") or "flatfiles",
+        "key_id": k.get("id", ""),
     }
 
 
@@ -242,8 +250,127 @@ def tushare_token() -> str:
     return str((load().get("tushare", {}) or {}).get("token", "") or "")
 
 
-def databento_key() -> str:
-    return str((load().get("databento", {}) or {}).get("api_key", "") or "")
+def databento_key(dataset: str | None = None) -> str:
+    """The API key for a Databento dataset (the first key whose products cover
+    it; without ``dataset``, the first key)."""
+    return str((pick_key("databento", dataset) or {}).get("api_key", "") or "")
+
+
+# ── vendor keys: several per vendor, each for some products ──────────────────
+#
+# Databento and massive sell products separately, so a team may hold one key per
+# subscription or a single key for everything. ``keys.<vendor>`` is a list of
+# ``{id, label, products, <secrets>…}``; ``products`` are dataset codes
+# (``GLBX.MDP3``) or flat-file indices (``us_options_opra/*``), shell-style
+# patterns allowed, ``["*"]`` for all. A download uses the first key whose
+# products match. The single key of older configs shows up as ``default``.
+
+KEY_SECRETS = {
+    "databento": ("api_key",),
+    "massive": ("s3_access_key_id", "s3_secret_access_key", "rest_api_key"),
+}
+KEY_FIELDS = {
+    "databento": ("label", "products", "monthly_budget_usd", "note"),
+    "massive": ("label", "products", "s3_endpoint", "note"),
+}
+
+
+def _legacy_key(vendor: str, cfg: dict[str, Any]) -> dict[str, Any] | None:
+    if vendor == "databento":
+        v = (cfg.get("databento", {}) or {}).get("api_key", "")
+        return {"id": "default", "label": "default", "products": ["*"], "api_key": v} if v else None
+    m = cfg.get("massive", {}) or {}
+    if m.get("s3_access_key_id") or m.get("s3_secret_access_key") or m.get("rest_api_key"):
+        return {"id": "default", "label": "default", "products": ["*"],
+                "s3_access_key_id": m.get("s3_access_key_id", ""),
+                "s3_secret_access_key": m.get("s3_secret_access_key", ""),
+                "rest_api_key": m.get("rest_api_key", "")}
+    return None
+
+
+def vendor_keys(vendor: str) -> list[dict[str, Any]]:
+    """All keys of a vendor, secrets in the clear."""
+    if vendor not in KEY_SECRETS:
+        raise ValueError(f"unknown vendor {vendor!r}")
+    cfg = load()
+    keys = [dict(k) for k in ((cfg.get("keys") or {}).get(vendor) or [])]
+    legacy = _legacy_key(vendor, cfg)
+    if legacy and not any(k.get("id") == "default" for k in keys):
+        keys.insert(0, legacy)
+    return keys
+
+
+def _matches(patterns, product: str | None) -> bool:
+    import fnmatch
+    pats = patterns or ["*"]
+    if product is None:
+        return True
+    return any(p == "*" or fnmatch.fnmatchcase(product, p) or product.startswith(p.rstrip("*").rstrip("/") + "/")
+               for p in pats)
+
+
+def pick_key(vendor: str, product: str | None = None) -> dict[str, Any] | None:
+    """The first key of ``vendor`` whose products cover ``product``."""
+    for k in vendor_keys(vendor):
+        if any(k.get(s) for s in KEY_SECRETS[vendor]) and _matches(k.get("products"), product):
+            return k
+    return None
+
+
+def masked_keys(vendor: str) -> list[dict[str, Any]]:
+    out = []
+    for k in vendor_keys(vendor):
+        v = {f: k.get(f) for f in ("id", *KEY_FIELDS[vendor]) if f in k}
+        v.setdefault("products", ["*"])
+        for sname in KEY_SECRETS[vendor]:
+            val = str(k.get(sname) or "")
+            v[sname] = ("•" * 4 + val[-4:]) if val else ""
+        out.append(v)
+    return out
+
+
+def save_key(vendor: str, key: dict[str, Any]) -> dict[str, Any]:
+    """Add (no ``id``) or update a key. Blank or masked secrets keep the stored
+    value. Returns the masked key."""
+    import secrets as _secrets
+    with _LOCK:
+        keys = vendor_keys(vendor)
+        kid = str(key.get("id") or "") or "k_" + _secrets.token_hex(4)
+        cur = next((k for k in keys if k.get("id") == kid), None)
+        new = dict(cur or {"id": kid})
+        for f in KEY_FIELDS[vendor]:
+            if f in key:
+                new[f] = key[f]
+        if isinstance(new.get("products"), str):
+            new["products"] = [p.strip() for p in new["products"].split(",") if p.strip()]
+        new["products"] = new.get("products") or ["*"]
+        for sname in KEY_SECRETS[vendor]:
+            sv = str(key.get(sname) or "")
+            if sv and "•" not in sv:
+                new[sname] = sv.strip()
+        if not any(new.get(s) for s in KEY_SECRETS[vendor]):
+            raise ValueError("a key needs its secret")
+        keys = [new if k.get("id") == kid else k for k in keys] if cur else [*keys, new]
+        cfg = load()
+        cfg.setdefault("keys", {})[vendor] = keys
+        save(cfg)
+        return next(k for k in masked_keys(vendor) if k["id"] == kid)
+
+
+def delete_key(vendor: str, key_id: str) -> bool:
+    with _LOCK:
+        keys = vendor_keys(vendor)
+        if not any(k.get("id") == key_id for k in keys):
+            return False
+        cfg = load()
+        cfg.setdefault("keys", {})[vendor] = [k for k in keys if k.get("id") != key_id]
+        if key_id == "default":           # the single key of older configs
+            if vendor == "databento":
+                cfg.setdefault("databento", {})["api_key"] = ""
+            else:
+                cfg.setdefault("massive", {}).update(s3_access_key_id="", s3_secret_access_key="", rest_api_key="")
+        save(cfg)
+        return True
 
 
 def dirs() -> dict[str, str]:

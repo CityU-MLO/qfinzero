@@ -91,9 +91,15 @@ def csv_to_parquet(csv_gz: Path, parquet: Path) -> None:
 
 
 def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoint: str, root: Path,
-             dry_run: bool = True, on_line: Optional[OnLine] = None, s3=None) -> dict[str, Any]:
-    """Plan (``dry_run``) or fetch one index over a date range."""
+             dry_run: bool = True, on_line: Optional[OnLine] = None, s3=None,
+             on_progress: Optional[Callable[..., None]] = None,
+             should_stop: Optional[Callable[[], bool]] = None) -> dict[str, Any]:
+    """Plan (``dry_run``) or fetch one index over a date range. Progress (files
+    and bytes, as boto3 transfers them) goes to ``on_progress``; ``should_stop``
+    is checked between files."""
     say = on_line or (lambda _l: None)
+    prog = on_progress or (lambda **_k: None)
+    stop = should_stop or (lambda: False)
     index = str(params.get("index") or "")
     start = date.fromisoformat(str(params.get("start"))[:10])
     end = date.fromisoformat(str(params.get("end"))[:10])
@@ -110,21 +116,41 @@ def download(params: dict[str, Any], *, access_key: str, secret_key: str, endpoi
                               "bytes": nbytes, "dry_run": dry_run,
                               "first": files[0]["date"] if files else None,
                               "last": files[-1]["date"] if files else None}
+    prog(stage="planned", files_total=len(todo), files_done=0, bytes_total=nbytes, bytes_done=0)
     if dry_run or not todo:
         return result
-    done = 0
+    done = failed = 0
+    got = [0]
     for f in todo:
+        if stop():
+            say("[massive] stopped by the user")
+            break
         target = Path(f["path"])
         tmp = target.with_suffix(".csv.gz.part")
         target.parent.mkdir(parents=True, exist_ok=True)
+        prog(stage="downloading", current=f["date"])
+
+        def tick(n: int) -> None:
+            got[0] += n
+            prog(bytes_done=got[0])
         try:
-            s3.download_file(BUCKET, f["key"], str(tmp))
+            try:
+                s3.download_file(BUCKET, f["key"], str(tmp), Callback=tick)
+            except TypeError:          # a client without transfer callbacks
+                s3.download_file(BUCKET, f["key"], str(tmp))
+                got[0] += f["size"]
+            prog(stage="converting", current=f["date"])
             csv_to_parquet(tmp, target)
             done += 1
             say(f"  [{done}/{len(todo)}] {f['date']}  {f['size'] / 1e6:.1f} MB")
         except Exception as e:  # noqa: BLE001 — report and continue with the next day
+            failed += 1
             say(f"  [error] {f['key']}: {type(e).__name__}: {e}")
         finally:
             tmp.unlink(missing_ok=True)
+        prog(files_done=done + failed, files_failed=failed, bytes_done=got[0])
+    stopped = done + failed < len(todo)
     result.update(downloaded=done, ok=done == len(todo))
+    if stopped:
+        result["error"] = "stopped by the user"
     return result

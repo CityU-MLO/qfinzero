@@ -3,6 +3,9 @@
 import os
 import pytest
 
+# the data-admin job registry must not write into a real data root during tests
+os.environ.setdefault("QFZ_JOBS_PERSIST", "0")
+
 # Mock base URLs — no real servers needed
 MOCK_UPQ_URL = "http://mock-upq:19350"
 MOCK_ESP_URL = "http://mock-esp:19330"
