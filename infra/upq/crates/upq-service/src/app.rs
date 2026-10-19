@@ -1524,11 +1524,12 @@ async fn future_minute(
     Query(params): Query<FutureQuery>,
 ) -> axum::response::Response {
     let default = [
-        "ticker", "root", "window_start", "open", "high", "low", "close", "volume", "transactions",
+        "ticker", "root", "instrument_id", "window_start", "open", "high", "low", "close", "volume",
+        "transactions",
     ];
     let allow = [
-        "ticker", "root", "window_start", "open", "high", "low", "close", "volume", "transactions",
-        "trade_date",
+        "ticker", "root", "instrument_id", "window_start", "open", "high", "low", "close", "volume",
+        "transactions", "trade_date",
     ];
     let projection = match parse_projection(params.fields.as_deref(), &default, &allow) {
         Ok(p) => p,
@@ -1564,12 +1565,13 @@ async fn future_daily(
         Err(m) => return invalid_argument(m),
     };
     let allow = [
-        "ticker", "root", "trade_date", "date", "open", "high", "low", "close", "settle", "volume",
-        "transactions",
+        "ticker", "root", "instrument_id", "trade_date", "date", "open", "high", "low", "close", "settle",
+        "settle_source", "volume", "transactions",
     ];
     let fields = match params.fields.as_deref().map(parse_csv_list) {
         Some(f) if !f.is_empty() => f,
-        _ => ["ticker", "root", "date", "open", "high", "low", "close", "settle", "volume", "transactions"]
+        _ => ["ticker", "root", "instrument_id", "date", "open", "high", "low", "close", "settle", "settle_source",
+              "volume", "transactions"]
             .iter()
             .map(|s| s.to_string())
             .collect(),

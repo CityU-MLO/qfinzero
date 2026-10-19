@@ -53,7 +53,10 @@ Added:
   `upq_future_*` tools; PMB futures with contract specs, per-contract initial
   and maintenance margin, daily variation margin, margin calls met at initial
   margin and liquidation of unmet calls (`pmb_trade_future`, `universe.futures`,
-  `add_futures`); futures in the broker terminal and the availability map.
+  `add_futures`); futures in the broker terminal and the availability map;
+  exchange settlement prices from Databento `statistics`, and rolls of
+  continuous series (by `instrument_id`) that move positions without booking
+  the spread.
 - Chat conversations stored per user (new, rename, delete, search), the context
   rebuilt from the history each turn with tool-result trimming and automatic or
   manual compaction, a context meter, stopping an answer (kept as interrupted),

@@ -87,6 +87,7 @@ OPTION_QUOTE_MINUTE = {
 FUTURE_MINUTE = {
     "ticker": "VARCHAR",
     "root": "VARCHAR",
+    "instrument_id": "BIGINT",     # the contract a continuous series pointed to (rolls change it)
     "window_start": "BIGINT",
     "open": "DOUBLE",
     "high": "DOUBLE",
@@ -97,17 +98,20 @@ FUTURE_MINUTE = {
     "trade_date": "DATE",
 }
 
-# ``settle`` is the price daily variation margin marks to (last trade of the
-# session until exchange settlement prices are loaded).
+# ``settle`` is the price daily variation margin marks to: the exchange
+# settlement (``settle_source = 'exchange'``, from Databento statistics) or the
+# last trade of the session (``'last'``).
 FUTURE_DAILY = {
     "ticker": "VARCHAR",
     "root": "VARCHAR",
+    "instrument_id": "BIGINT",
     "trade_date": "DATE",
     "open": "DOUBLE",
     "high": "DOUBLE",
     "low": "DOUBLE",
     "close": "DOUBLE",
     "settle": "DOUBLE",
+    "settle_source": "VARCHAR",
     "volume": "BIGINT",
     "transactions": "BIGINT",
 }

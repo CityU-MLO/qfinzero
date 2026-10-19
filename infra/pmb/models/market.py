@@ -44,7 +44,9 @@ class FutureBar(BaseModel):
     volume: int
     root: Optional[str] = None
     settle: Optional[float] = None       # daily bars
+    settle_source: Optional[str] = None  # exchange | last
     session_date: Optional[str] = None   # CME trade date
+    instrument_id: Optional[int] = None  # contract behind a continuous series
 
 
 class Quote(BaseModel):

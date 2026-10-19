@@ -194,9 +194,17 @@ export function Terminal({
       busyRef.current = true;
       try {
         await step(sessionId, n);
+        const before = stateRef.current?.futures_activity?.settlements.length ?? 0;
         const s = await getState(sessionId);
         apply(s, true);
         if (initialEquity === null) setInitialEquity(s.account.equity);
+        const fresh = (s.futures_activity?.settlements.length ?? 0) - before;
+        if (fresh > 0) {
+          const total = s.futures_activity!.settlements.slice(0, fresh).reduce((a, x) => a + x.amount, 0);
+          setToast(t(`Futures settled: ${total >= 0 ? "+" : ""}${money(total)} variation margin`,
+            `期货结算：变动保证金 ${total >= 0 ? "+" : ""}${money(total)}`));
+          setTimeout(() => setToast(null), 3500);
+        }
         if (s.clock.is_done) {
           playingRef.current = false;
           setPlaying(false);
@@ -207,7 +215,7 @@ export function Terminal({
         busyRef.current = false;
       }
     },
-    [sessionId, apply, initialEquity],
+    [sessionId, apply, initialEquity, t],
   );
 
   const loop = useCallback(() => {
@@ -517,6 +525,27 @@ export function Terminal({
           </button>
         </div>
       </div>
+
+      {state?.futures_activity?.margin_call && (() => {
+        const mc = state.futures_activity!.margin_call!;
+        const fa = state.futures_activity!;
+        return (
+          <div className="flex flex-wrap items-center gap-x-3 border-b border-warning/40 bg-warning/10 px-5 py-1.5 text-sm text-warning">
+            <span className="font-semibold">
+              {mc.level === "LIQUIDATION" ? t("Liquidated", "已强制平仓") : t("Margin call", "追加保证金")}
+            </span>
+            {mc.call_amount != null && mc.call_amount > 0 && (
+              <span>{t(`Deposit or reduce by ${money(mc.call_amount)} to get back to the initial margin.`,
+                `需要补足 ${money(mc.call_amount)}，使权益回到初始保证金。`)}</span>
+            )}
+            <span className="text-warning/80">
+              {t("New positions are blocked; closing orders still execute.", "禁止开新仓，平仓单照常成交。")}
+              {fa.call_limit > 0 && t(` Settlements in call: ${fa.call_sessions}/${fa.call_limit}, then the futures are liquidated.`,
+                ` 已经过 ${fa.call_sessions}/${fa.call_limit} 次结算，之后期货将被强平。`)}
+            </span>
+          </div>
+        );
+      })()}
 
       {err && (
         <div className="flex items-center justify-between border-b border-destructive/30 bg-destructive/5 px-5 py-1.5 text-sm text-destructive">
@@ -869,6 +898,57 @@ export function Terminal({
               cls={acct?.margin_status === "NORMAL" || acct?.margin_status === "OK" ? "text-up" : "text-warning"}
             />
           </div>
+
+          {/* Futures: margin per position and daily settlement */}
+          {(state?.positions ?? []).some((p) => isFutureId(p.instrument_id)) || (state?.futures_activity?.settlements.length ?? 0) > 0 ? (
+            <div className="mt-5 border-t border-border pt-4 text-xs">
+              <div className="mb-2 font-semibold text-muted-foreground">{t("Futures", "期货")}</div>
+              {(state?.positions ?? []).filter((p) => isFutureId(p.instrument_id)).map((p) => {
+                const sym = instName(p.instrument_id);
+                const sp = state?.futures_specs?.[sym];
+                const mult = p.multiplier ?? sp?.multiplier ?? 1;
+                const ote = p.qty * (p.mark_price - (p.basis_price ?? p.avg_price)) * mult;
+                return (
+                  <div key={p.instrument_id} className="mb-2 rounded-md border px-2 py-1.5">
+                    <div className="flex justify-between font-medium text-foreground">
+                      <span className="font-mono">{sym} {p.qty > 0 ? "+" : ""}{p.qty}</span>
+                      <span className={ote >= 0 ? "text-up" : "text-down"}>{ote >= 0 ? "+" : ""}{money(ote)}</span>
+                    </div>
+                    <div className="mt-0.5 flex justify-between text-muted-foreground">
+                      <span>{t("since settle", "上次结算以来")} {num(p.basis_price ?? p.avg_price)}</span>
+                      {sp && <span>{t("IM", "初始")} {money(Math.abs(p.qty) * sp.initial_per_contract)} · {t("MM", "维持")} {money(Math.abs(p.qty) * sp.maintenance_per_contract)}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+              {(state?.futures_activity?.settlements.length ?? 0) > 0 && (
+                <>
+                  <div className="mb-1 mt-3 font-medium text-muted-foreground">{t("Daily settlement", "每日结算")}</div>
+                  <table className="w-full">
+                    <tbody>
+                      {state!.futures_activity!.settlements.slice(0, 8).map((s, i) => (
+                        <tr key={i} className="border-t border-border/60" title={`${num(s.prev_price)} → ${num(s.settle)} × ${s.qty}`}>
+                          <td className="py-1 tabular-nums text-muted-foreground">{s.session_date.slice(5)}</td>
+                          <td className="py-1 font-mono">{instName(s.instrument_id)}</td>
+                          <td className="py-1 text-right tabular-nums">{num(s.settle)}</td>
+                          <td className={`py-1 text-right tabular-nums ${s.amount >= 0 ? "text-up" : "text-down"}`}>
+                            {s.amount >= 0 ? "+" : ""}{money(s.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {(state?.futures_activity?.rolls.length ?? 0) > 0 && (
+                <div className="mt-2 text-muted-foreground">
+                  {state!.futures_activity!.rolls.slice(0, 3).map((r, i) => (
+                    <div key={i}>{t("Rolled", "换月")} {instName(r.instrument_id)}: {num(r.old_price)} → {num(r.new_price)}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
 

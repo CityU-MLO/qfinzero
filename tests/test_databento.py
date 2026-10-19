@@ -604,3 +604,26 @@ def test_glbx_mbp1_becomes_future_quotes(tmp_path):
                    "ORDER BY window_start") == [("ZN", "ZN", T0930, 110.515625, 110.53125, 12),
                                                 ("ZN", "ZN", T0930 + 60 * S, 110.53125, 110.546875, 12)]
     assert _q(con, f"SELECT close, volume FROM read_parquet('{_store(paths, 'future_minute')}')") == [(110.53125, 4)]
+
+
+@needs_dbn
+def test_glbx_statistics_settle_and_instrument_ids(tmp_path):
+    import databento_dbn as d
+    paths = _paths(tmp_path)
+    _write_dbn(paths.databento / "GLBX.MDP3" / "mbo" / "2025-01-02.dbn", "GLBX.MDP3", "mbo",
+               {"ZN.v.0": 42}, [_mbo(42, T0930, 110.5, 3, "T"), _mbo(42, T0930 + 3600 * S * 3, 110.25, 2, "T")])
+
+    def stat(price, recv, flags):
+        return d.StatMsg(1, 42, recv, recv, DAY_START, int(round(price * PX)), 0, d.StatType.SETTLEMENT_PRICE,
+                         stat_flags=flags)
+    _write_dbn(paths.databento / "GLBX.MDP3" / "statistics" / "2025-01-02.dbn", "GLBX.MDP3", "statistics",
+               {"ZN.v.0": 42}, [stat(110.3, T0930 + 7 * 3600 * S, 0), stat(110.375, T0930 + 8 * 3600 * S, 1),
+                                stat(110.9, T0930 + 9 * 3600 * S, 0)])   # a later preliminary loses to the final
+    res = _convert(paths)
+    assert res.rows > 0, res.notes
+    con = duckdb.connect()
+    day = _q(con, f"SELECT ticker, instrument_id, close, settle, settle_source "
+                  f"FROM read_parquet('{_store(paths, 'future_daily')}')")
+    assert day == [("ZN", 42, 110.25, 110.375, "exchange")]
+    ids = _q(con, f"SELECT DISTINCT instrument_id FROM read_parquet('{_store(paths, 'future_minute')}')")
+    assert ids == [(42,)]

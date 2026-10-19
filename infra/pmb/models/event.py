@@ -62,6 +62,17 @@ class RiskEventPayload(BaseModel):
     call_amount: Optional[float] = None       # deposit that would meet the call
 
 
+class FutureRollPayload(BaseModel):
+    """A front-month continuous series moved to the next contract: the position
+    moves with it at the new contract's first price (the spread is not P&L)."""
+    instrument_id: str
+    qty: int
+    from_contract: Optional[int] = None
+    to_contract: int
+    old_price: float
+    new_price: float
+
+
 class VariationMarginPayload(BaseModel):
     """Daily futures settlement of one position."""
     instrument_id: str

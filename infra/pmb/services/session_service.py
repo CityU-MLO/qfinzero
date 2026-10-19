@@ -22,6 +22,7 @@ from models.event import (
     RiskEventPayload,
     OrderEventPayload,
     VariationMarginPayload,
+    FutureRollPayload,
 )
 from domain.futures import session_date_of
 from domain.session_clock import SessionClock, ns_to_iso, iso_to_ns
@@ -392,6 +393,38 @@ class SessionService:
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
         return {"ok": True, "loaded": loaded, "unknown_spec": unknown}
 
+    def _roll_futures(self, state: SessionState, future_bars: dict, ts: str) -> list[dict]:
+        events = []
+        for pos in state.ledger.future_positions():
+            bar = future_bars.get(pos.instrument_id.split(":", 1)[1])
+            if bar is None or bar.instrument_id is None or pos.contract_id in (None, bar.instrument_id):
+                continue
+            rec = state.ledger.roll_future(pos.instrument_id, bar.open, bar.instrument_id)
+            if rec:
+                evt = EventEnvelope(event_id=state.next_event_id(), ts=ts, type=EventType.FUTURE_ROLL,
+                                    payload=FutureRollPayload(**rec).model_dump())
+                events.append(evt.model_dump())
+                state.history.append_event(evt)
+        return events
+
+    def _futures_activity(self, state: SessionState, limit: int = 30) -> dict:
+        """Recent settlements and rolls, and the open margin call, for the UI."""
+        settlements, rolls, risk = [], [], None
+        for e in reversed(state.history._events):
+            kind = e.get("type")
+            kind = kind.value if hasattr(kind, "value") else kind
+            if kind == EventType.VARIATION_MARGIN.value and len(settlements) < limit:
+                settlements.append({**e["payload"], "ts": e["ts"]})
+            elif kind == EventType.FUTURE_ROLL.value and len(rolls) < limit:
+                rolls.append({**e["payload"], "ts": e["ts"]})
+            elif kind == EventType.RISK_EVENT.value and risk is None:
+                risk = {**e["payload"], "ts": e["ts"]}
+        if state.margin_engine.margin_status == MarginStatus.NORMAL:
+            risk = None
+        return {"settlements": settlements, "rolls": rolls, "margin_call": risk,
+                "call_sessions": state.margin_engine.call_sessions,
+                "call_limit": state.margin_engine._config.future_margin_call_sessions}
+
     def _is_last_future_bar(self, state: SessionState, ts_ns: int) -> bool:
         """Last bar of a CME session (daily sessions: every bar). The very last
         bar of a minute run is not a settlement unless the session ended there."""
@@ -627,6 +660,9 @@ class SessionService:
         events.append(market_event.model_dump())
         state.history.append_event(market_event)
 
+        # 1b. Continuous futures that moved to the next contract take positions along
+        events.extend(self._roll_futures(state, future_bars, ts))
+
         # 2. Update market prices in ledger
         prices = state.cache.get_prices_at(ts_ns)
         state.ledger.update_market_prices(prices)
@@ -729,6 +765,12 @@ class SessionService:
         # 4b. Re-mark positions created/modified by fills to bar close
         if trades:
             state.ledger.update_market_prices(prices)
+
+        # 4b'. new futures positions remember the contract they were opened in
+        for pos in state.ledger.future_positions():
+            bar = future_bars.get(pos.instrument_id.split(":", 1)[1])
+            if pos.contract_id is None and bar is not None and bar.instrument_id is not None:
+                pos.contract_id = bar.instrument_id
 
         # 4c. Futures daily settlement (variation margin) at the end of a CME session
         if state.ledger.future_positions() and self._is_last_future_bar(state, ts_ns):
@@ -1345,6 +1387,7 @@ class SessionService:
                 ],
             },
             "futures_specs": self._futures_specs(state),
+            "futures_activity": self._futures_activity(state),
         }
 
     def _futures_specs(self, state: SessionState) -> dict:

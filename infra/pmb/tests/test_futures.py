@@ -181,3 +181,44 @@ async def test_checkpoint_keeps_futures_basis_and_call_state():
     assert cp["config"]["universe"]["futures"] == ["CL"]
     (pos,) = cp["ledger"]["positions"]
     assert pos["basis_price"] == 86.0 and pos["multiplier"] == 1000 and pos["last_settle_date"] == "2025-01-07"
+
+
+class RollUPQ(FakeUPQ):
+    BARS = [("2025-01-07T14:30:00", 90.0, 1), ("2025-01-07T21:59:00", 91.0, 1),
+            ("2025-01-07T23:00:00", 95.0, 2),           # the series moves to the next contract (+4 spread)
+            ("2025-01-08T21:59:00", 96.0, 2), ("2025-01-08T23:00:00", 96.0, 2)]
+
+    async def get_future_minute_bars(self, tickers, start, end):
+        return [FutureBar(symbol="CL", root="CL", window_start_ns=ns(t), open=p, high=p, low=p, close=p, volume=10,
+                          session_date=session_date_of(ns(t)), instrument_id=i) for t, p, i in self.BARS]
+
+    async def get_future_daily_bars(self, tickers, start, end):
+        return [FutureBar(symbol="CL", root="CL", window_start_ns=ns(d + "T00:00:00"), open=s, high=s, low=s, close=s,
+                          volume=100, settle=s, session_date=d, instrument_id=i)
+                for d, s, i in (("2025-01-07", 91.0, 1), ("2025-01-08", 96.0, 2))]
+
+
+@pytest.mark.asyncio
+async def test_roll_moves_the_position_without_booking_the_spread():
+    accounts = AccountService()
+    account = accounts.create_account(CreateAccountRequest(initial_cash=50_000, market=Market.US))
+    svc = SessionService(RollUPQ())
+    sid, _ = await svc.create_session(CreateSessionRequest(
+        account_id=account.account_id, start_ts="2025-01-07T00:00:00", end_ts="2025-01-09T12:00:00",
+        universe=Universe(futures=["CL"]), execution_config=ExecutionConfig(slippage_bps=0.0),
+    ), account)
+    orders = OrderService(svc)
+    _buy(orders, sid, account.account_id)
+    state = svc.get_session(sid)
+    svc.step(sid, 2)                                          # filled at 90, settled at 91: +1,000
+    assert state.ledger.positions["FUTURE:CL"].contract_id == 1
+    res = svc.step(sid, 1)                                    # the series rolls to contract 2 at 95
+    (roll,) = _events(res, EventType.FUTURE_ROLL)
+    assert roll["payload"]["from_contract"] == 1 and roll["payload"]["to_contract"] == 2
+    pos = state.ledger.positions["FUTURE:CL"]
+    assert (pos.avg_price, pos.basis_price, pos.contract_id) == (94.0, 95.0, 2)
+    assert pos.unrealized_pnl == pytest.approx(1000.0)        # open P&L carried over, not +5,000
+    svc.step(sid, 1)                                          # settled at 96: +1,000 more
+    assert state.ledger.cash == pytest.approx(50_000 - 1.5 + 2000)
+    act = svc.get_full_state(sid)["futures_activity"]
+    assert [s["amount"] for s in act["settlements"]] == [1000.0, 1000.0] and len(act["rolls"]) == 1

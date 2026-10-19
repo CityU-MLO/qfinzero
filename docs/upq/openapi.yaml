@@ -694,6 +694,7 @@ components:
       properties:
         ticker: {type: string, example: ZN}
         root: {type: string, example: ZN}
+        instrument_id: {type: integer, format: int64, description: contract behind a continuous series; a change is a roll}
         window_start: {type: integer, format: int64}
         open: {type: number}
         high: {type: number}
@@ -712,6 +713,8 @@ components:
         low: {type: number}
         close: {type: number}
         settle: {type: number}
+        settle_source: {type: string, enum: [exchange, last]}
+        instrument_id: {type: integer, format: int64}
         volume: {type: integer}
         transactions: {type: integer}
     QuoteRecord:

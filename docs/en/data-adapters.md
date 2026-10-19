@@ -98,7 +98,8 @@ takes about two minutes, and later scans take about one second.
 | `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily | only records with `action == 'T'` |
 | `cmbp-1`, `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute`, `future_quote_minute` | last top of book in each minute (see below) |
 | `mbp-1`, `mbp-10` of a futures venue | `future_quote_minute` | the exchange's own book is the BBO |
-| definition, statistics, status, imbalance | none | reference data |
+| `statistics` of a futures venue | `future_daily.settle` | exchange settlement prices |
+| definition, statistics (other venues), status, imbalance | none | reference data |
 
 In MBO, a `T` record is the execution and an `F` record is the passive side of
 the same execution, so counting both would double the volume. Hidden-order
@@ -136,8 +137,12 @@ executions also arrive as `T`.
 - Fixed-point prices are divided by 1e9, so `56650000000` becomes exactly `56.65`.
 - Futures sessions run from 18:00 ET to 17:00 ET the next day, so a bar from
   18:00 ET on belongs to the next trade date. A daily bar covers the whole
-  session; `settle` is its last trade (exchange settlement prices from the
-  `statistics` schema are not converted yet). Databento cuts files on UTC days,
+  session. `settle` is the exchange settlement price when a `statistics` file
+  of the venue has one for that contract and session (stat type
+  `SETTLEMENT_PRICE`; a final settlement beats a preliminary one), with
+  `settle_source = 'exchange'`; otherwise the session's last trade
+  (`'last'`). `instrument_id` on futures bars is the contract a continuous
+  series pointed to, so a change marks a roll. Databento cuts files on UTC days,
   so a lone file also holds the first two hours of the next session: those
   minutes are kept, but that session gets a daily bar only when its 12:00–17:00
   ET part is present for the product.

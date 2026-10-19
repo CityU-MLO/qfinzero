@@ -213,7 +213,9 @@ class Converter:
                        and e.get("v") == databento.EXTRACT_VERSION
                        and (e.get("rows", 0) == 0 or out.exists())
                        and (e.get("q_rows", 0) == 0
-                            or databento.quote_staging_path(out).exists()))
+                            or databento.quote_staging_path(out).exists())
+                       and (e.get("s_rows", 0) == 0
+                            or databento.settle_staging_path(out).exists()))
             if force or not current:
                 todo.append((f, out))
             else:
@@ -242,6 +244,7 @@ class Converter:
         # ── stage 2: assemble per (store, trade_date) ──
         # (stores, asset, date) -> staging files; bar and quote stores apart
         by_date: dict[tuple[str, str, str], list[Path]] = {}
+        settles: dict[str, list[Path]] = {}
         for f, out, e in staged:
             for kind, rows_k, dates_k, assets_k, path in (
                     ("bars", "rows", "dates", "assets", out),
@@ -254,6 +257,15 @@ class Converter:
                     for a in e.get(assets_k, []):
                         if a in assets:
                             by_date.setdefault((kind, a, d), []).append(path)
+            # exchange settlements join the futures daily bars of their session
+            if e.get("s_rows") and "future" in assets:
+                for d in e.get("s_dates", []):
+                    if (start and d < start) or (end and d > end):
+                        continue
+                    settles.setdefault(d, []).append(databento.settle_staging_path(out))
+        for d, paths in settles.items():
+            if ("bars", "future", d) in by_date:
+                by_date[("bars", "future", d)] += paths
         written = 0
         assembled: set[str] = set()
         for (kind, asset, d), stg in sorted(by_date.items(), key=lambda kv: (kv[0][2], kv[0][0], kv[0][1])):
@@ -264,16 +276,19 @@ class Converter:
             sql_fn = (databento.assembly_sql if kind == "bars"
                       else (lambda st, sg, dd, sb, _iv=iv: databento.quote_sql(st, sg, dd, sb, interval=_iv)))
             for store in stores:
+                inputs = stg if store == "future_daily" else [p for p in stg if not databento.is_settle_staging(p)]
+                if not inputs:
+                    continue
                 part_dir = self.p.partition(store, d)
                 sibs = databento.sibling_parts(part_dir)
-                fp = databento.fingerprint([*stg, *sibs]) + (f"|q{iv}m" if iv != 1 else "")
+                fp = databento.fingerprint([*inputs, *sibs]) + (f"|q{iv}m" if iv != 1 else "")
                 mkey = f"databento:{store}/{d}"
                 assembled.add(mkey)
                 if not force and self.manifest.fp_current(mkey, fp):
                     res.skipped += 1
                     continue
                 target = part_dir / databento.PART_NAME
-                rows = copy_to_parquet(self.con, sql_fn(store, stg, d, sibs), target)
+                rows = copy_to_parquet(self.con, sql_fn(store, inputs, d, sibs), target)
                 if rows == 0:
                     databento.remove_part(target)    # fully covered by another vendor
                 else:
@@ -334,6 +349,7 @@ class Converter:
                    "v": databento.EXTRACT_VERSION,
                    "rows": r.rows, "dates": r.dates, "assets": r.assets,
                    "q_rows": r.q_rows, "q_dates": r.q_dates, "q_assets": r.q_assets,
+                   "s_rows": r.s_rows, "s_dates": r.s_dates,
                    "staging": str(out)}
             if r.dropped_symbols:
                 rec["unmapped_instruments"] = r.dropped_symbols

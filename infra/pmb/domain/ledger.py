@@ -204,6 +204,24 @@ class Ledger:
                 pos.last_settle_date = None
         return realized
 
+    def roll_future(self, instrument_id: str, new_price: float, contract_id: int) -> dict | None:
+        """Move a futures position on a continuous series to its next contract at
+        ``new_price``. Entry and basis shift by the gap from the old contract's
+        mark, so open P&L carries over and the spread between the contracts is
+        not booked as a gain or loss."""
+        pos = self._positions.get(instrument_id)
+        if pos is None or pos.type != InstrumentType.FUTURE or not pos.qty:
+            return None
+        old = pos.mark_price or (pos.basis_price if pos.basis_price is not None else pos.avg_price)
+        shift = new_price - old
+        prev = pos.contract_id
+        pos.avg_price += shift
+        pos.basis_price = (pos.basis_price if pos.basis_price is not None else old) + shift
+        pos.mark_price = new_price
+        pos.contract_id = contract_id
+        return {"instrument_id": instrument_id, "qty": pos.qty, "from_contract": prev, "to_contract": contract_id,
+                "old_price": old, "new_price": new_price}
+
     def settle_futures(self, settles: dict[str, float], session_date: str) -> list[dict]:
         """Daily settlement: pay ``qty * (settle - basis) * multiplier`` into cash
         for each futures position with a settle price, and move its basis to the

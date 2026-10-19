@@ -128,6 +128,25 @@ export interface FullState {
   trades: Trade[];
   market: { ts: string; stocks: StockQuote[]; options: unknown[]; futures?: StockQuote[] };
   futures_specs?: Record<string, FutureSpecView>;
+  futures_activity?: FuturesActivity;
+}
+
+export interface Settlement {
+  ts: string;
+  instrument_id: string;
+  session_date: string;
+  qty: number;
+  prev_price: number;
+  settle: number;
+  amount: number;
+}
+
+export interface FuturesActivity {
+  settlements: Settlement[];   // newest first
+  rolls: { ts: string; instrument_id: string; from_contract: number | null; to_contract: number; old_price: number; new_price: number }[];
+  margin_call: { level: string; equity: number; maintenance_margin_req: number; initial_margin_req?: number; call_amount?: number; ts: string } | null;
+  call_sessions: number;
+  call_limit: number;
 }
 
 // ── Allocate account ───────────────────────────────────────────────────────

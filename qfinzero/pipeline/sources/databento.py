@@ -68,7 +68,7 @@ PART_NAME = "part-databento-0000.parquet"
 INDEX_FILE = "databento_index.json"   # under <storage>/_state/
 INDEX_VERSION = 2   # 2: OCEA recognised as a US equity venue
 # Bump when extraction output changes so cached staging bars are rebuilt.
-EXTRACT_VERSION = 4   # 3: quote staging (<key>.q.parquet); 4: futures
+EXTRACT_VERSION = 5   # 3: quote staging (<key>.q.parquet); 4: futures; 5: instrument ids, settlements
 
 UNDEF_PRICE = 9223372036854775807     # i64::MAX, Databento's "no price"
 UNDEF_TS = 18446744073709551615       # u64::MAX, Databento's "no timestamp"
@@ -127,8 +127,10 @@ _ET = "America/New_York"
 # staging columns (one row per bar); written per source file
 STAGING_COLUMNS = (
     "asset", "ticker", "kind", "trade_date", "window_start", "et_min",
-    "open", "high", "low", "close", "volume", "transactions", "drank", "src",
+    "open", "high", "low", "close", "volume", "transactions", "drank", "src", "iid",
 )
+# exchange settlement prices of futures (statistics schema) -> <key>.s.parquet
+SETTLE_STAGING_COLUMNS = ("ticker", "trade_date", "settle", "final", "ts")
 
 
 def dataset_rank(dataset: str | None) -> int:
@@ -211,8 +213,12 @@ class FileInfo:
             self.asset == "future" and self.schema in FUTURE_BOOK_SCHEMAS)
 
     @property
+    def has_settlements(self) -> bool:
+        return self.asset == "future" and self.schema == "statistics" and self.fmt == "dbn"
+
+    @property
     def convertible(self) -> bool:
-        return self.error is None and (self.has_bars or self.has_quotes) and (
+        return self.error is None and (self.has_bars or self.has_quotes or self.has_settlements) and (
             self.asset is not None or self.fmt == "parquet")
 
     def overlaps(self, start: str | None, end: str | None) -> bool:
@@ -476,7 +482,8 @@ def _bars_to_staging_sql(src: str, kind_col: str, drank: int, src_id: str) -> st
                CAST(volume AS BIGINT) AS volume,
                CAST(transactions AS BIGINT) AS transactions,
                {int(drank)} AS drank,
-               '{src_id}' AS src
+               '{src_id}' AS src,
+               CAST(iid AS BIGINT) AS iid
         FROM {src}
     """
 
@@ -492,11 +499,22 @@ class ExtractResult:
     q_rows: int = 0                                      # quote staging
     q_dates: list[str] = field(default_factory=list)
     q_assets: list[str] = field(default_factory=list)
+    s_rows: int = 0                                      # settlement staging
+    s_dates: list[str] = field(default_factory=list)
 
 
 def quote_staging_path(out: Path) -> Path:
     """Quote staging file next to a bar staging file (``<key>.q.parquet``)."""
     return out.with_name(out.stem + ".q.parquet")
+
+
+def settle_staging_path(out: Path) -> Path:
+    """Settlement staging file next to a bar staging file (``<key>.s.parquet``)."""
+    return out.with_name(out.stem + ".s.parquet")
+
+
+def is_settle_staging(p: Path) -> bool:
+    return Path(p).name.endswith(".s.parquet")
 
 
 def _write_staging(con, select_sql: str, out: Path) -> tuple[int, list[str], list[str]]:
@@ -646,7 +664,7 @@ def _extract_dbn(info: FileInfo, out: Path, con, chunk: int) -> ExtractResult:
     res.dropped_symbols += _register_symbols(con, "_bars", md)
     con.execute(f"""CREATE OR REPLACE TEMP VIEW _named AS
         SELECT '{asset}' AS asset, s.sym, b.ws, b.open, b.high, b.low, b.close,
-               b.volume, b.transactions
+               b.volume, b.transactions, b.key AS iid
         FROM _bars b JOIN _sym s ON s.key = b.key AND s.day = b.ws // {NS_PER_DAY}""")
     n, dates, assets = _write_staging(
         con, _bars_to_staging_sql("_named", f"'{kind}'", drank, src_id), out)
@@ -669,6 +687,7 @@ def _extract_parquet(info: FileInfo, out: Path, con) -> ExtractResult:
         asset_expr = f"'{info.asset}'"
     else:   # infer per row from the symbol shape
         asset_expr = f"CASE WHEN regexp_matches(symbol, '{OSI_RE}') THEN 'option' ELSE 'stock' END"
+    iid = "CAST(instrument_id AS BIGINT)" if "instrument_id" in cols else "NULL::BIGINT"
 
     def price(col: str) -> str:
         ctype = cols.get(col, "")
@@ -683,7 +702,7 @@ def _extract_parquet(info: FileInfo, out: Path, con) -> ExtractResult:
         if "action" in cols and schema != "tcbbo":
             where.append("action = 'T'")
         con.execute(f"""CREATE OR REPLACE TEMP TABLE _bars AS
-            SELECT {asset_expr} AS asset, CAST(symbol AS VARCHAR) AS sym,
+            SELECT {asset_expr} AS asset, CAST(symbol AS VARCHAR) AS sym, {iid} AS iid,
                    ts - ts % {NS_PER_MIN} AS ws,
                    arg_min(px, file_row_number) AS open, max(px) AS high, min(px) AS low,
                    arg_max(px, file_row_number) AS close,
@@ -697,7 +716,7 @@ def _extract_parquet(info: FileInfo, out: Path, con) -> ExtractResult:
         bucket = NS_PER_MIN if kind == "s" else None
         ws = f"{ts} - {ts} % {bucket}" if bucket else ts
         con.execute(f"""CREATE OR REPLACE TEMP TABLE _bars AS
-            SELECT {asset_expr} AS asset, CAST(symbol AS VARCHAR) AS sym, {ws} AS ws,
+            SELECT {asset_expr} AS asset, CAST(symbol AS VARCHAR) AS sym, {iid} AS iid, {ws} AS ws,
                    arg_min({price('open')}, file_row_number) AS open,
                    max({price('high')}) AS high, min({price('low')}) AS low,
                    arg_max({price('close')}, file_row_number) AS close,
@@ -918,6 +937,63 @@ QUOTE_STORES_FOR_ASSET = {
 }
 
 
+def _extract_dbn_settlements(info: FileInfo, out: Path, con, chunk: int) -> tuple[int, list[str]]:
+    """Exchange settlement prices (``statistics`` records with stat_type
+    SETTLEMENT_PRICE) per contract and session -> ``<key>.s.parquet``. The
+    session is the one ``ts_ref`` (else ``ts_recv``) falls in; a final
+    settlement beats a preliminary one, a later record an earlier one."""
+    import databento as db
+    import numpy as np
+    import pyarrow as pa
+
+    store = db.DBNStore.from_file(info.path)
+    parts = []
+    for arr in store.to_ndarray(count=chunk):
+        if len(arr) == 0:
+            continue
+        ok = (arr["stat_type"] == 3) & (arr["price"] != UNDEF_PRICE)
+        if "update_action" in arr.dtype.names:
+            ok &= arr["update_action"] != 2          # 2 = delete
+        sel = arr[ok]
+        if not len(sel):
+            continue
+        ref = sel["ts_ref"].astype(np.uint64)
+        ts = np.where(ref < UNDEF_TS, ref, sel["ts_recv"].astype(np.uint64)).astype(np.int64)
+        parts.append(pa.table({
+            "key": sel["instrument_id"].astype(np.int64),
+            "ws": ts,
+            "recv": sel["ts_recv"].astype(np.int64),
+            "px": sel["price"].astype(np.float64) / PRICE_DIVISOR,
+            "final": (sel["stat_flags"].astype(np.int64) & 1) == 1,
+        }))
+    if not parts:
+        return 0, []
+    con.register("_st", pa.concat_tables(parts))
+    con.execute("CREATE OR REPLACE TEMP TABLE _stat AS SELECT * FROM _st")
+    con.unregister("_st")
+    _register_symbols(con, "_stat", store.metadata)
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _stg AS
+        SELECT {_ticker_sql('s.sym', "'future'")} AS ticker,
+               CAST({_et_shifted('t.ws')} AS DATE) AS trade_date,
+               t.px AS settle, t.final, t.recv AS ts
+        FROM _stat t JOIN _sym s ON s.key = t.key AND s.day = t.ws // {NS_PER_DAY}
+        QUALIFY row_number() OVER (PARTITION BY ticker, trade_date ORDER BY final DESC, recv DESC) = 1""")
+    con.execute("DELETE FROM _stg WHERE ticker IS NULL")
+    n = con.execute("SELECT count(*) FROM _stg").fetchone()[0]
+    if n:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".parquet.tmp")
+        con.execute(f"COPY (SELECT {', '.join(SETTLE_STAGING_COLUMNS)} FROM _stg ORDER BY ticker, trade_date) "
+                    f"TO '{_lit(tmp)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        os.replace(tmp, out)
+    dates = [r[0] for r in con.execute(
+        "SELECT DISTINCT strftime(trade_date, '%Y-%m-%d') FROM _stg ORDER BY 1").fetchall()]
+    con.execute("DROP TABLE _stg")
+    con.execute("DROP TABLE _stat")
+    con.unregister("_sym")
+    return int(n), dates
+
+
 def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = None,
                  chunk: int = 2_000_000) -> ExtractResult:
     """Convert one raw file into staging bars at ``out``. Picklable entry point
@@ -943,6 +1019,11 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
             res.q_rows, res.q_dates, res.q_assets = q
         if res.q_rows == 0:
             qout.unlink(missing_ok=True)
+        sout = settle_staging_path(out)
+        if info.has_settlements:
+            res.s_rows, res.s_dates = _extract_dbn_settlements(info, sout, con, chunk)
+        if res.s_rows == 0:
+            sout.unlink(missing_ok=True)
         return res
     finally:
         con.close()
@@ -1002,6 +1083,7 @@ def _staging_list(files: list[Path]) -> str:
 
 def future_minute_sql(staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
     """``future_minute``: the whole session (no overnight split), best source per ticker."""
+    staging = [p for p in staging if not is_settle_staging(p)]
     return f"""
         WITH src AS (
             SELECT * FROM read_parquet({_staging_list(staging)})
@@ -1017,16 +1099,25 @@ def future_minute_sql(staging: list[Path], trade_date: str, siblings: list[Path]
             SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
             {_DEDUPE}
         )
-        SELECT ticker, {FUTURE_ROOT_SQL} AS root, window_start, open, high, low, close,
+        SELECT ticker, {FUTURE_ROOT_SQL} AS root, CAST(iid AS BIGINT) AS instrument_id,
+               window_start, open, high, low, close,
                volume, transactions, DATE '{trade_date}' AS trade_date
         FROM bars ORDER BY ticker, window_start"""
 
 
 def future_daily_sql(staging: list[Path], trade_date: str, siblings: list[Path]) -> str:
+    settles = [p for p in staging if is_settle_staging(p)]
+    staging = [p for p in staging if not is_settle_staging(p)]
+    exch = (f"""SELECT ticker, settle FROM read_parquet({_staging_list(settles)})
+                WHERE trade_date = DATE '{trade_date}'
+                QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY final DESC, ts DESC) = 1"""
+            if settles else "SELECT NULL::VARCHAR AS ticker, NULL::DOUBLE AS settle WHERE FALSE")
     """``future_daily``: one bar per session (18:00 ET the day before to 17:00 ET).
 
-    ``settle`` is the last trade of the session. The exchange's settlement price
-    (from the ``statistics`` schema) is not converted yet. Databento cuts files
+    ``settle`` is the exchange settlement price when a ``statistics`` file gave
+    one for that contract and session (``settle_source = 'exchange'``), else the
+    last trade of the session (``'last'``). ``instrument_id`` is the contract a
+    continuous series pointed to at the session's end. Databento cuts files
     on UTC days, so a lone file also holds the first hours of the next session;
     a session built from minutes gets a daily bar only when its US day part
     (12:00-17:00 ET) is present for that product (root) in that source.
@@ -1045,6 +1136,7 @@ def future_daily_sql(staging: list[Path], trade_date: str, siblings: list[Path])
                    arg_max(close, window_start) AS close,
                    CAST(sum(volume) AS BIGINT) AS volume,
                    CAST(sum(transactions) AS BIGINT) AS transactions,
+                   arg_max(iid, window_start) AS iid,
                    count(*) FILTER (WHERE et_min BETWEEN 720 AND 1019) AS day_rows
             FROM src GROUP BY ticker, src, kind
         ),
@@ -1058,9 +1150,13 @@ def future_daily_sql(staging: list[Path], trade_date: str, siblings: list[Path])
                     PARTITION BY ticker ORDER BY drank DESC, krank DESC, volume DESC, src) AS rn
                 FROM cand WHERE krank <> 3 OR day_part > 0) WHERE rn = 1
         )
-        SELECT ticker, {FUTURE_ROOT_SQL} AS root, DATE '{trade_date}' AS trade_date,
-               open, high, low, close, close AS settle, volume, transactions
-        FROM bars ORDER BY ticker"""
+        SELECT b.ticker, regexp_extract(split_part(b.ticker, '.', 1),
+                   '^([A-Z0-9]+?)([FGHJKMNQUVXZ][0-9]{{1,2}})?$', 1) AS root,
+               CAST(b.iid AS BIGINT) AS instrument_id, DATE '{trade_date}' AS trade_date,
+               b.open, b.high, b.low, b.close, coalesce(x.settle, b.close) AS settle,
+               CASE WHEN x.settle IS NULL THEN 'last' ELSE 'exchange' END AS settle_source,
+               b.volume, b.transactions
+        FROM bars b LEFT JOIN ({exch}) x USING (ticker) ORDER BY b.ticker"""
 
 
 def minute_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:

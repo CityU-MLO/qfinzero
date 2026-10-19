@@ -169,9 +169,20 @@ without a spec is refused. `GET /v1/futures/specs` lists the built-in specs;
 contract at the current price (`futures_specs`). The account's stock leverage
 sets buying power: `equity / stock_initial − initial margin` (Reg-T 50% is 2×).
 
-Not modelled yet: contract expiry and rolls (front-month continuous series do
-not expire), exchange settlement prices other than the session's last trade,
-and spread (inter-commodity) margin credits.
+**Rolls.** A front-month continuous series (`ZN`) moves to the next contract
+from time to time; its bars carry the `instrument_id` of the contract behind
+them. When it changes, the position moves with it at the new contract's first
+price (a `FUTURE_ROLL` event): entry and basis shift by the gap, so open P&L
+carries over and the spread between the two contracts is not booked as a gain
+or loss. **Settlement prices** are the exchange's when the data has them
+(Databento `statistics`, `settle_source = 'exchange'`), else the session's last
+trade. The terminal shows each futures position's margin and open P&L since
+the last settlement, the daily settlements, rolls, and a banner while a margin
+call is open.
+
+Not modelled yet: expiry of outright contracts (trade the continuous series,
+or close an outright before its last trading day) and spread (inter-commodity)
+margin credits.
 
 ## 5. Intraday research
 

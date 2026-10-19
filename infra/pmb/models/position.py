@@ -18,3 +18,4 @@ class Position(BaseModel):
     multiplier: Optional[float] = None
     basis_price: Optional[float] = None
     last_settle_date: Optional[str] = None
+    contract_id: Optional[int] = None    # futures: the contract a continuous series is in

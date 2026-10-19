@@ -77,7 +77,8 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 | `mbp-1`、`mbp-10`、`cmbp-1`、`mbo` | 分钟线 + 日线 | 只取 `action == 'T'` 的记录 |
 | `cmbp-1`、`cbbo-1s`、`cbbo-1m`、`bbo-1s`、`bbo-1m` | `option_quote_minute`、`stock_quote_minute`、`future_quote_minute` | 每分钟最后的最优买卖价（见下文） |
 | 期货交易所的 `mbp-1`、`mbp-10` | `future_quote_minute` | 交易所自身的盘口就是最优买卖价 |
-| definition、statistics、status、imbalance | 无 | 参考数据 |
+| 期货交易所的 `statistics` | `future_daily.settle` | 交易所结算价 |
+| definition、statistics（其他交易所）、status、imbalance | 无 | 参考数据 |
 
 MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者都算会让成交量翻倍。隐藏单的成交也以 `T` 出现。
 
@@ -102,7 +103,9 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
 - 股票日线的开高低收取 09:30–16:00（该时段有成交时），成交量和成交笔数取全天，与 massive 日线一致。期权日线用全部成交。
 - 定点价格除以 1e9，所以 `56650000000` 精确等于 `56.65`。
 - 期货交易时段从美东 18:00 到次日 17:00，所以 18:00 之后的 bar 属于下一个交易日。日线覆盖整个时段；
-  `settle` 是时段的最后成交价（交易所 `statistics` schema 中的结算价暂不转换）。Databento 按 UTC 日切文件，
+  若期货交易所的 `statistics` 文件给出了该合约该时段的结算价（stat type `SETTLEMENT_PRICE`，最终结算价优先于初步结算价），
+  `settle` 用交易所结算价，`settle_source = 'exchange'`；否则用时段最后成交价（`'last'`）。期货 bar 上的 `instrument_id`
+  是连续序列当时对应的合约，变化即表示换月。Databento 按 UTC 日切文件，
   单独一个文件还会带上下一个时段的前两小时：这些分钟线会保留，但只有该品种 12:00–17:00 的部分也存在时，
   那个时段才会生成日线。
 

@@ -161,7 +161,8 @@ class UPQClient:
                                                     "end": end_s, "limit": 100000})
             out += [FutureBar(symbol=r["ticker"], root=r.get("root"), window_start_ns=r["window_start"],
                               open=r["open"], high=r["high"], low=r["low"], close=r["close"],
-                              volume=r["volume"], session_date=session_date_of(r["window_start"]))
+                              volume=r["volume"], session_date=session_date_of(r["window_start"]),
+                              instrument_id=r.get("instrument_id"))
                     for r in rows]
             if len(rows) < 100000:
                 return out
@@ -176,7 +177,8 @@ class UPQClient:
         return [FutureBar(symbol=r["ticker"], root=r.get("root"),
                           window_start_ns=iso_to_ns(r["date"] + "T00:00:00+00:00"),
                           open=r["open"], high=r["high"], low=r["low"], close=r["close"],
-                          volume=r["volume"], settle=r.get("settle"), session_date=r["date"])
+                          volume=r["volume"], settle=r.get("settle"), session_date=r["date"],
+                          settle_source=r.get("settle_source"), instrument_id=r.get("instrument_id"))
                 for r in rows]
 
     async def get_future_quotes(self, symbol: str, start: str, end: str):

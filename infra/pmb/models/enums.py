@@ -63,6 +63,7 @@ class EventType(str, Enum):
     ERROR_EVENT = "ERROR_EVENT"
     OPTION_EXPIRY_EVENT = "OPTION_EXPIRY_EVENT"
     VARIATION_MARGIN = "VARIATION_MARGIN"
+    FUTURE_ROLL = "FUTURE_ROLL"
 
 
 class SessionStatus(str, Enum):

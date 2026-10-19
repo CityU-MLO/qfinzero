@@ -57,19 +57,19 @@ fn fixture() -> Result<TempDir, Box<dyn std::error::Error>> {
         &m,
         &format!(
             "SELECT * FROM (VALUES \
-             ('ZN', 'ZN', {EVE}::BIGINT, 110.0, 110.0, 110.0, 110.0, 5::BIGINT, 1::BIGINT, DATE '2025-01-02'), \
-             ('ZN', 'ZN', {T0930}::BIGINT, 110.5, 110.5, 110.5, 110.5, 7::BIGINT, 2::BIGINT, DATE '2025-01-02'), \
-             ('ZNH5', 'ZN', {T0930}::BIGINT, 110.4, 110.4, 110.4, 110.4, 3::BIGINT, 1::BIGINT, DATE '2025-01-02'), \
-             ('CL', 'CL', {T0930}::BIGINT, 72.0, 72.0, 72.0, 72.0, 9::BIGINT, 3::BIGINT, DATE '2025-01-02')) \
-             t(ticker, root, window_start, open, high, low, close, volume, transactions, trade_date)"
+             ('ZN', 'ZN', 42::BIGINT, {EVE}::BIGINT, 110.0, 110.0, 110.0, 110.0, 5::BIGINT, 1::BIGINT, DATE '2025-01-02'), \
+             ('ZN', 'ZN', 42::BIGINT, {T0930}::BIGINT, 110.5, 110.5, 110.5, 110.5, 7::BIGINT, 2::BIGINT, DATE '2025-01-02'), \
+             ('ZNH5', 'ZN', 42::BIGINT, {T0930}::BIGINT, 110.4, 110.4, 110.4, 110.4, 3::BIGINT, 1::BIGINT, DATE '2025-01-02'), \
+             ('CL', 'CL', 7::BIGINT, {T0930}::BIGINT, 72.0, 72.0, 72.0, 72.0, 9::BIGINT, 3::BIGINT, DATE '2025-01-02')) \
+             t(ticker, root, instrument_id, window_start, open, high, low, close, volume, transactions, trade_date)"
         ),
     )?;
     write(
         &tmp.path().join("future_daily/trade_date=2025-01-02"),
-        "SELECT ticker, root, trade_date, open::DOUBLE AS open, high::DOUBLE AS high, low::DOUBLE AS low, \
-         close::DOUBLE AS close, settle::DOUBLE AS settle, volume, transactions FROM (VALUES \
-         ('ZN', 'ZN', DATE '2025-01-02', 110.0, 110.6, 109.9, 110.5, 110.5, 12::BIGINT, 3::BIGINT)) \
-         t(ticker, root, trade_date, open, high, low, close, settle, volume, transactions)",
+        "SELECT ticker, root, instrument_id, trade_date, open::DOUBLE AS open, high::DOUBLE AS high, low::DOUBLE AS low, \
+         close::DOUBLE AS close, settle::DOUBLE AS settle, settle_source, volume, transactions FROM (VALUES \
+         ('ZN', 'ZN', 42::BIGINT, DATE '2025-01-02', 110.0, 110.6, 109.9, 110.5, 110.5, 'exchange', 12::BIGINT, 3::BIGINT)) \
+         t(ticker, root, instrument_id, trade_date, open, high, low, close, settle, settle_source, volume, transactions)",
     )?;
     write(
         &tmp.path().join("future_quote_minute/trade_date=2025-01-02"),
@@ -113,6 +113,8 @@ async fn daily_settle_is_final_at_17_et() -> TestResult {
     let (_, v) = get(tmp.path(), "/future/daily?tickers=ZN&start=2025-01-01&end=2025-01-03").await?;
     assert_eq!(v[0]["date"].as_str(), Some("2025-01-02"));
     assert_eq!(v[0]["settle"].as_f64(), Some(110.5));
+    assert_eq!(v[0]["settle_source"].as_str(), Some("exchange"));
+    assert_eq!(v[0]["instrument_id"].as_i64(), Some(42));
     // 16:59 ET: session 01-02 is not closed yet
     let (_, early) =
         get(tmp.path(), "/future/daily?tickers=ZN&start=2025-01-01&end=2025-01-03&as_of=2025-01-02T21:59:00Z").await?;
