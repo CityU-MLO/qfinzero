@@ -5,5 +5,6 @@ pub mod splits;
 
 pub mod app;
 pub mod as_of;
+pub mod db;
 pub mod greeks;
 pub mod rates_curve;

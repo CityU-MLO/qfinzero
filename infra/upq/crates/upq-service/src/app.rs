@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs;
@@ -100,8 +99,8 @@ enum ServiceError {
     Duckdb(#[from] duckdb::Error),
     #[error("join error: {0}")]
     Join(String),
-    #[error("connection error: {0}")]
-    Connection(String),
+    #[error("busy: {0}")]
+    Busy(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -722,7 +721,7 @@ async fn health() -> axum::response::Response {
     );
     (
         StatusCode::OK,
-        Json(json!({ "status": "ok", "service": "upq", "version": version })),
+        Json(json!({ "status": "ok", "service": "upq", "version": version, "pool": crate::db::pool_size() })),
     )
         .into_response()
 }
@@ -3046,7 +3045,7 @@ fn row_is_call(row: &Map<String, Value>) -> Option<bool> {
 }
 
 fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
-    with_thread_local_connection(|conn| {
+    with_pooled_connection(|conn| {
         let mut stmt = conn.prepare(sql)?;
         let mut rows = stmt.query([])?;
         let columns = match rows.as_ref() {
@@ -3069,29 +3068,20 @@ fn run_sql_json(sql: &str) -> Result<Vec<Value>, ServiceError> {
 }
 
 async fn run_sql_json_async(sql: String) -> Result<Vec<Value>, ServiceError> {
+    // bounded admission: a full queue answers 503 instead of piling up threads
+    let _permit = crate::db::admit()
+        .await
+        .map_err(|_| ServiceError::Busy("too many queries in flight".to_string()))?;
     let task = tokio::task::spawn_blocking(move || run_sql_json(&sql));
     task.await
         .map_err(|error| ServiceError::Join(error.to_string()))?
 }
 
-thread_local! {
-    static THREAD_LOCAL_DUCKDB_CONN: RefCell<Option<Connection>> = const { RefCell::new(None) };
-}
-
-fn with_thread_local_connection<T>(
+/// Run `f` on a connection of the shared pool (see [`crate::db`]).
+fn with_pooled_connection<T>(
     f: impl FnOnce(&Connection) -> Result<T, ServiceError>,
 ) -> Result<T, ServiceError> {
-    THREAD_LOCAL_DUCKDB_CONN.with(|cell| {
-        if cell.borrow().is_none() {
-            *cell.borrow_mut() = Some(Connection::open_in_memory()?);
-        }
-
-        let borrow = cell.borrow();
-        let conn = borrow.as_ref().ok_or_else(|| {
-            ServiceError::Connection("failed to initialize connection".to_string())
-        })?;
-        f(conn)
-    })
+    crate::db::with_connection(f).map_err(ServiceError::Busy)?
 }
 
 fn value_ref_to_json(value: ValueRef<'_>) -> Value {
@@ -3539,6 +3529,14 @@ fn invalid_argument(message: &str) -> axum::response::Response {
 }
 
 fn internal_error(error: ServiceError) -> axum::response::Response {
+    if let ServiceError::Busy(message) = &error {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, "2")],
+            Json(json!({"code": "busy", "message": message})),
+        )
+            .into_response();
+    }
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({
