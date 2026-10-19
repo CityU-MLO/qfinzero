@@ -54,7 +54,9 @@ jobs:
         working-directory: infra/dashboard-web
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4   # version from package.json packageManager
+      - uses: pnpm/action-setup@v4   # version from the packageManager field
+        with:
+          package_json_file: infra/dashboard-web/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 20
