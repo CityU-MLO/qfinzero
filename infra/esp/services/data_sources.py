@@ -225,7 +225,7 @@ def news_doc_to_event(doc: dict, now_utc: datetime) -> Event:
     return Event(
         event_id=f"news_{doc['_id']}",
         event_type=event_type,
-        title=doc.get("title") or "",
+        title=html_mod.unescape(doc.get("title") or ""),   # Benzinga titles carry HTML entities
         time_utc=pub_utc.isoformat(),
         importance=Importance.MEDIUM,
         status=EventStatus.OCCURRED,

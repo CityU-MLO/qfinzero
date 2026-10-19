@@ -18,6 +18,9 @@ Added:
   synthetic spread.
 - Settings → Rates: load U.S. Treasury or FRED rate files; they are kept across
   updates and laid over the massive rates.
+- Benzinga monthly news archives (`YYYY-MM.jsonl.gz`) load into ESP with the
+  teaser, image and full article text; `/esp/news/{id}/body` returns `body` and
+  accepts the `news_…` event id of a search result. Titles are HTML-unescaped.
 
 Changed:
 

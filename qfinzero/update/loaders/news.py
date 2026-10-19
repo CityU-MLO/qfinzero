@@ -2,7 +2,10 @@
 
 ESP reads Polygon-shaped news docs (``published_utc``, ``title``, ``publisher.name``,
 ``tickers``, ``description``, ``article_url``, ``keywords``). The massive Benzinga
-drop stores stringified lists (``"['AAPL','MSFT']"``) which we parse.
+drop stores stringified lists (``"['AAPL','MSFT']"``) which we parse. Benzinga's
+monthly archive deliveries (``YYYY-MM.jsonl.gz``) carry real lists plus the
+teaser, images and the HTML body: the teaser becomes ``description``, the
+largest image ``image_url`` and the body plain text ``body_text``.
 
     python -m qfinzero.update.loaders.news --since 2025-01 --until 2026-12
     python -m qfinzero.update.loaders.news --months 12          # last N months
@@ -13,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gzip
+import html
 import json
 import re
 from datetime import datetime, timezone
@@ -21,7 +26,9 @@ from pathlib import Path
 from qfinzero import config
 
 # massive Benzinga news drop: <RAW_MASSIVE_DIR>/benzinga/news/YYYY/YYYY-MM.jsonl
-_MONTH_RE = re.compile(r"(\d{4})-(\d{2})\.jsonl$")
+_MONTH_RE = re.compile(r"(\d{4})-(\d{2})\.jsonl(?:\.gz)?$")
+_TAG_RE = re.compile(r"<[^>]+>")
+_BLOCK_RE = re.compile(r"</?(?:p|div|br|li|ul|ol|h[1-6]|tr|table|blockquote)[^>]*>", re.I)
 
 
 def _news_dir() -> Path:
@@ -54,6 +61,16 @@ def _parse_dt(value) -> datetime | None:
         return None
 
 
+def html_text(body: str | None) -> str:
+    """Article HTML -> plain text with paragraph breaks."""
+    if not body:
+        return ""
+    t = _BLOCK_RE.sub("\n", str(body))
+    t = html.unescape(_TAG_RE.sub("", t))
+    lines = [re.sub(r"[ \t\xa0]+", " ", ln).strip() for ln in t.splitlines()]
+    return "\n".join(ln for ln in lines if ln)
+
+
 def to_doc(rec: dict) -> dict | None:
     """Benzinga record -> ESP/Polygon ticker_news doc, or None if unusable."""
     bid = str(rec.get("benzinga_id") or "").strip()
@@ -62,22 +79,33 @@ def to_doc(rec: dict) -> dict | None:
     published = _parse_dt(rec.get("published"))
     if published is None:
         return None
-    return {
+    doc = {
         "_id": f"bz_{bid}",
         "published_utc": published,
-        "title": rec.get("title") or "",
-        "description": "",  # the massive Benzinga drop carries no body/summary
+        "title": html.unescape(rec.get("title") or ""),
+        # the massive drop has no summary; archive deliveries have a teaser
+        "description": html_text(rec.get("teaser")),
         "article_url": rec.get("url"),
         "author": rec.get("author"),
         "publisher": {"name": "Benzinga"},
         "tickers": _parse_list(rec.get("tickers")),
         "keywords": _parse_list(rec.get("channels")) + _parse_list(rec.get("tags")),
     }
+    images = _parse_list(rec.get("images"))
+    if images:
+        doc["image_url"] = images[-1]           # deliveries list sizes small -> large
+    body = html_text(rec.get("body"))
+    if body:
+        doc["body_text"] = body
+    updated = _parse_dt(rec.get("last_updated"))
+    if updated:
+        doc["updated_utc"] = updated
+    return doc
 
 
 def _month_files(since: str | None, until: str | None) -> list[Path]:
     out = []
-    for p in _news_dir().rglob("*.jsonl"):
+    for p in _news_dir().rglob("*.jsonl*"):
         m = _MONTH_RE.search(p.name)
         if not m:
             continue
@@ -111,7 +139,8 @@ def load(since: str | None = None, until: str | None = None, batch: int = 2000) 
     total = upserts = skipped = 0
     ops: list = []
     for f in files:
-        with open(f, encoding="utf-8") as fh:
+        opener = gzip.open if f.name.endswith(".gz") else open
+        with opener(f, "rt", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:

@@ -1,3 +1,4 @@
+import html
 import base64
 import json
 from datetime import datetime, timedelta, timezone
@@ -40,6 +41,8 @@ async def news_body(news_id: str, request: Request, now_utc: str | None = None):
     """``now_utc`` (ISO): articles published after it are reported as missing."""
     ds = request.app.state.data_sources
     doc = await ds.news.get_by_id(news_id)
+    if doc is None and news_id.startswith("news_"):      # the event_id of a search result
+        doc = await ds.news.get_by_id(news_id[len("news_"):])
     if doc is not None and now_utc:
         pub = doc.get("published_utc")
         if isinstance(pub, datetime):
@@ -57,7 +60,7 @@ async def news_body(news_id: str, request: Request, now_utc: str | None = None):
 
     return {
         "news_id": news_id,
-        "title": doc.get("title"),
+        "title": html.unescape(doc.get("title") or ""),
         "description": doc.get("description"),
         "article_url": doc.get("article_url"),
         "published_utc": pub_iso,
@@ -65,6 +68,8 @@ async def news_body(news_id: str, request: Request, now_utc: str | None = None):
         "author": doc.get("author"),
         "keywords": doc.get("keywords") or [],
         "image_url": doc.get("image_url"),
+        # full article text when the source delivered one (Benzinga archives)
+        "body": doc.get("body_text"),
         "publisher": doc.get("publisher"),
         "insights": doc.get("insights"),
     }
