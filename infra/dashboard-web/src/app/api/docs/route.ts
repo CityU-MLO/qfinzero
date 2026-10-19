@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 import { isLocale, type Locale } from "@/lib/i18n";
-import type { DocIndex, DocPage } from "@/lib/docs";
+import { headings, type ApiReference, type DocIndex, type DocPage, type SearchEntry } from "@/lib/docs";
 
 // Repo root relative to the Next process cwd (infra/dashboard-web).
 const REPO_ROOT = path.resolve(process.cwd(), "../../");
@@ -46,10 +46,89 @@ function stripLanguageSwitch(md: string): string {
   return [...head, ...lines.slice(8)].join("\n").replace(/^\s+/, "");
 }
 
+async function loadReference(): Promise<ApiReference> {
+  try {
+    const raw = JSON.parse(await fs.readFile(path.join(REPO_ROOT, "docs", "api", "reference.json"), "utf8"));
+    return { services: raw.services ?? [], mcp: raw.mcp ?? [] };
+  } catch {
+    return { services: [], mcp: [] };
+  }
+}
+
+/** Markdown to searchable plain text. */
+function plain(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_>#|]/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Guide pages split at their ## / ### headings, plus endpoints and tools. */
+async function searchIndex(index: DocIndex, lang: Locale): Promise<SearchEntry[]> {
+  const out: SearchEntry[] = [];
+  for (const s of index.sections) {
+    for (const p of s.pages) {
+      const file = lang === "zh" && (await exists(p.zh)) ? p.zh! : p.en;
+      let md = "";
+      try {
+        md = stripLanguageSwitch(await fs.readFile(path.join(REPO_ROOT, file), "utf8"));
+      } catch {
+        continue;
+      }
+      const title = lang === "zh" ? p.title.zh : p.title.en;
+      const section = lang === "zh" ? s.title.zh : s.title.en;
+      const hs = headings(md);
+      const lines = md.split("\n");
+      // body before the first heading belongs to the page itself
+      let cur = { title, id: "", buf: [] as string[] };
+      const flush = () => {
+        const text = plain(cur.buf.join("\n")).slice(0, 1200);
+        if (text || !cur.id) out.push({ kind: "guide", href: `/docs/${p.slug}${cur.id ? `#${cur.id}` : ""}`,
+          title: cur.title, section: cur.id ? `${section} › ${title}` : section, text });
+      };
+      let hi = 0;
+      let fence = false;
+      for (const line of lines) {
+        if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+        if (!fence && /^(##|###)\s+/.test(line) && hi < hs.length) {
+          flush();
+          cur = { title: hs[hi].text, id: hs[hi].id, buf: [] };
+          hi += 1;
+          continue;
+        }
+        cur.buf.push(line);
+      }
+      flush();
+    }
+  }
+  const ref = await loadReference();
+  for (const svc of ref.services) {
+    const st = lang === "zh" ? svc.title.zh : svc.title.en;
+    for (const e of svc.endpoints) {
+      out.push({ kind: "endpoint", href: `/docs/api/${svc.id}/${e.id}`, title: `${e.method} ${e.path}`,
+        section: `${st} › ${e.group}`, text: `${e.summary}. ${e.description} ${e.params.map((x) => x.name).join(" ")}`.slice(0, 600) });
+    }
+  }
+  for (const t of ref.mcp) {
+    out.push({ kind: "tool", href: `/docs/mcp/${t.name}`, title: t.name, section: `MCP › ${t.group}`,
+      text: `${t.summary} ${t.params.map((x) => x.name).join(" ")}`.slice(0, 600) });
+  }
+  return out;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const index = await loadIndex();
   const pages: DocPage[] = index.sections.flatMap((s) => s.pages);
+
+  if (url.searchParams.get("ref")) return NextResponse.json(await loadReference());
+  if (url.searchParams.get("search")) {
+    const lang: Locale = isLocale(url.searchParams.get("lang")) ? (url.searchParams.get("lang") as Locale) : "en";
+    return NextResponse.json({ entries: await searchIndex(index, lang) });
+  }
 
   const slug = url.searchParams.get("slug");
   if (!slug) {

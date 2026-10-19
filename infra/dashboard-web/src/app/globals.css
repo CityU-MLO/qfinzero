@@ -71,32 +71,41 @@ table {
 
 /* Documentation pages (doc hub). Independent of the markdown renderer's defaults. */
 .doc-body {
-  line-height: 1.7;
-  font-size: 14.5px;
+  line-height: 1.75;
+  font-size: 15px;
+  color: hsl(var(--foreground) / 0.92);
 }
 .doc-body h1 {
-  font-size: 1.6rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   margin: 0 0 1rem;
+  color: hsl(var(--foreground));
+}
+.doc-body h1 + p {
+  font-size: 1.08rem;
+  color: hsl(var(--muted-foreground));
 }
 .doc-body h2 {
-  font-size: 1.22rem;
-  font-weight: 600;
-  line-height: 1.35;
-  margin: 2.2rem 0 0.8rem;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px solid hsl(var(--border));
+  font-size: 1.4rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin: 2.6rem 0 0.8rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid hsl(var(--border) / 0.8);
+  color: hsl(var(--foreground));
 }
 .doc-body h3 {
-  font-size: 1.04rem;
+  font-size: 1.1rem;
   font-weight: 600;
-  margin: 1.6rem 0 0.5rem;
+  margin: 1.9rem 0 0.6rem;
+  color: hsl(var(--foreground));
 }
 .doc-body h4 {
   font-weight: 600;
-  margin: 1.2rem 0 0.4rem;
+  margin: 1.4rem 0 0.4rem;
 }
 .doc-body p,
 .doc-body ul,
@@ -104,51 +113,109 @@ table {
 .doc-body table,
 .doc-body pre,
 .doc-body blockquote {
-  margin: 0 0 0.9rem;
+  margin: 0 0 1rem;
 }
 .doc-body ul {
   list-style: disc;
-  padding-left: 1.3rem;
+  padding-left: 1.4rem;
 }
 .doc-body ol {
   list-style: decimal;
-  padding-left: 1.4rem;
+  padding-left: 1.5rem;
 }
 .doc-body li + li {
-  margin-top: 0.2rem;
+  margin-top: 0.3rem;
+}
+.doc-body li::marker {
+  color: hsl(var(--muted-foreground) / 0.7);
+}
+.doc-body a {
+  color: hsl(var(--primary));
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--primary) / 0.3);
+  text-underline-offset: 3px;
+}
+.doc-body a:hover {
+  text-decoration-color: hsl(var(--primary));
+}
+.doc-body strong {
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 .doc-body :not(pre) > code {
   background: hsl(var(--muted));
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
-  font-size: 0.88em;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 5px;
+  padding: 0.08em 0.38em;
+  font-size: 0.86em;
 }
 .doc-body blockquote {
   border-left: 3px solid hsl(var(--border));
-  padding-left: 0.9rem;
+  padding-left: 1rem;
   color: hsl(var(--muted-foreground));
 }
 .doc-body table {
+  display: block;
+  overflow-x: auto;
   width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
 }
 .doc-body th,
 .doc-body td {
-  border: 1px solid hsl(var(--border));
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 0.55rem 0.8rem;
   text-align: left;
   vertical-align: top;
 }
+.doc-body tr:last-child td {
+  border-bottom: 0;
+}
 .doc-body th {
-  background: hsl(var(--muted) / 0.7);
-  font-weight: 500;
+  background: hsl(var(--muted) / 0.6);
+  font-weight: 600;
+  font-size: 12.5px;
+  color: hsl(var(--foreground) / 0.8);
 }
 .doc-body hr {
-  margin: 1.8rem 0;
+  margin: 2.2rem 0;
   border-color: hsl(var(--border));
 }
 .doc-body > :first-child,
 .doc-body > div > :first-child {
   margin-top: 0;
+}
+.doc-body > div > h2:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid hsl(var(--border));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: hsl(var(--card));
+  padding: 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.docs-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+.code-panel pre {
+  margin: 0;
 }

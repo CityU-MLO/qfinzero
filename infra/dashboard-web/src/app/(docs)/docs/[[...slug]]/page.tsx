@@ -8,5 +8,5 @@ export async function generateMetadata() {
 
 export default async function DocsPage({ params }: { params: Promise<{ slug?: string[] }> }) {
   const { slug } = await params;
-  return <DocsHub slug={slug?.[0] ?? "overview"} />;
+  return <DocsHub slug={(slug ?? []).map(decodeURIComponent)} />;
 }

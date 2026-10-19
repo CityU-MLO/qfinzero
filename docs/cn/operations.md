@@ -118,6 +118,16 @@ systemctl --user restart qfinzero-hub      # 或：docker compose up -d --build
 
 存储格式随代码一起演进。升级前请阅读 [更新日志](../../CHANGELOG.md)：需要重新转换数据或新增环境变量的改动都会列在其中。
 
+## 文档中心
+
+`/docs` 是公开页面，由 Web UI 提供：
+
+- **指南** 是仓库里的 markdown，列在 `docs/index.json` 中（中英文；没有中文文件的页面显示英文）。
+- **API 参考** 和 **MCP 工具** 由 `docs/api/reference.json` 渲染，这个文件从服务本身生成：UPQ 的 `docs/upq/openapi.yaml`、ESP 和 PMB 的 FastAPI schema，以及 `mcp/server.py` 中注册的工具。修改接口或工具后运行 `python -m qfinzero.docsgen`；文件过期时测试会失败。
+- 搜索（`⌘K` 或 `/`）覆盖指南章节、接口和工具。已登录的读者可以在接口页面用自己的会话发送 GET 请求和 ESP 查询。
+
+hub 自身的 OpenAPI schema（`/auth` 路由）在 `/svc/openapi`。
+
 ## 安全检查清单
 
 - [ ] 只有 hub（或其前面的代理）可以从外部访问。

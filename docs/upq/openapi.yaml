@@ -504,6 +504,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /dividends/query:
+    get:
+      summary: Dividends Query
+      description: |
+        Cash dividends by ex-dividend date for one or more stocks. With `as_of`,
+        the end date is capped at the as-of date (ET).
+      operationId: getDividends
+      parameters:
+        - name: tickers
+          in: query
+          required: true
+          description: Comma-separated list of stock tickers
+          schema:
+            type: string
+            example: "AAPL,MSFT"
+        - name: start
+          in: query
+          required: true
+          description: First ex-dividend date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2025-01-01"
+        - name: end
+          in: query
+          required: true
+          description: Last ex-dividend date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2025-12-31"
+        - name: as_of
+          in: query
+          required: false
+          description: Point-in-time cap (ISO datetime or nanoseconds); see /rates/query.
+          schema:
+            type: string
+            example: "2025-06-30T20:00:00Z"
+      responses:
+        '200':
+          description: Dividends ordered by ticker and ex-dividend date (empty when none are stored)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DividendRecord'
+              example:
+                - { ticker: AAPL, ex_dividend_date: "2025-02-10", amount: 0.25 }
+        '400':
+          description: Invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /stock/quote:
     get:
       summary: Stock minute NBBO
@@ -903,6 +958,20 @@ components:
               type: integer
         - $ref: '#/components/schemas/GreekFields'
 
+    DividendRecord:
+      type: object
+      properties:
+        ticker:
+          type: string
+          example: AAPL
+        ex_dividend_date:
+          type: string
+          format: date
+          example: "2025-02-10"
+        amount:
+          type: number
+          description: Cash amount per share
+          example: 0.25
     RateRecord:
       type: object
       properties:

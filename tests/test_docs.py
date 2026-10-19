@@ -14,6 +14,27 @@ def test_mcp_reference_is_current():
     assert r.returncode == 0, r.stderr
 
 
+def test_api_reference_is_current():
+    """docs/api/reference.json (the hub's API and MCP reference) matches the services."""
+    r = subprocess.run([sys.executable, "-m", "qfinzero.docsgen", "--check"], cwd=REPO,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_api_reference_shape():
+    import json
+    ref = json.loads((REPO / "docs" / "api" / "reference.json").read_text())
+    assert [s["id"] for s in ref["services"]] == ["upq", "esp", "pmb"]
+    for s in ref["services"]:
+        ids = [e["id"] for e in s["endpoints"]]
+        assert len(ids) == len(set(ids)) and s["base"].startswith("/svc/")
+        for e in s["endpoints"]:
+            assert e["method"] in ("GET", "POST", "PUT", "PATCH", "DELETE") and e["summary"]
+    upq = {e["path"] for e in ref["services"][0]["endpoints"]}
+    assert {"/stock/daily", "/dividends/query", "/future/quote"} <= upq
+    assert len({t["name"] for t in ref["mcp"]}) == len(ref["mcp"]) > 40
+
+
 def test_relative_links_resolve():
     """Every relative markdown link in README and docs/en|cn points at a file."""
     files = [REPO / "README.md", REPO / "CHANGELOG.md", *(REPO / "docs" / "en").glob("*.md"),

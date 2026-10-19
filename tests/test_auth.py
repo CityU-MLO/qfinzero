@@ -145,6 +145,12 @@ def test_roles_cookies_keys_and_header_spoofing(hub):
     assert client.get("/admin/users", headers={**bearer, "accept": "text/html"}).status_code == 403
 
 
+def test_docs_root_is_the_web_hub_not_swagger(hub):
+    client, _ = hub
+    paths = {getattr(r, "path", "") for r in client.app.routes}
+    assert "/docs" not in paths and "/redoc" not in paths and "/svc/openapi.json" in paths
+
+
 def test_csrf_and_password_change_invalidate(hub):
     client, store = hub
     store.create_user("res", PW, "researcher")

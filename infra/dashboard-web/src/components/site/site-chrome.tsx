@@ -70,7 +70,7 @@ export function SiteFooter() {
         <div className="flex flex-wrap gap-5">
           <a href={REPO} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t("Source", "源代码")}</a>
           <Link href="/docs" className="hover:text-foreground">{t("Documentation", "文档")}</Link>
-          <Link href="/docs/mcp-tools" className="hover:text-foreground">{t("MCP tools", "MCP 工具")}</Link>
+          <Link href="/docs/mcp" className="hover:text-foreground">{t("MCP tools", "MCP 工具")}</Link>
           <Link href="/login" className="hover:text-foreground">{t("Sign in", "登录")}</Link>
         </div>
       </div>

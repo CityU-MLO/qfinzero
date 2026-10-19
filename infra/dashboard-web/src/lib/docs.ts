@@ -56,3 +56,103 @@ export function headings(md: string): { level: 2 | 3; text: string; id: string }
   }
   return out;
 }
+
+// ── API reference (docs/api/reference.json, built by `python -m qfinzero.docsgen`) ──
+
+export interface ApiField {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  in?: "query" | "path" | "header" | "cookie";
+  default?: unknown;
+  enum?: unknown[];
+  example?: unknown;
+  nullable?: boolean;
+  range?: [number | null, number | null];
+  children?: ApiField[];
+}
+
+export interface ApiEndpoint {
+  id: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path: string;
+  group: string;
+  summary: string;
+  description: string;
+  params: ApiField[];
+  body: { fields: ApiField[]; required: boolean; example: unknown } | null;
+  responses: { status: string; description: string; example?: unknown }[];
+  deprecated: boolean;
+}
+
+export interface ApiService {
+  id: string;
+  title: Localized;
+  summary: Localized;
+  base: string;
+  scope: string;
+  version: string;
+  intro: string;
+  endpoints: ApiEndpoint[];
+}
+
+export interface McpTool {
+  name: string;
+  group: string;
+  summary: string;
+  description: string;
+  params: ApiField[];
+  returns: string;
+  example: Record<string, unknown>;
+}
+
+export interface ApiReference {
+  services: ApiService[];
+  mcp: McpTool[];
+}
+
+/** One searchable entry: a guide section, an endpoint or an MCP tool. */
+export interface SearchEntry {
+  kind: "guide" | "endpoint" | "tool";
+  href: string;
+  title: string;
+  section: string;
+  text: string;
+}
+
+/** Group items by a key, keeping first-seen order. */
+export function groupBy<T>(items: T[], key: (x: T) => string): [string, T[]][] {
+  const m = new Map<string, T[]>();
+  for (const x of items) {
+    const k = key(x);
+    m.set(k, [...(m.get(k) ?? []), x]);
+  }
+  return [...m.entries()];
+}
+
+/** Score an entry for a query (0 = no match): every word must appear somewhere. */
+export function scoreEntry(e: SearchEntry, words: string[]): number {
+  const title = e.title.toLowerCase();
+  const sect = e.section.toLowerCase();
+  const text = e.text.toLowerCase();
+  let score = 0;
+  for (const w of words) {
+    if (title === w) score += 12;
+    else if (title.startsWith(w)) score += 8;
+    else if (title.includes(w)) score += 5;
+    else if (sect.includes(w)) score += 2;
+    else if (text.includes(w)) score += 1;
+    else return 0;
+  }
+  return score + (e.kind === "guide" ? 0.5 : 0);
+}
+
+/** A short excerpt of ``text`` around the first query word. */
+export function excerpt(text: string, words: string[], width = 140): string {
+  const low = text.toLowerCase();
+  const at = Math.min(...words.map((w) => low.indexOf(w)).filter((i) => i >= 0), Infinity);
+  if (!Number.isFinite(at)) return text.slice(0, width);
+  const start = Math.max(0, at - 40);
+  return (start > 0 ? "…" : "") + text.slice(start, start + width).trim() + (start + width < text.length ? "…" : "");
+}

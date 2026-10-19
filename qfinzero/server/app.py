@@ -94,7 +94,9 @@ async def lifespan(app: FastAPI):
 
 
 def build_app(auth_store: AuthStore | None = None) -> FastAPI:
-    app = FastAPI(title="QFinZero", version=qfinzero_version(), lifespan=lifespan)
+    # /docs belongs to the web documentation hub; the hub's own schema lives under /svc
+    app = FastAPI(title="QFinZero", version=qfinzero_version(), lifespan=lifespan,
+                  docs_url="/svc/openapi", redoc_url=None, openapi_url="/svc/openapi.json")
 
     # ── authentication (users, roles, API keys); see qfinzero/auth ──
     _store: list[AuthStore] = [auth_store] if auth_store else []

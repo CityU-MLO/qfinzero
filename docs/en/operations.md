@@ -132,6 +132,23 @@ The storage formats are versioned with the code. Read the
 [changelog](../../CHANGELOG.md) before upgrading: a change that needs a
 re-conversion or a new environment variable is listed there.
 
+## The documentation hub
+
+`/docs` is public and served by the web UI:
+
+- **Guides** are the repository's markdown, listed in `docs/index.json`
+  (English and Chinese; a page without a Chinese file falls back to English).
+- **API reference** and **MCP tools** are rendered from
+  `docs/api/reference.json`, generated from the services themselves: UPQ's
+  `docs/upq/openapi.yaml`, the FastAPI schemas of ESP and PMB, and the tools
+  registered in `mcp/server.py`. After changing an endpoint or a tool, run
+  `python -m qfinzero.docsgen`; the test suite fails while the file is stale.
+- Search (`⌘K` or `/`) covers guide sections, endpoints and tools. Signed-in
+  readers can send GET requests and ESP queries from an endpoint page with
+  their own session.
+
+The hub's own OpenAPI schema (the `/auth` routes) is at `/svc/openapi`.
+
 ## Security checklist
 
 - [ ] Only the hub (or the proxy in front of it) is reachable from outside.
