@@ -454,7 +454,7 @@ def setup_layout_init(body: dict = Body(default={})) -> dict:
 @app.get("/setup/keys")
 def setup_keys() -> dict:
     from qfinzero.admin import config_store, vendor_keys
-    return {"keys": {v: config_store.masked_keys(v) for v in ("databento", "massive")},
+    return {"keys": {v: config_store.masked_keys(v) for v in ("databento", "massive", "tiingo")},
             "catalog": vendor_keys.catalog(), "spend": vendor_keys.spend()}
 
 

@@ -372,6 +372,78 @@ class Converter:
                 res.notes.append(f"{removed} stale Databento part(s) removed")
         return res
 
+    # ── Tiingo BOATS (overnight, fills behind the other vendors) ─────────
+
+    def convert_tiingo(self, start=None, end=None, force=False) -> ConvertResult:
+        """Tiingo BOATS bars and recorded quotes -> ``part-tiingo-0000.parquet``
+        in ``stock_minute``, ``stock_overnight_daily`` and ``stock_quote_minute``."""
+        from .sources import tiingo
+        res = ConvertResult("tiingo")
+        root = self.p.tiingo
+        if not (root / "boats").is_dir():
+            res.notes.append(f"{root / 'boats'} missing")
+            return res
+        stage = self.p.tiingo_staging
+        stage.mkdir(parents=True, exist_ok=True)
+        by_kind: dict[str, dict[str, list[Path]]] = {"bars": {}, "quotes": {}}
+        extracted = 0
+        from datetime import date as _date, timedelta as _td
+        q_lo = (_date.fromisoformat(start) - _td(days=1)).isoformat() if start else None
+        for kind, groups, sql_fn in (("bars", tiingo.price_months(root), tiingo.price_staging_sql),
+                                     ("quotes", tiingo.quote_days(root), tiingo.quote_staging_sql)):
+            for g, files in groups.items():
+                # bar months are cached, so only the end bounds them (sessions cross month ends)
+                if not files or (end and g > (end[:7] if kind == "bars" else end)):
+                    continue
+                if kind == "quotes" and q_lo and g < q_lo:
+                    continue
+                out = stage / f"{kind}-{g}.parquet"
+                fp = tiingo.files_fingerprint(files)
+                mkey = f"tiingo-src:{kind}/{g}"
+                e = self.manifest.get(mkey)
+                if force or not (e and e.get("fp") == fp and (not e.get("rows") or out.exists())):
+                    rows = copy_to_parquet(self.con, sql_fn(files), out)
+                    if not rows:
+                        out.unlink(missing_ok=True)
+                    dates = [r[0] for r in self.con.execute(
+                        f"SELECT DISTINCT strftime(trade_date, '%Y-%m-%d') FROM read_parquet('{out}') ORDER BY 1"
+                    ).fetchall()] if rows else []
+                    e = {"fp": fp, "rows": rows, "dates": dates, "staging": str(out), "files": len(files)}
+                    self.manifest.put(mkey, e)
+                    extracted += 1
+                for d in e.get("dates", []):
+                    by_kind[kind].setdefault(d, []).append(out)
+        written = 0
+        jobs = [("stock_minute", d, stg, lambda stg, d, sib: tiingo.minute_sql(stg, d, sib))
+                for d, stg in by_kind["bars"].items()] + \
+               [("stock_quote_minute", d, stg, lambda stg, d, sib: tiingo.quote_sql(stg, d, sib))
+                for d, stg in by_kind["quotes"].items()]
+        for session, (prev, _) in databento.overnight_sessions(by_kind["bars"]).items():
+            stg = sorted({p for d, ps in by_kind["bars"].items() if prev <= d <= session for p in ps})
+            jobs.append((databento.OVERNIGHT_STORE, session, stg,
+                         lambda stg, d, sib, _prev=prev: tiingo.overnight_daily_sql(stg, d, _prev, sib)))
+        for store, d, stg, sql_fn in sorted(jobs, key=lambda j: (j[1], j[0])):
+            if (start and d < start) or (end and d > end):
+                continue
+            part_dir = self.p.partition(store, d)
+            sibs = tiingo.sibling_parts(part_dir)
+            fp = databento.fingerprint([*stg, *sibs])
+            mkey = f"tiingo:{store}/{d}"
+            if not force and self.manifest.fp_current(mkey, fp):
+                res.skipped += 1
+                continue
+            target = part_dir / tiingo.PART_NAME
+            rows = copy_to_parquet(self.con, sql_fn(stg, d, sibs), target)
+            if rows == 0:
+                databento.remove_part(target)
+            else:
+                written += 1
+            self.manifest.put(mkey, {"fp": fp, "rows": rows, "trade_date": d, "store": store})
+            res.partitions += 1
+            res.rows += rows
+        res.notes.append(f"{extracted} month/day group(s) read; {written} partitions with Tiingo rows")
+        return res
+
     def _assemble_overnight(self, by_date, start, end, force, assembled: set[str], res: ConvertResult) -> int:
         """``stock_overnight_daily``: one bar per ticker and overnight session
         (20:00-04:00 ET), dated by the trading day the session precedes."""

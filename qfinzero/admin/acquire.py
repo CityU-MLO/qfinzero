@@ -66,6 +66,12 @@ TARGETS: dict[str, AcquireTarget] = {
         writes_to="$RAW_DATABENTO_DIR/<dataset>/<schema>/<symbol>/ (DBN, read in place)",
         needs=("databento.api_key",), supports_prod=False, python=True,
     ),
+    "tiingo": AcquireTarget(
+        id="tiingo", label="Tiingo BOATS overnight (Blue Ocean minute bars / top of book)",
+        script="", base_args=[],
+        writes_to="$RAW_TIINGO_DIR/boats/{prices/<YYYY-MM>/<TICKER>,quotes/<date>/<HHMM>}.json.gz",
+        supports_prod=False, python=True,
+    ),
 }
 
 
@@ -166,6 +172,8 @@ def acquire(
     if missing:
         return {"ok": False, "error": f"missing config: {', '.join(missing)}", "target": t.id}
 
+    if t.python and t.id == "tiingo":
+        return _acquire_tiingo(params or {}, dry_run=dry_run, on_line=on_line)
     if t.python:
         return _acquire_databento(cfg, params or {}, dry_run=dry_run, on_line=on_line)
 
@@ -188,6 +196,34 @@ def acquire(
     res["target"] = t.id
     res["dry_run"] = dry_run
     res["prod"] = prod
+    return res
+
+
+def _acquire_tiingo(params: dict[str, Any], *, dry_run: bool, on_line: OnLine | None,
+                    on_progress=None, should_stop=None) -> dict[str, Any]:
+    from . import tiingo_dl
+    key = tiingo_dl.api_key()
+    if not key:
+        return {"ok": False, "error": "no Tiingo key (Data setup -> Vendor keys -> Tiingo, product boats)",
+                "target": "tiingo"}
+    syms = params.get("symbols")
+    syms = [s for s in str(syms).split(",") if s.strip()] if syms else None
+    if params.get("kind") == "quotes":
+        if dry_run:
+            return {"ok": True, "dry_run": True, "target": "tiingo",
+                    "note": "records /boats once a minute while the 20:00-04:00 ET session runs"}
+        res = tiingo_dl.record_quotes(key=key, minutes=params.get("minutes"), on_line=on_line,
+                                      should_stop=should_stop)
+    else:
+        if dry_run:
+            client = tiingo_dl.Client(key)
+            n = len(syms) if syms else len(tiingo_dl.universe(client))
+            return {"ok": True, "dry_run": True, "target": "tiingo", "tickers": n,
+                    "note": "one request per ticker and month; Tiingo bills by plan, not per request"}
+        res = tiingo_dl.download_prices(key=key, start=params.get("start"), end=params.get("end"),
+                                        tickers=syms, on_line=on_line, on_progress=on_progress,
+                                        should_stop=should_stop)
+    res["target"] = "tiingo"
     return res
 
 

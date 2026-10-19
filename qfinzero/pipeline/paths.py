@@ -45,6 +45,7 @@ class PipelinePaths:
     tushare: Path
     storage: Path
     databento: Path = Path(RAW_DATABENTO_DIR)
+    tiingo: Path = Path(os.environ.get("RAW_TIINGO_DIR") or "/data/tiingo")
 
     # ── raw massive layout ──────────────────────────────────────
     @property
@@ -122,6 +123,11 @@ class PipelinePaths:
         """Per-source-file bar cache for the Databento converter."""
         return self.storage / "_staging" / "databento"
 
+    @property
+    def tiingo_staging(self) -> Path:
+        """Per-month bar / per-day quote cache for the Tiingo converter."""
+        return self.storage / "_staging" / "tiingo"
+
     # ── UPQ storage output sub-stores ───────────────────────────
     def store(self, name: str) -> Path:
         return self.storage / name
@@ -136,6 +142,7 @@ def resolve(
     tushare: str | os.PathLike | None = None,
     storage: str | os.PathLike | None = None,
     databento: str | os.PathLike | None = None,
+    tiingo: str | os.PathLike | None = None,
 ) -> PipelinePaths:
     """Resolve all pipeline locations, with optional explicit overrides.
 
@@ -149,4 +156,5 @@ def resolve(
         databento=Path(
             databento or os.environ.get("RAW_DATABENTO_DIR") or RAW_DATABENTO_DIR
         ).expanduser(),
+        tiingo=Path(tiingo or os.environ.get("RAW_TIINGO_DIR") or "/data/tiingo").expanduser(),
     )

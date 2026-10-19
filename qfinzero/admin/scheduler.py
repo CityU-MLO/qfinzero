@@ -31,6 +31,9 @@ MANAGED_END = "# END qfz-data (QFinZero data-admin managed)"
 DEFAULT_COMMANDS = {
     "prices": "{py} -m qfinzero.pipeline.cli update --source prices",
     "news": "bash {repo}/scripts/news_data.sh update",
+    "tiingo_quotes": "{py} -m qfinzero.pipeline.cli acquire tiingo --kind quotes --run",
+    "tiingo_prices": ("{py} -m qfinzero.pipeline.cli acquire tiingo --kind prices --run && "
+                      "{py} -m qfinzero.pipeline.cli convert --vendor tiingo"),
 }
 
 

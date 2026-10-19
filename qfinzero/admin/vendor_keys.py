@@ -41,7 +41,8 @@ def massive_indices() -> list[tuple[str, str]]:
 
 def catalog() -> dict[str, list[dict[str, str]]]:
     return {"databento": [{"product": c, "name": n} for c, n in DATABENTO_DATASETS],
-            "massive": [{"product": c, "name": n} for c, n in massive_indices()]}
+            "massive": [{"product": c, "name": n} for c, n in massive_indices()],
+            "tiingo": [{"product": "boats", "name": "BOATS overnight (Blue Ocean ATS)"}]}
 
 
 def _find(vendor: str, key_id: str) -> dict[str, Any]:
@@ -58,6 +59,13 @@ def test_key(vendor: str, key_id: str, *, databento_client=None, s3=None) -> dic
     HEAD; only those the subscription covers answer. The key can then be
     scoped to exactly those."""
     k = _find(vendor, key_id)
+    if vendor == "tiingo":
+        from . import tiingo_dl
+        try:
+            snap = tiingo_dl.Client(k["api_key"]).get("/boats/spy")
+        except Exception as e:  # noqa: BLE001 - report the vendor's answer
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": True, "access": {"boats": bool(snap)}}
     if vendor == "databento":
         try:
             client = databento_client or __import__("databento").Historical(k["api_key"])

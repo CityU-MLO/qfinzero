@@ -27,6 +27,11 @@ Added:
   precedes (trading calendar aware). UPQ `/stock/daily?session=overnight`, MCP
   `upq_stock_daily(trading_session="overnight")`, and an overnight level in
   the coverage map.
+- Tiingo BOATS overnight data: a Tiingo vendor key, `qfz-data acquire tiingo`
+  (minute bars from 2026-07-07; a once-a-minute top-of-book recorder) into
+  `$RAW_TIINGO_DIR`, and `qfz-data convert --vendor tiingo`, which fills
+  `stock_minute`, `stock_overnight_daily` and `stock_quote_minute` behind
+  Databento for about 9,000 tickers. Two schedule groups, off by default.
 - Settings → News storage: MongoDB connection and test, documents, disk and
   index size per collection, one collection per vendor (`news_benzinga`,
   `news_tushare`) copied out of the shared `ticker_news` (left unchanged), a

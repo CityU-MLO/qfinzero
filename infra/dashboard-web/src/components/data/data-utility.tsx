@@ -11,7 +11,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { dataAdmin, type DirInfo, type JobProgress, type Vendor, type VendorKey } from "@/lib/data-admin";
+import { dataAdmin, type DirInfo, type JobProgress, type KeyVendor, type VendorKey } from "@/lib/data-admin";
 import { cn } from "@/lib/utils";
 
 const inputCls =
@@ -246,8 +246,9 @@ export function LayoutPanel() {
 
 // ── vendor keys ───────────────────────────────────────────────────────────
 
-const SECRETS: Record<Vendor, { k: keyof VendorKey; en: string; zh: string }[]> = {
+const SECRETS: Record<KeyVendor, { k: keyof VendorKey; en: string; zh: string }[]> = {
   databento: [{ k: "api_key", en: "API key", zh: "API 密钥" }],
+  tiingo: [{ k: "api_key", en: "API token", zh: "API Token" }],
   massive: [
     { k: "s3_access_key_id", en: "S3 access key ID", zh: "S3 Access Key ID" },
     { k: "s3_secret_access_key", en: "S3 secret", zh: "S3 Secret" },
@@ -256,7 +257,7 @@ const SECRETS: Record<Vendor, { k: keyof VendorKey; en: string; zh: string }[]> 
 };
 
 function KeyEditor({ vendor, initial, catalog, onDone }: {
-  vendor: Vendor; initial: VendorKey | null; catalog: { product: string; name: string }[]; onDone: () => void;
+  vendor: KeyVendor; initial: VendorKey | null; catalog: { product: string; name: string }[]; onDone: () => void;
 }) {
   const t = useT();
   const [label, setLabel] = React.useState(initial?.label ?? "");
@@ -342,16 +343,17 @@ export function KeysPanel() {
   const t = useT();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["setup", "keys"], queryFn: dataAdmin.keys });
-  const [editing, setEditing] = React.useState<{ vendor: Vendor; key: VendorKey | null } | null>(null);
+  const [editing, setEditing] = React.useState<{ vendor: KeyVendor; key: VendorKey | null } | null>(null);
   const [tests, setTests] = React.useState<Record<string, { busy?: boolean; ok?: boolean; text?: string; access?: Record<string, boolean> }>>({});
   const [confirm, setConfirm] = React.useState<string | null>(null);
   const done = () => { setEditing(null); qc.invalidateQueries({ queryKey: ["setup"] }); };
-  const test = async (vendor: Vendor, k: VendorKey) => {
+  const test = async (vendor: KeyVendor, k: VendorKey) => {
     setTests((x) => ({ ...x, [k.id]: { busy: true } }));
     try {
       const r = await dataAdmin.testKey(vendor, k.id);
       const ok = r.ok;
-      const text = !ok ? r.error ?? "" : vendor === "databento" ? t(`Key accepted (${r.datasets} datasets listed).`, `密钥有效（列出 ${r.datasets} 个数据集）。`)
+      const text = !ok ? r.error ?? "" : vendor === "tiingo" ? t("Token accepted: BOATS answers.", "Token 有效：BOATS 有响应。")
+        : vendor === "databento" ? t(`Key accepted (${r.datasets} datasets listed).`, `密钥有效（列出 ${r.datasets} 个数据集）。`)
         : t(`Can list ${Object.values(r.access ?? {}).filter(Boolean).length} of ${Object.keys(r.access ?? {}).length} products.`,
           `可访问 ${Object.keys(r.access ?? {}).length} 个产品中的 ${Object.values(r.access ?? {}).filter(Boolean).length} 个。`);
       setTests((x) => ({ ...x, [k.id]: { ok, text, access: r.access } }));
@@ -376,21 +378,21 @@ export function KeysPanel() {
       <CardContent className="space-y-5">
         {q.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         {q.isError && <Alert variant="error">{(q.error as Error).message}</Alert>}
-        {data && (["databento", "massive"] as const).map((vendor) => (
+        {data && (["databento", "massive", "tiingo"] as const).map((vendor) => (
           <section key={vendor} className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">{vendor === "databento" ? "Databento" : "massive"}</div>
+              <div className="text-sm font-semibold">{{ databento: "Databento", massive: "massive", tiingo: "Tiingo (BOATS overnight)" }[vendor]}</div>
               <Button size="sm" variant="outline" onClick={() => setEditing({ vendor, key: null })}><Plus /> {t("Add key", "添加密钥")}</Button>
             </div>
-            {data.keys[vendor].length === 0 && !editing && (
+            {(data.keys[vendor] ?? []).length === 0 && !editing && (
               <p className="text-[13px] text-muted-foreground">{t("No key yet.", "还没有密钥。")}</p>
             )}
             <div className="space-y-2">
-              {data.keys[vendor].map((k) => {
+              {(data.keys[vendor] ?? []).map((k) => {
                 const spent = data.spend.by_key[k.id];
                 const tr = tests[k.id];
                 if (editing?.key?.id === k.id && editing.vendor === vendor) {
-                  return <KeyEditor key={k.id} vendor={vendor} initial={k} catalog={data.catalog[vendor]} onDone={done} />;
+                  return <KeyEditor key={k.id} vendor={vendor} initial={k} catalog={data.catalog[vendor] ?? []} onDone={done} />;
                 }
                 return (
                   <div key={k.id} className="rounded-lg border px-3 py-2">
@@ -445,7 +447,7 @@ export function KeysPanel() {
                 );
               })}
               {editing && editing.vendor === vendor && editing.key === null && (
-                <KeyEditor vendor={vendor} initial={null} catalog={data.catalog[vendor]} onDone={done} />
+                <KeyEditor vendor={vendor} initial={null} catalog={data.catalog[vendor] ?? []} onDone={done} />
               )}
             </div>
           </section>
