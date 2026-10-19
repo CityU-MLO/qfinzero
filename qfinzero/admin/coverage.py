@@ -24,6 +24,7 @@ from typing import Any, Optional
 LEVELS = (
     # id, store, what a cell counts
     ("daily", "stock_daily"),
+    ("overnight_daily", "stock_overnight_daily"),
     ("minute", "stock_minute"),
     ("quotes", "stock_quote_minute"),
     ("options_eod", "option_day"),
@@ -135,9 +136,9 @@ def _summarize(store: str, files: list[Path]) -> dict[str, dict]:
                 e["volume"] += int(v or 0)
                 e["sessions"][s] = int(n)
             return out
-        if store in ("stock_daily", "crypto_daily", "fx_daily"):
+        if store in ("stock_daily", "stock_overnight_daily", "crypto_daily", "fx_daily"):
             rows = con.execute(f"SELECT ticker, count(*), sum(volume), sum(close * volume) FROM {src} GROUP BY 1").fetchall()
-            return {t: {"rows": int(n), "volume": float(v or 0) if store != "stock_daily" else int(v or 0),
+            return {t: {"rows": int(n), "volume": int(v or 0) if store.startswith("stock_") else float(v or 0),
                         "dollar_volume": float(dv or 0)} for t, n, v, dv in rows}
         rows = con.execute(f"SELECT ticker, count(*) FROM {src} GROUP BY 1").fetchall()
         return {t: {"rows": int(n)} for t, n in rows}

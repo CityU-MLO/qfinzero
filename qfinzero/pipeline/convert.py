@@ -237,13 +237,17 @@ class Converter:
             res.notes.append(f"{root} missing")
             return res
         files = databento.index(root, self.p.state_dir, self.con)
-        usable = [f for f in files if f.convertible and f.overlaps(start, end)]
+        # only the requested asset classes are extracted (parquet exports learn theirs on extraction)
+        usable = [f for f in files if f.convertible and f.overlaps(start, end)
+                  and (f.asset is None or f.asset in assets)]
         skipped_roles: dict[str, int] = {}
         for f in files:
             if f.convertible:
                 continue
             if f.error:
                 why = "unreadable"
+            elif f.out_of_scope:
+                why = "out of scope"   # cmbp-1, MBO outside Blue Ocean
             elif f.role in ("trades", "ohlcv"):
                 why = "unsupported dataset"
             else:
@@ -265,7 +269,7 @@ class Converter:
             out = stage / f"{databento.file_key(Path(f.path))}.parquet"
             e = self.manifest.get(key)
             current = (e and e.get("src_size") == f.size and e.get("src_mtime") == f.mtime
-                       and e.get("v") == databento.EXTRACT_VERSION
+                       and e.get("v") == databento.extract_version(f.schema)
                        and (e.get("rows", 0) == 0 or out.exists())
                        and (e.get("q_rows", 0) == 0
                             or databento.quote_staging_path(out).exists())
@@ -353,6 +357,7 @@ class Converter:
                                          **({"interval_min": iv} if kind == "quotes" else {})})
                 res.partitions += 1
                 res.rows += rows
+        written += self._assemble_overnight(by_date, start, end, force, assembled, res)
         res.notes.append(f"files: {len(staged) - n_cached} extracted, {n_cached} cached")
         res.notes.append(f"{written} partitions with Databento rows")
 
@@ -367,9 +372,42 @@ class Converter:
                 res.notes.append(f"{removed} stale Databento part(s) removed")
         return res
 
+    def _assemble_overnight(self, by_date, start, end, force, assembled: set[str], res: ConvertResult) -> int:
+        """``stock_overnight_daily``: one bar per ticker and overnight session
+        (20:00-04:00 ET), dated by the trading day the session precedes."""
+        stock = {d: stg for (kind, asset, d), stg in by_date.items() if kind == "bars" and asset == "stock"}
+        if not stock:
+            return 0
+        store = databento.OVERNIGHT_STORE
+        written = 0
+        for session, (prev, _) in sorted(databento.overnight_sessions(stock).items()):
+            if (start and session < start) or (end and session > end):
+                continue
+            inputs = sorted({p for d, stg in stock.items() if prev <= d <= session for p in stg
+                             if not databento.is_settle_staging(p)})
+            fp = databento.fingerprint(inputs)
+            mkey = f"databento:{store}/{session}"
+            assembled.add(mkey)
+            if not force and self.manifest.fp_current(mkey, fp):
+                res.skipped += 1
+                continue
+            target = self.p.partition(store, session) / databento.PART_NAME
+            rows = copy_to_parquet(self.con, databento.overnight_daily_sql(inputs, session, prev), target)
+            if rows == 0:
+                databento.remove_part(target)
+            else:
+                written += 1
+            self.manifest.put(mkey, {"fp": fp, "rows": rows, "inputs": len(inputs),
+                                     "trade_date": session, "store": store})
+            res.partitions += 1
+            res.rows += rows
+        return written
+
     def _drop_stale_databento(self, assembled: set[str], start, end, assets, files) -> int:
         stores = {s for a in assets for s in (*databento.STORES_FOR_ASSET[a],
                                               *databento.QUOTE_STORES_FOR_ASSET[a])}
+        if "stock" in assets:
+            stores.add(databento.OVERNIGHT_STORE)
         removed = 0
         for key, e in list(self.manifest.entries.items()):
             if not key.startswith("databento:") or key in assembled:
@@ -401,7 +439,7 @@ class Converter:
 
         def record(f, out, r):
             rec = {"src": f.path, "src_size": f.size, "src_mtime": f.mtime,
-                   "v": databento.EXTRACT_VERSION,
+                   "v": databento.extract_version(f.schema),
                    "rows": r.rows, "dates": r.dates, "assets": r.assets,
                    "q_rows": r.q_rows, "q_dates": r.q_dates, "q_assets": r.q_assets,
                    "s_rows": r.s_rows, "s_dates": r.s_dates,

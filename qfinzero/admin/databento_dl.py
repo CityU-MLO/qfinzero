@@ -68,6 +68,10 @@ def plan(params: dict[str, Any], root: Path) -> list[dict[str, Any]]:
     schema = str(params.get("schema") or "").strip()
     if not dataset or not schema:
         raise ValueError("dataset and schema are required")
+    from qfinzero.pipeline.sources.databento import out_of_scope
+    if out_of_scope(schema, dataset):
+        raise ValueError(f"{schema} from {dataset} is not used by QFinZero (it stops at consolidated BBO; "
+                         "market-by-order data only from Blue Ocean, OCEA.MEMOIR)")
     syms = params.get("symbols") or []
     if isinstance(syms, str):
         syms = [s.strip() for s in syms.split(",")]

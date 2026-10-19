@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 
 from .engine import _lit, connect, parquet_options
 
-STORES = ("stock_daily", "stock_minute", "stock_quote_minute", "option_day", "option_minute",
+STORES = ("stock_daily", "stock_overnight_daily", "stock_minute", "stock_quote_minute", "option_day", "option_minute",
           "option_quote_minute", "future_daily", "future_minute", "future_quote_minute",
           "crypto_daily", "crypto_minute", "fx_daily", "fx_minute", "fx_quote_minute")
 

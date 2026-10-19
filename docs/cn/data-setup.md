@@ -59,7 +59,7 @@ Databento 和 massive 的很多产品是分开订阅的，所以一个人可能�
 
 两家供应商都可以写入分钟报价存储。PMB 按它成交，期权链快照也从中读取买卖价：
 
-- Databento：`cbbo-1m`、`cbbo-1s`、`bbo-*`、`cmbp-1`（股票和 OPRA），以及期货交易所的 `mbp-1` / `mbp-10`。
+- Databento：`cbbo-1m`、`cbbo-1s`、`bbo-*`（股票和 OPRA），Blue Ocean 的 `mbo`（夜盘股票报价），以及期货交易所的 `mbp-1` / `mbp-10`。
 - massive：`us_options_opra/quotes_v1` 和 `us_stocks_sip/quotes_v1` flat files（逐笔，数据量很大）、
   REST 报价样本（`*.jsonl.gz`）和 30 分钟快照 parquet。检查时会显示每类文件各有多少。
 

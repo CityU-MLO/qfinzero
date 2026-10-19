@@ -149,6 +149,18 @@
        "description": "Point-in-time cap (ISO datetime, UTC unless an offset is given, or nanoseconds). Only rows already final at this time are returned: minute rows once window_start + 60s <= as_of, stock daily bars after 16:00 ET, option daily bars and the end-of-day chain after 16:15 ET. The service-wide ceiling UPQ_AS_OF applies as well.",
        "in": "query",
        "example": "2026-02-19T14:36:00Z"
+      },
+      {
+       "name": "session",
+       "type": "string",
+       "required": false,
+       "description": "regular (default): the exchange day. overnight: one bar per Blue Ocean ATS 20:00-04:00 ET session, dated by the trading day it precedes (Sunday night and Monday morning are Monday's session), final at 04:00 ET of that date.",
+       "in": "query",
+       "default": "regular",
+       "enum": [
+        "regular",
+        "overnight"
+       ]
       }
      ],
      "body": null,
@@ -5130,6 +5142,17 @@
       "none",
       "split",
       "total"
+     ]
+    },
+    {
+     "name": "trading_session",
+     "type": "string",
+     "required": false,
+     "description": "\"regular\" (default) = the exchange day; \"overnight\" = one bar per Blue Ocean 20:00-04:00 ET session, dated by the trading day it precedes (Sunday night + Monday morning = Monday), final at 04:00 ET",
+     "default": "regular",
+     "enum": [
+      "regular",
+      "overnight"
      ]
     },
     {

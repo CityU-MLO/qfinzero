@@ -103,7 +103,7 @@ def _databento_storage(p: PipelinePaths) -> dict:
             pass
     if dates:
         out.update(processed=len(dates), start=min(dates), end=max(dates))
-    for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
+    for store in ("stock_daily", "stock_overnight_daily", "stock_minute", "option_day", "option_minute",
                   "stock_quote_minute", "option_quote_minute",
                   "future_daily", "future_minute", "future_quote_minute"):
         d = p.store(store)
@@ -114,7 +114,7 @@ def _databento_storage(p: PipelinePaths) -> dict:
 
 def scan_storage(p: PipelinePaths) -> dict:
     out: dict = {"root": str(p.storage)}
-    for store in ("stock_daily", "stock_minute", "option_day", "option_minute",
+    for store in ("stock_daily", "stock_overnight_daily", "stock_minute", "option_day", "option_minute",
                   "stock_quote_minute", "option_quote_minute",
                   "future_daily", "future_minute", "future_quote_minute",
                   "crypto_daily", "crypto_minute", "fx_daily", "fx_minute", "fx_quote_minute"):

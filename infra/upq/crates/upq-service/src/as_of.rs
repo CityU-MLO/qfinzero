@@ -18,6 +18,8 @@ pub const NS_PER_MIN: i64 = 60_000_000_000;
 
 /// 16:00 ET: a stock daily bar is final.
 pub const STOCK_CLOSE: (u32, u32) = (16, 0);
+/// An overnight (20:00-04:00 ET) session bar is final at 04:00 ET of its date.
+pub const OVERNIGHT_CLOSE: (u32, u32) = (4, 0);
 /// 16:15 ET: an option daily bar is final (index/ETF options trade to 16:15).
 pub const OPTION_CLOSE: (u32, u32) = (16, 15);
 /// 17:00 ET: a futures session (18:00 ET the evening before to 17:00 ET) has closed.

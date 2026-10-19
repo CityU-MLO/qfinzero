@@ -183,6 +183,18 @@ paths:
           schema:
             type: string
             example: "2026-02-19T14:36:00Z"
+        - name: session
+          in: query
+          required: false
+          description: >-
+            regular (default): the exchange day. overnight: one bar per Blue
+            Ocean ATS 20:00-04:00 ET session, dated by the trading day it
+            precedes (Sunday night and Monday morning are Monday's session),
+            final at 04:00 ET of that date.
+          schema:
+            type: string
+            enum: [regular, overnight]
+            default: regular
       responses:
         '200':
           description: Successful query

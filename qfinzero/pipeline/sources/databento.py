@@ -15,14 +15,22 @@ schema                                 becomes
 ``ohlcv-1h``                           daily only
 ``ohlcv-1d`` / ``ohlcv-eod``           daily only
 ``trades`` ``tbbo`` ``tcbbo``          trade records -> minute bars + daily
-``mbp-1`` ``mbp-10`` ``mbo``           trade records (``action == 'T'``) ->
-``cmbp-1``                             minute bars + daily
+``mbp-1`` ``mbp-10``                   trade records (``action == 'T'``) ->
+``mbo`` (Blue Ocean only)              minute bars + daily
 =====================================  =======================================
 
-Quote schemas (``bbo-*``, ``cbbo-*``, ``cmbp-1``, and ``mbp-1`` / ``mbp-10`` of a
-futures venue) fill the minute quote stores; reference schemas (definition,
-statistics, status, imbalance) are indexed but not converted. In MBO data only ``T`` records are counted; ``F`` fills are the passive
-side of the same execution and would double count.
+Quote schemas (``bbo-*``, ``cbbo-*``, and ``mbp-1`` / ``mbp-10`` of a futures
+venue) fill the minute quote stores; reference schemas (definition, statistics,
+status, imbalance) are indexed but not converted.
+
+QFZ stops at consolidated BBO: ``cmbp-1`` and market-by-order data are out of
+scope (indexed, never converted) with one exception, Blue Ocean ATS
+(``OCEA.MEMOIR``) ``mbo``, the only source of the 20:00-04:00 ET overnight
+session. Its book is replayed into the minute quote store (the venue's own
+best bid/offer at the end of each minute, not an NBBO), its ``T`` records make
+the overnight minute bars (``F`` fills are the passive side of the same
+execution and would double count), and each overnight session becomes one
+``stock_overnight_daily`` bar dated by the trading day it precedes.
 
 Asset class: ``OPRA.*`` datasets (or OSI-style symbols in parquet) become
 options; US equity datasets become stocks; futures venues (``GLBX.MDP3`` = CME
@@ -66,9 +74,15 @@ from ..engine import _lit, parquet_options
 SUFFIXES = (".dbn.zst", ".dbn", ".parquet")
 PART_NAME = "part-databento-0000.parquet"
 INDEX_FILE = "databento_index.json"   # under <storage>/_state/
-INDEX_VERSION = 2   # 2: OCEA recognised as a US equity venue
+INDEX_VERSION = 3   # 2: OCEA recognised as a US equity venue; 3: cmbp-1 out of scope
 # Bump when extraction output changes so cached staging bars are rebuilt.
 EXTRACT_VERSION = 5   # 3: quote staging (<key>.q.parquet); 4: futures; 5: instrument ids, settlements
+# Per-schema bumps rebuild only the files of that schema.
+EXTRACT_VERSION_BY_SCHEMA = {"mbo": 6}   # 6: Blue Ocean book replay -> minute quotes
+
+
+def extract_version(schema: str | None) -> int:
+    return EXTRACT_VERSION_BY_SCHEMA.get(schema or "", EXTRACT_VERSION)
 
 UNDEF_PRICE = 9223372036854775807     # i64::MAX, Databento's "no price"
 UNDEF_TS = 18446744073709551615       # u64::MAX, Databento's "no timestamp"
@@ -79,7 +93,7 @@ NS_PER_MIN = 60_000_000_000
 NS_PER_DAY = 86_400_000_000_000
 
 # schema -> how it converts
-TRADE_SCHEMAS = {"trades", "tbbo", "tcbbo", "mbp-1", "mbp-10", "mbo", "cmbp-1"}
+TRADE_SCHEMAS = {"trades", "tbbo", "tcbbo", "mbp-1", "mbp-10", "mbo"}
 OHLCV_KIND = {          # staging "kind" per OHLCV schema
     "ohlcv-1s": "s",    # re-aggregated to minutes
     "ohlcv-1m": "m",
@@ -90,7 +104,18 @@ OHLCV_KIND = {          # staging "kind" per OHLCV schema
 QUOTE_SCHEMAS = {"bbo-1s", "bbo-1m", "cbbo-1s", "cbbo-1m"}
 # Schemas whose records carry a top-of-book (bid/ask) -> quote stores, with a
 # preference rank: full-resolution consolidated updates beat sampled quotes.
-QUOTE_CAPABLE = {"cmbp-1": 4, "cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
+QUOTE_CAPABLE = {"mbo": 4, "cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
+# QFZ stops at consolidated BBO: these never convert. Market-by-order data is
+# used only from these datasets (Blue Ocean: the overnight session has no other
+# source); other venues' MBO duplicates consolidated trades and quotes.
+OUT_OF_SCOPE_SCHEMAS = {"cmbp-1"}
+MBO_DATASETS = ("OCEA",)
+
+
+def out_of_scope(schema: str | None, dataset: str | None) -> bool:
+    if schema in OUT_OF_SCOPE_SCHEMAS:
+        return True
+    return schema == "mbo" and not (dataset or "").startswith(MBO_DATASETS)
 # A futures exchange is the only venue, so its own top of book is the BBO.
 FUTURE_BOOK_SCHEMAS = {"mbp-1", "mbp-10"}
 # Sampled schemas stamp ts_recv at the *end* of their interval.
@@ -217,8 +242,13 @@ class FileInfo:
         return self.asset == "future" and self.schema == "statistics" and self.fmt == "dbn"
 
     @property
+    def out_of_scope(self) -> bool:
+        return out_of_scope(self.schema, self.dataset)
+
+    @property
     def convertible(self) -> bool:
-        return self.error is None and (self.has_bars or self.has_quotes or self.has_settlements) and (
+        return self.error is None and not self.out_of_scope and (
+            self.has_bars or self.has_quotes or self.has_settlements) and (
             self.asset is not None or self.fmt == "parquet")
 
     def overlaps(self, start: str | None, end: str | None) -> bool:
@@ -835,6 +865,120 @@ def _extract_dbn_quotes(info: FileInfo, out: Path, con, chunk: int) -> tuple[int
     return result
 
 
+def replay_mbo_book(batches) -> dict[str, list]:
+    """Replay market-by-order records into one book per instrument and return the
+    book at the end of every minute in which it changed (by ``ts_recv``):
+    ``key, ws, last_ts, bid, ask, bsz, asz`` (prices fixed-point, ``None`` when a
+    side is empty). Actions: ``R`` clears the instrument's book, ``A`` adds an
+    order, ``M`` moves it to a new price/size, ``C`` and ``F`` take size off it
+    (cancel / passive fill), ``T`` and ``N`` leave the book alone."""
+    orders: dict[int, dict[int, list]] = {}           # iid -> order id -> [side, px, size]
+    books: dict[int, tuple[dict, dict]] = {}          # iid -> (bid levels, ask levels)
+    pending: dict[int, list] = {}                     # iid -> [ws, last_ts] changed, not yet emitted
+    out: dict[str, list] = {k: [] for k in ("key", "ws", "last_ts", "bid", "ask", "bsz", "asz")}
+
+    def emit(iid: int, ws: int, ts: int) -> None:
+        bids, asks = books[iid]
+        b = max(bids) if bids else None
+        a = min(asks) if asks else None
+        for k, v in (("key", iid), ("ws", ws), ("last_ts", ts), ("bid", b), ("ask", a),
+                     ("bsz", bids.get(b, 0) if b is not None else 0),
+                     ("asz", asks.get(a, 0) if a is not None else 0)):
+            out[k].append(v)
+
+    def take(lv: dict, px: int, n: int) -> None:
+        left = lv.get(px, 0) - n
+        if left > 0:
+            lv[px] = left
+        else:
+            lv.pop(px, None)
+
+    for arr in batches:
+        if len(arr) == 0:
+            continue
+        cols = [arr[c].tolist() for c in ("ts_recv", "instrument_id", "order_id", "price", "size")]
+        acts = arr["action"].tolist()
+        sides = arr["side"].tolist()
+        for ts, iid, oid, px, sz, act, side in zip(*cols, acts, sides):
+            if ts >= UNDEF_TS:
+                continue
+            if act in (b"T", b"N"):
+                continue
+            ws = ts // NS_PER_MIN * NS_PER_MIN
+            pend = pending.get(iid)
+            if pend is not None and pend[0] != ws:
+                emit(iid, pend[0], pend[1])
+                del pending[iid]
+            book = books.get(iid)
+            if book is None:
+                book = books[iid] = ({}, {})
+                orders[iid] = {}
+            own = orders[iid]
+            if act == b"R":
+                book[0].clear(); book[1].clear(); own.clear()
+            elif act == b"A":
+                if side in (b"B", b"A") and px != UNDEF_PRICE and sz > 0:
+                    own[oid] = [side, px, sz]
+                    lv = book[0] if side == b"B" else book[1]
+                    lv[px] = lv.get(px, 0) + sz
+            elif act == b"M":
+                o = own.get(oid)
+                if o is not None:
+                    take(book[0] if o[0] == b"B" else book[1], o[1], o[2])
+                    del own[oid]
+                s_ = o[0] if o is not None else side
+                if s_ in (b"B", b"A") and px != UNDEF_PRICE and sz > 0:
+                    own[oid] = [s_, px, sz]
+                    lv = book[0] if s_ == b"B" else book[1]
+                    lv[px] = lv.get(px, 0) + sz
+            elif act in (b"C", b"F"):
+                o = own.get(oid)
+                if o is None:
+                    continue
+                n = min(sz, o[2]) if sz > 0 else o[2]
+                take(book[0] if o[0] == b"B" else book[1], o[1], n)
+                o[2] -= n
+                if o[2] <= 0:
+                    del own[oid]
+            else:
+                continue
+            pending[iid] = [ws, ts]
+    for iid, (ws, ts) in pending.items():
+        emit(iid, ws, ts)
+    return out
+
+
+def _extract_dbn_mbo_quotes(info: FileInfo, out: Path, con, chunk: int) -> tuple[int, list[str], list[str]]:
+    """Blue Ocean MBO -> the venue's best bid/offer at the end of each minute."""
+    import databento as db
+    import pyarrow as pa
+
+    store = db.DBNStore.from_file(info.path)
+    rows = replay_mbo_book(store.to_ndarray(count=chunk))
+    if not rows["key"]:
+        return 0, [], []
+
+    def px(vals):
+        return pa.array([None if v is None else v / PRICE_DIVISOR for v in vals], pa.float64())
+
+    con.register("_mbo_q", pa.table({
+        "key": pa.array(rows["key"], pa.int64()), "ws": pa.array(rows["ws"], pa.int64()),
+        "last_ts": pa.array(rows["last_ts"], pa.int64()), "bid": px(rows["bid"]), "ask": px(rows["ask"]),
+        "bsz": pa.array(rows["bsz"], pa.int64()), "asz": pa.array(rows["asz"], pa.int64()),
+    }))
+    con.execute("CREATE OR REPLACE TEMP TABLE _quotes AS SELECT * FROM _mbo_q")
+    con.unregister("_mbo_q")
+    _register_symbols(con, "_quotes", store.metadata)
+    con.execute(f"""CREATE OR REPLACE TEMP VIEW _qnamed AS
+        SELECT '{info.asset}' AS asset, s.sym, q.ws, q.last_ts, q.bid, q.ask, q.bsz, q.asz
+        FROM _quotes q JOIN _sym s ON s.key = q.key AND s.day = q.ws // {NS_PER_DAY}""")
+    result = _write_quote_staging(con, "_qnamed", info, out)
+    con.execute("DROP VIEW _qnamed")
+    con.unregister("_sym")
+    con.execute("DROP TABLE _quotes")
+    return result
+
+
 def _extract_parquet_quotes(info: FileInfo, out: Path, con) -> tuple[int, list[str], list[str]]:
     path = Path(info.path)
     cols = _parquet_columns(con, path)
@@ -1015,6 +1159,7 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
         qout = quote_staging_path(out)
         if info.has_quotes:
             q = (_extract_parquet_quotes(info, qout, con) if info.fmt == "parquet"
+                 else _extract_dbn_mbo_quotes(info, qout, con, chunk) if info.schema == "mbo"
                  else _extract_dbn_quotes(info, qout, con, chunk))
             res.q_rows, res.q_dates, res.q_assets = q
         if res.q_rows == 0:
@@ -1247,6 +1392,57 @@ def daily_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
         FROM bars ORDER BY ticker""" if asset == "stock" else _option_projection(
             "bars", trade_date,
             f"epoch_ns(timezone('{_ET}', TIMESTAMP '{trade_date} 00:00:00'))"))
+
+
+OVERNIGHT_STORE = "stock_overnight_daily"
+
+
+def overnight_sessions(et_dates: Iterable[str]) -> dict[str, tuple[str, str]]:
+    """Overnight sessions touched by bars on these ET dates.
+
+    A session runs 20:00 ET to 04:00 ET and belongs to the trading day it
+    precedes: evening bars (20:00-24:00) of ET date E go to the first trading day
+    after E, morning bars (00:00-04:00) of M to the first trading day on or after
+    M (Sunday night and Monday morning are Monday's session). Returns
+    ``{session date: (previous trading day, session date)}``; the session's
+    evening bars lie on ET dates in [prev, S), its morning bars in (prev, S]."""
+    from qfinzero.market_calendar import is_trading_day, next_trading_day, previous_trading_day
+    out: dict[str, tuple[str, str]] = {}
+    for e in et_dates:
+        d = date.fromisoformat(e)
+        for s in {next_trading_day(d), d if is_trading_day(d) else next_trading_day(d)}:
+            out[s.isoformat()] = (previous_trading_day(s).isoformat(), s.isoformat())
+    return out
+
+
+def overnight_daily_sql(staging: list[Path], session: str, prev: str) -> str:
+    """One bar per ticker for the overnight session dated ``session``: O/H/L/C,
+    volume and transactions of its 20:00-04:00 ET minute bars (one source per
+    ticker, as for the other daily bars), with the first and last bar minute."""
+    return f"""
+        WITH raw AS (
+            SELECT * FROM read_parquet({_staging_list(staging)})
+            WHERE asset = 'stock' AND kind = 'm'
+              AND ((et_min >= 1200 AND trade_date >= DATE '{prev}' AND trade_date < DATE '{session}')
+                OR (et_min < 240 AND trade_date > DATE '{prev}' AND trade_date <= DATE '{session}'))
+        ),
+        src AS (SELECT * FROM raw {_DEDUPE_DAILY}),
+        cand AS (
+            SELECT ticker, src, max(drank) AS drank,
+                   arg_min(open, window_start) AS open, max(high) AS high, min(low) AS low,
+                   arg_max(close, window_start) AS close,
+                   CAST(sum(volume) AS BIGINT) AS volume,
+                   CAST(sum(transactions) AS BIGINT) AS transactions,
+                   min(window_start) AS first_window_start, max(window_start) AS last_window_start
+            FROM src GROUP BY ticker, src
+        ),
+        bars AS (
+            SELECT * FROM cand QUALIFY row_number() OVER (
+                PARTITION BY ticker ORDER BY drank DESC, volume DESC, src) = 1
+        )
+        SELECT ticker, DATE '{session}' AS trade_date, open, high, low, close, volume, transactions,
+               first_window_start, last_window_start
+        FROM bars ORDER BY ticker"""
 
 
 def assembly_sql(store: str, staging: list[Path], trade_date: str, siblings: list[Path]) -> str:

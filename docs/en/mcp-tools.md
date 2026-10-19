@@ -235,6 +235,7 @@ Query daily OHLCV bars for one or more stocks, with optional technical indicator
 | `fields` | str |  | `null` | Comma-separated fields to return, e.g. "date,close,volume" Available: ticker, date, open, high, low, close, volume, transactions |
 | `indicators` | str |  | `null` | Comma-separated technical indicators, e.g. "ma_20,ema_12,macd" Supported: ma_N (Simple Moving Average), ema_N (Exponential Moving Average), macd (MACD 12/26/9 — returns macd, macd_signal, macd_histogram columns). |
 | `adjust` | "none" \| "split" \| "total" |  | `"none"` | "none" = as traded (default); "split" = split-adjusted; "total" = split- and dividend-adjusted (for returns over long windows) |
+| `trading_session` | "regular" \| "overnight" |  | `"regular"` | "regular" (default) = the exchange day; "overnight" = one bar per Blue Ocean 20:00-04:00 ET session, dated by the trading day it precedes (Sunday night + Monday morning = Monday), final at 04:00 ET |
 | `session_id` | str |  | `null` | Optional PMB session to time-lock this query to (data after the session's current bar is hidden, enforced server-side). |
 
 ### upq_stock_minute

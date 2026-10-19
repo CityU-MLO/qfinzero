@@ -157,6 +157,7 @@ def upq_stock_daily(
     fields: Optional[str] = None,
     indicators: Optional[str] = None,
     adjust: Literal["none", "split", "total"] = "none",
+    trading_session: Literal["regular", "overnight"] = "regular",
     session_id: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
@@ -173,6 +174,9 @@ def upq_stock_daily(
                     macd (MACD 12/26/9 — returns macd, macd_signal, macd_histogram columns).
         adjust: "none" = as traded (default); "split" = split-adjusted;
                 "total" = split- and dividend-adjusted (for returns over long windows)
+        trading_session: "regular" (default) = the exchange day; "overnight" = one bar
+                per Blue Ocean 20:00-04:00 ET session, dated by the trading day it
+                precedes (Sunday night + Monday morning = Monday), final at 04:00 ET
         session_id: Optional PMB session to time-lock this query to (data after
             the session's current bar is hidden, enforced server-side).
 
@@ -185,6 +189,7 @@ def upq_stock_daily(
             tickers=tickers, start=start, end=end,
             fields=fields, indicators=indicators, as_of=as_of,
             adjust=None if adjust == "none" else adjust,
+            session=None if trading_session == "regular" else trading_session,
         ))
 
 

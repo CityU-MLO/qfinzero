@@ -136,11 +136,19 @@ takes about two minutes, and later scans take about one second.
 | `ohlcv-1s` | minute + daily | re-aggregated to minutes |
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily | `ohlcv-1d` uses the UTC day Databento reports |
 | `trades`, `tbbo`, `tcbbo` | minute + daily | every record is a trade |
-| `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily | only records with `action == 'T'` |
-| `cmbp-1`, `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute`, `future_quote_minute` | last top of book in each minute (see below) |
+| `mbp-1`, `mbp-10`, `mbo` (Blue Ocean only) | minute + daily | only records with `action == 'T'` |
+| `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute`, `future_quote_minute` | last top of book in each minute (see below) |
+| `mbo` of Blue Ocean (`OCEA.MEMOIR`) | `stock_quote_minute`, `stock_overnight_daily` | book replayed; see [Overnight](#overnight) |
 | `mbp-1`, `mbp-10` of a futures venue | `future_quote_minute` | the exchange's own book is the BBO |
 | `statistics` of a futures venue | `future_daily.settle` | exchange settlement prices |
 | definition, statistics (other venues), status, imbalance | none | reference data |
+| `cmbp-1`, `mbo` of other venues | none | out of scope (below) |
+
+**Scope.** QFinZero stops at consolidated top of book. `cmbp-1` and
+market-by-order data are indexed but never converted, and the download form
+refuses them, with one exception: Blue Ocean `mbo`, the only source of the
+overnight session. Other venues' MBO adds nothing the consolidated trades and
+quotes do not already give.
 
 In MBO, a `T` record is the execution and an `F` record is the passive side of
 the same execution, so counting both would double the volume. Hidden-order
@@ -197,9 +205,8 @@ columns. A row is the book at the end of the minute that starts at
 `window_start`. Sampled schemas (`cbbo-*`, `bbo-*`) stamp the end of their
 interval, so the stamp is shifted back into its minute. Minutes without an
 update are not written; readers carry the last row forward. When several
-sources quote a name, the order is consolidated feeds, then `cmbp-1` (every
-update), then 1-second samples, then 1-minute samples. `cmbp-1` files yield
-both trade bars and quotes.
+sources quote a name, the order is consolidated feeds, then 1-second samples,
+then 1-minute samples.
 
 **Sampling interval.** Each quote store can keep one book per 1, 5, 15, 30 or
 60 minutes instead of every minute: the last book of each bucket (buckets are
@@ -215,12 +222,31 @@ rebuilds the affected partitions.
 
 ### Overnight
 
-`OCEA.MEMOIR` (Blue Ocean ATS) trades 20:00–04:00 ET. Its minute bars are
-added to `stock_minute` even when another vendor already wrote the daytime
-bars of that ticker. In the overnight window only an identical (ticker,
-minute) is skipped. Overnight trades never enter daily bars. Partitions stay
-on ET calendar dates; PMB assigns the overnight session to the next trading
-date.
+`OCEA.MEMOIR` (Blue Ocean ATS) trades 20:00–04:00 ET. Its market-by-order
+files give three things:
+
+- **Minute bars** in `stock_minute`, from the `T` records. They are added even
+  when another vendor already wrote the daytime bars of that ticker; in the
+  overnight window only an identical (ticker, minute) is skipped.
+- **Minute quotes** in `stock_quote_minute`: the book is replayed order by
+  order (`A` add, `M` modify, `C` cancel, `F` passive fill, `R` clear) and the
+  best bid and offer at the end of each minute in which the book changed is
+  written. It is Blue Ocean's own book, not an NBBO; overnight it is usually
+  the only lit venue.
+- **Session bars** in `stock_overnight_daily`: one bar per ticker and session
+  (O/H/L/C, volume, transactions, first and last bar minute). A session belongs
+  to the trading day it precedes: evening bars (20:00–24:00 ET) go to the next
+  trading day, morning bars (00:00–04:00 ET) to that day or, if it is not a
+  trading day, the next one. Sunday night and Monday morning are Monday's
+  session; around a market closure both halves move to the next open day.
+  UPQ serves them with `/stock/daily?session=overnight` (MCP:
+  `upq_stock_daily(trading_session="overnight")`), final at 04:00 ET of their
+  date.
+
+Overnight trades never enter `stock_daily`. Minute partitions stay on ET
+calendar dates (a session spans two of them), so time ranges and `as_of` work
+as for any other minute bar; PMB assigns the overnight session to the next
+trading date.
 
 ### Choosing a source and avoiding double counts
 

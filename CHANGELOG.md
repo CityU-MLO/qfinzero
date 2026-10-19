@@ -21,6 +21,12 @@ Added:
 - Benzinga monthly news archives (`YYYY-MM.jsonl.gz`) load into ESP with the
   teaser, image and full article text; `/esp/news/{id}/body` returns `body` and
   accepts the `news_…` event id of a search result. Titles are HTML-unescaped.
+- Blue Ocean overnight session: the `OCEA.MEMOIR` order book is replayed into
+  minute quotes (`stock_quote_minute`), and each 20:00-04:00 ET session becomes
+  one bar in the new `stock_overnight_daily` store, dated by the trading day it
+  precedes (trading calendar aware). UPQ `/stock/daily?session=overnight`, MCP
+  `upq_stock_daily(trading_session="overnight")`, and an overnight level in
+  the coverage map.
 - Settings → News storage: MongoDB connection and test, documents, disk and
   index size per collection, one collection per vendor (`news_benzinga`,
   `news_tushare`) copied out of the shared `ticker_news` (left unchanged), a
@@ -29,6 +35,10 @@ Added:
 
 Changed:
 
+- QFinZero stops at consolidated BBO: Databento `cmbp-1` and market-by-order
+  data outside Blue Ocean are indexed but no longer converted, and the
+  download form refuses them (they only duplicated consolidated trades and
+  quotes).
 - UPQ shares one DuckDB database through a connection pool; a full queue
   answers 503 instead of failing with 500 (`UPQ_POOL_SIZE`,
   `UPQ_DUCKDB_THREADS`, `UPQ_QUEUE_TIMEOUT_S`).

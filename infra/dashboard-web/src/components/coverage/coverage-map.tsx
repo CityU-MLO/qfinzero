@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 // ── types of /api/coverage/* ──────────────────────────────────────────────
 
-type LevelId = "daily" | "minute" | "quotes" | "options_eod" | "options_minute" | "options_quotes"
+type LevelId = "daily" | "overnight_daily" | "minute" | "quotes" | "options_eod" | "options_minute" | "options_quotes"
   | "futures_daily" | "futures_minute" | "futures_quotes"
   | "crypto_daily" | "crypto_minute" | "fx_daily" | "fx_minute" | "fx_quotes";
 type Kind = "stock" | "future" | "crypto" | "fx";
@@ -39,6 +39,7 @@ interface CellDetail {
 
 const LEVELS: { id: LevelId; en: string; zh: string; short: string }[] = [
   { id: "daily", en: "Daily bars", zh: "日线", short: "D" },
+  { id: "overnight_daily", en: "Overnight daily (Blue Ocean)", zh: "夜盘日线（Blue Ocean）", short: "N" },
   { id: "minute", en: "Minute bars", zh: "分钟线", short: "M" },
   { id: "quotes", en: "Stock quotes", zh: "股票报价", short: "Q" },
   { id: "options_eod", en: "Options EOD", zh: "期权日线", short: "OD" },
@@ -142,7 +143,7 @@ function TickerInput({ value, onChange }: { value: string[]; onChange: (v: strin
 
 // ── the map ───────────────────────────────────────────────────────────────
 
-const STOCK_LEVELS: LevelId[] = ["daily", "minute", "quotes"];
+const STOCK_LEVELS: LevelId[] = ["daily", "overnight_daily", "minute", "quotes"];
 const OPTION_LEVELS: LevelId[] = ["options_eod", "options_minute", "options_quotes"];
 const FUTURE_LEVELS: LevelId[] = ["futures_daily", "futures_minute", "futures_quotes"];
 const CRYPTO_LEVELS: LevelId[] = ["crypto_daily", "crypto_minute"];

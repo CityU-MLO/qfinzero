@@ -128,6 +128,7 @@ class UPQClient:
         indicators: str = None,
         as_of: str = None,
         adjust: str = None,
+        session: str = None,
     ) -> list[dict]:
         """Query stock daily bars with optional technical indicators.
 
@@ -139,6 +140,8 @@ class UPQClient:
             indicators: Comma-separated indicators, e.g. "ma_5,ema_12,macd"
                         Supported: ma_N (SMA), ema_N (EMA), macd (MACD 12/26/9).
             adjust: "none" (default, as traded), "split" or "total" (splits and dividends)
+            session: "regular" (default) or "overnight": one bar per Blue Ocean
+                20:00-04:00 ET session, dated by the trading day it precedes
 
         Returns:
             List of dicts with ticker, date, OHLCV fields, plus indicator columns when requested.
@@ -156,6 +159,8 @@ class UPQClient:
             params["as_of"] = as_of
         if adjust:
             params["adjust"] = adjust
+        if session:
+            params["session"] = session
         return self._get("/stock/daily", params)
 
     # ── Options ───────────────────────────────────────────────────

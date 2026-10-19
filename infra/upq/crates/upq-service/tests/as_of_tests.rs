@@ -107,6 +107,36 @@ async fn daily_bar_is_visible_after_the_close() -> TestResult {
 }
 
 #[tokio::test]
+async fn overnight_session_bar_is_final_at_four_am() -> TestResult {
+    let tmp = TempDir::new()?;
+    for (d, close) in [("2025-01-06", 100.0), ("2025-01-07", 101.0)] {
+        write(
+            &tmp.path().join(format!("stock_overnight_daily/trade_date={d}")),
+            &format!(
+                "SELECT 'AAPL' AS ticker, DATE '{d}' AS trade_date, {close} AS open, {close} AS high, \
+                 {close} AS low, {close} AS close, 10::BIGINT AS volume, 2::BIGINT AS transactions, \
+                 0::BIGINT AS first_window_start, 0::BIGINT AS last_window_start"
+            ),
+        )?;
+    }
+    let base = "/stock/daily?tickers=AAPL&start=2025-01-06&end=2025-01-07&session=overnight";
+    // 2025-01-07 03:59 ET (08:59 UTC): Tuesday's session is still trading
+    let (status, v) = get(tmp.path(), &format!("{base}&as_of=2025-01-07T08:59:00Z")).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rows(&v), 1);
+    // 04:00 ET: it is final
+    let (_, v) = get(tmp.path(), &format!("{base}&as_of=2025-01-07T09:00:00Z")).await?;
+    assert_eq!(rows(&v), 2);
+    assert_eq!(v[1]["close"], 101.0);
+    // the regular store is a different series
+    let (_, v) = get(tmp.path(), "/stock/daily?tickers=AAPL&start=2025-01-06&end=2025-01-07").await?;
+    assert_eq!(rows(&v), 0);
+    let (status, _) = get(tmp.path(), "/stock/daily?tickers=AAPL&start=2025-01-06&end=2025-01-07&session=weekend").await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+#[tokio::test]
 async fn end_of_day_chain_is_refused_before_it_is_final() -> TestResult {
     let tmp = TempDir::new()?;
     write(

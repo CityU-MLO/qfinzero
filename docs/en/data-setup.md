@@ -96,8 +96,8 @@ What import does:
 Both vendors can fill the minute quote stores that PMB fills orders against
 and that option-chain snapshots read their bid and ask from:
 
-- Databento: `cbbo-1m`, `cbbo-1s`, `bbo-*`, `cmbp-1` (stocks and OPRA), and
-  `mbp-1` / `mbp-10` from a futures venue.
+- Databento: `cbbo-1m`, `cbbo-1s`, `bbo-*` (stocks and OPRA), Blue Ocean
+  `mbo` (overnight stock quotes), and `mbp-1` / `mbp-10` from a futures venue.
 - massive: `us_options_opra/quotes_v1` and `us_stocks_sip/quotes_v1` flat
   files (tick by tick, very large), the REST quotes samples (`*.jsonl.gz`) and
   30-minute snapshot parquet files. Inspect shows how many files of each kind

@@ -107,7 +107,7 @@ class FakeDatabento:
 def test_databento_download_progress_budget_and_spend(env):
     from qfinzero.admin import config_store as cs, databento_dl, vendor_keys
     k = cs.save_key("databento", {"label": "fut", "products": ["GLBX.MDP3"], "api_key": "db-1", "monthly_budget_usd": 1.0})
-    params = {"dataset": "GLBX.MDP3", "schema": "mbo", "symbols": "ZN.v.0,CL.v.0", "stype_in": "continuous",
+    params = {"dataset": "GLBX.MDP3", "schema": "mbp-1", "symbols": "ZN.v.0,CL.v.0", "stype_in": "continuous",
               "start": "2026-09-01", "end": "2026-09-01", "max_cost": 10}
     lib = Path(cs.dirs()["raw_databento"])
     client = FakeDatabento(cost=1.5)

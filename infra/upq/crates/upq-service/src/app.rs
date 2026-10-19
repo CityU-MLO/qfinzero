@@ -225,6 +225,9 @@ struct StockQuery {
     adjust: Option<String>,
     /// Point-in-time cap (ISO datetime or ns); see `as_of.rs`.
     as_of: Option<String>,
+    /// `/stock/daily` only: `regular` (default) or `overnight` (Blue Ocean
+    /// 20:00-04:00 ET sessions, dated by the trading day they precede).
+    session: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,15 +380,18 @@ async fn stock_daily(
         return invalid_argument("tickers must not be empty");
     }
 
-    // A daily bar is final at 16:00 ET; cap the end date at the last final bar.
+    // Regular sessions: a daily bar is final at 16:00 ET. Overnight sessions
+    // (store `stock_overnight_daily`): final at 04:00 ET of the date they carry.
+    let (store, close) = match params.session.as_deref().unwrap_or("regular") {
+        "regular" => ("stock_daily", as_of::STOCK_CLOSE),
+        "overnight" => ("stock_overnight_daily", as_of::OVERNIGHT_CLOSE),
+        _ => return invalid_argument("session must be regular or overnight"),
+    };
     let cap = match request_cap(&state, params.as_of.as_deref()) {
         Ok(cap) => cap,
         Err(response) => return response,
     };
-    let end = clamp_date(
-        &params.end,
-        cap.and_then(|c| as_of::daily_cap_date(c, as_of::STOCK_CLOSE)),
-    );
+    let end = clamp_date(&params.end, cap.and_then(|c| as_of::daily_cap_date(c, close)));
     if end.as_str() < params.start.as_str() {
         return (StatusCode::OK, Json(json!([]))).into_response();
     }
@@ -420,7 +426,7 @@ async fn stock_daily(
         params.start.clone()
     };
 
-    let dataset_dir = state.storage_root.join("stock_daily");
+    let dataset_dir = state.storage_root.join(store);
     if !has_any_parquet_file(&dataset_dir) {
         return (StatusCode::OK, Json(json!([]))).into_response();
     }
@@ -745,6 +751,7 @@ fn build_freshness_response(storage_root: &Path) -> Result<Value, ServiceError> 
     let partitioned_datasets = [
         ("stock_minute", "tickers", true),
         ("stock_daily", "tickers", false),
+        ("stock_overnight_daily", "tickers", false),
         ("option_minute", "tickers", true),
         ("option_day", "tickers", true),
         ("future_minute", "tickers", true),
