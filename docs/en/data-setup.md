@@ -7,21 +7,60 @@ QFinZero. It does two things for each vendor:
 
 - **Local files**: pick folders or files that are already on the server with a
   file browser, and import them.
-- **Download**: save your key, describe what you want, look at the quote, and
-  download.
+- **Download**: describe what you want, look at the quote, and download with
+  one of your vendor keys, following its progress and cost.
 
 Both end with the same incremental conversion as `qfz-data convert`, so what
 you import appears in *Data availability*, in UPQ and in every MCP tool.
 
-## Where data goes
+## Where data goes: two layouts
 
-| path | role |
-|---|---|
-| `RAW_DATABENTO_DIR`, `RAW_MASSIVE_DIR` | the *raw library* of each vendor; downloads land here and imports are linked here |
-| `STORAGE_ROOT` (default `$QFZ_DATA_ROOT/upq`) | converted QFinZero storage that UPQ serves |
+QFinZero keeps data in two kinds of directory, and the **Directories** tab shows
+both with their free space and state:
 
-The strip at the top of the page shows the three paths and whether each vendor
-has a key.
+| layout | path (config key) | holds |
+|---|---|---|
+| RAW, massive | `raw_massive` (`RAW_MASSIVE_DIR`) | massive flat files as massive ships them: `<index>/YYYY/MM/YYYY-MM-DD.parquet` |
+| RAW, Databento | `raw_databento` (`RAW_DATABENTO_DIR`) | DBN files: `<dataset>/<schema>/<symbol>/<date>.dbn.zst`; `imports/` holds links to imported files |
+| RAW, Tushare | `raw_tushare` | Tushare dumps |
+| QFZ store | `storage_root` (`STORAGE_ROOT`, default `$QFZ_DATA_ROOT/upq`) | the converted, query-ready layout UPQ serves: `<store>/trade_date=YYYY-MM-DD/*.parquet`, plus `_state` and `_staging` |
+
+Downloads land in, and imports are linked into, the RAW libraries; the
+pipeline reads them in place and never writes into them. Only the converter
+writes the QFZ store.
+
+**Initialise** saves the paths in the data configuration
+(`$QFZ_DATA_ROOT/_state/qfz.config.json`, `dirs`), so every service and command
+sees the same ones after a restart, creates the standard sub-directories and
+writes a `.qfz-layout.json` marker into each root naming what it is. The
+markers catch mistakes before anything is written: a directory initialised as
+a RAW library cannot be chosen as the store, and two roles cannot share one
+directory. An existing directory that already holds files but has no marker
+(a shared data disk, say) is left alone unless you name it explicitly; the
+result lists it under *skipped*.
+
+## Vendor keys
+
+Databento and massive sell many products separately, so one person may hold
+several keys, each for some products, or one key for everything. The **Keys**
+tab keeps a list per vendor:
+
+- **products**: what the key may fetch, as patterns. Databento datasets
+  (`OPRA.PILLAR`, `GLBX.*`, `XNAS.ITCH`), massive indices (`us_options_opra`,
+  `us_stocks_sip`); `*` for all. A download uses the first key whose products
+  match its dataset or index, or the key you pick in the request.
+- **Test** checks a key against the vendor: the datasets Databento lets it
+  list, or, for massive, which flat-file indices it can read. *Scope the key
+  to these products* sets the key's products to what the test found.
+- **monthly budget** (Databento): the key's spending limit per calendar month,
+  in USD. A download whose quote exceeds what is left is refused.
+- Secrets are stored by the data service and shown masked. Saving a key with
+  the masked value (or blank) keeps the stored secret. A single key from an
+  older configuration appears as `default`.
+
+Every Databento download records what it cost in
+`$QFZ_DATA_ROOT/_state/databento_spend.jsonl`. The tab shows spend per month
+and key against the budgets, and the latest charges.
 
 ## Importing local files
 
@@ -84,8 +123,8 @@ and the broker trades them with exchange-style margin (see the PMB guide).
 ## Downloading
 
 1. Choose the vendor and the **Download** tab.
-2. Enter the credentials once; they are stored by the data service in
-   `$QFZ_DATA_ROOT/_state/qfz.config.json` and never shown again.
+2. Add a key on the **Keys** tab first (see above). The request picks the
+   matching key by default; choose another in *Key* if you hold several.
    - Databento: the API key from the Databento portal.
    - massive: the S3 access key ID and secret from the massive dashboard (flat
      files), and the endpoint (`https://files.massive.com`, the default
@@ -98,12 +137,46 @@ and the broker trades them with exchange-style margin (see the PMB guide).
 4. **Get quote** / **Plan** shows what would be fetched: the Databento cost and
    billable size (the quote is free), or the number of missing massive days and
    their size. Files already on disk are excluded.
-5. **Download and convert** starts a job. Databento refuses a request whose
-   quote exceeds the ceiling, which defaults to 0 so that only free data is
-   fetched without an explicit amount.
+5. **Download and convert** starts a job. A Databento request that costs
+   money needs the box *I accept a charge of up to $X to this Databento account*: ticking it sets the
+   ceiling to the quote. Without it the ceiling is 0 and only free data is
+   fetched. The key's monthly budget applies on top.
+
+The job shows a progress bar (files and bytes, rate, time left, the file being
+fetched), the stage (planned, downloading, converting) and, for Databento, the
+cost so far. **Stop** ends it after the current file; what was already written
+stays and a later download continues from there. Job history, including what
+each download cost, is kept in `$QFZ_DATA_ROOT/_state/jobs/` and survives a
+restart; a job that was running when the data service stopped shows as
+*interrupted*.
 
 Downloads use the same layout as the command line
 (`qfz-data acquire databento …`), so either can continue what the other started.
+
+## Store format and compression
+
+The converter writes the QFZ store as zstd parquet, level 3, 122,880-row
+groups. These can be changed in the data configuration (`format`:
+`compression`, `level`, `row_group_rows`), but the defaults were chosen by
+measurement on real partitions:
+
+- zstd level 9 makes files 3-6% smaller and reads them as fast, but writes
+  2-3x slower, so it is used only for partitions that no longer change.
+- Larger row groups (500k rows) shrink files a little more but make
+  single-ticker lookups 2-4x slower.
+- Parquet format version 2 made `stock_minute` 66% larger.
+
+**Compaction** rewrites partitions older than N days at zstd 9, checks each
+file's row count against the original and swaps it in. Run it from the
+**Directories** tab (*Estimate* shows the files and size first) or from the shell:
+
+```bash
+qfz-data compact --older-than 30 --dry-run
+qfz-data compact --older-than 30 --stores option_minute,option_quote_minute
+```
+
+Compacted files are remembered in `_state/compact.json` by size and modification
+time, so a re-run only touches new or reconverted partitions.
 
 ## Storage status
 

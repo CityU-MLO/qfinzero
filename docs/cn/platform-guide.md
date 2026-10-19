@@ -187,9 +187,41 @@ hub 对网站、`/svc/*` 和 `/mcp` 的每个请求做身份认证。
 | researcher | 另外可以交易、做研究、使用 MCP |
 | admin | 另外可以管理数据源、用户和 key |
 
-浏览器在 `/login` 登录，得到 HttpOnly 的 session cookie。agent 和脚本使用 API key（`Authorization: Bearer qfz_…` 或 `X-API-Key`），可以在账号页或用 `qfz-auth create-key` 创建。key 以其所有者的角色行事。
+浏览器在 `/login` 登录，得到 HttpOnly 的 session cookie。agent 和脚本使用 API key（`Authorization: Bearer qfz_…` 或 `X-API-Key`），可以在账号页或用 `qfz-auth create-key` 创建。key 以其所有者的角色行事，也可以更窄（见下文 *分发 API key*）。
 
 PMB 按创建者隔离账户和 session：其他人访问返回 404，admin 能看到全部。hub 会剥除客户端发来的身份 header，只把验证过的 `x-qfz-user` 和 `x-qfz-role` 转发给各服务。
+
+### 分发 API key
+
+key 的权限可以比所有者更窄。在账号页创建 key，或由管理员在 *用户* 页面发给他人时，可以设置：
+
+| 设置 | 作用 |
+|---|---|
+| scopes | key 能访问的服务；访问其他服务返回 `403` |
+| 只读 | 只能查询：不能下单、建 session、对话，也不能调用会改变状态的 MCP 工具 |
+| 到期 | 过了这个日期 key 失效（`401`） |
+| 速率限制 | 每分钟请求数；超过时返回 `429` 并带 `Retry-After` |
+| 备注 | 给谁用、在哪里运行 |
+
+| scope | 可访问 | 所有者最低角色 |
+|---|---|---|
+| `market-data` | UPQ（`/svc/upq`、`/api/upq`、`/api/coverage`） | viewer |
+| `events` | ESP（`/svc/esp`、`/api/esp`） | viewer |
+| `trading` | PMB（`/svc/pmb`、`/api/pmb`） | researcher |
+| `mcp` | `/mcp`；其中的工具取决于其他 scope（`upq_*`/`research_*` 需要 `market-data`，`esp_*` 需要 `events`，`pmb_*` 需要 `trading`） | researcher |
+| `chat` | 对话助手 | researcher |
+| `admin` | 数据管理、用户和 key | admin |
+
+key 的权限永远不超过所有者的角色：viewer 不能持有 `trading`，所有者被降级后，他名下所有 key 的权限也随之收窄。预设覆盖常见情况（*只读数据*：行情和事件，只读；*MCP agent*：MCP、数据、事件和交易；*完整权限*：所有者拥有的全部 scope，即 scope 出现之前创建的 key 的行为）。token 只显示一次，并附带环境变量、curl、Python 和 MCP 客户端配置的代码片段。
+
+key 列表显示最近 14 天每天的请求数（以及被拒绝的次数）、最近一次使用时间和发放人。scopes、只读、到期和速率限制之后都可以修改，不需要换 token；吊销在下一个请求时生效。
+
+```bash
+qfz-auth create-key bob --name class-feed --scopes market-data,events \
+    --read-only --expires-days 30 --rate 600
+```
+
+HTTP 接口：`GET /auth/scopes`、`POST /auth/keys`（自己的）、`POST /auth/users/{id}/keys`（管理员）、`PATCH /auth/keys/{id}`、`DELETE /auth/keys/{id}`，字段为 `scopes`（列表，`null` 表示全部）、`read_only`、`expires_in_days` 或 `expires_at`（`YYYY-MM-DD`）、`rate_per_min` 和 `note`。只有带 `admin` scope 的 key 才能管理 key。
 
 **首次启动。** 以下方式任选其一：
 

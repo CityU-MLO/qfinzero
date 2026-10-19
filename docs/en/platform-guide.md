@@ -237,11 +237,56 @@ The hub authenticates every request to the website, `/svc/*` and `/mcp`.
 Browsers sign in at `/login` and get an HttpOnly session cookie. Agents and
 scripts use API keys (`Authorization: Bearer qfz_…` or `X-API-Key`), created
 on the account page or with `qfz-auth create-key`. A key acts with its owner's
-role.
+role, or less (see *Handing out API keys* below).
 
 PMB scopes accounts and sessions to the user who created them. Others get 404,
 and admins see everything. The hub strips any identity headers a client sends
 and forwards the verified `x-qfz-user` and `x-qfz-role` to the services.
+
+### Handing out API keys
+
+A key can be narrower than its owner. When you create one (account page) or
+issue one to someone else (admins, *Users* page), choose:
+
+| setting | effect |
+|---|---|
+| scopes | the services the key reaches; requests elsewhere get `403` |
+| read-only | queries only: no orders, sessions, chat or state-changing MCP tools |
+| expiry | after this date the key stops working (`401`) |
+| rate limit | requests per minute; beyond it `429` with `Retry-After` |
+| note | who it is for, where it runs |
+
+| scope | reaches | least owner role |
+|---|---|---|
+| `market-data` | UPQ (`/svc/upq`, `/api/upq`, `/api/coverage`) | viewer |
+| `events` | ESP (`/svc/esp`, `/api/esp`) | viewer |
+| `trading` | PMB (`/svc/pmb`, `/api/pmb`) | researcher |
+| `mcp` | `/mcp`; its tools follow the other scopes (`upq_*`/`research_*` need `market-data`, `esp_*` need `events`, `pmb_*` need `trading`) | researcher |
+| `chat` | the chat assistant | researcher |
+| `admin` | data administration, users and keys | admin |
+
+A key never exceeds its owner's role: a viewer cannot hold `trading`, and
+demoting the owner narrows every key they have. Presets cover the usual cases
+(*Data reader*: market data and events, read-only; *MCP agent*: MCP, data,
+events and trading; *Full access*: every scope the owner has, the behaviour of
+keys made before scopes existed). The token is shown once, with snippets for
+the environment, curl, Python and an MCP client configuration.
+
+The key list shows requests per day for the last 14 days (and how many were
+refused), when the key was last used, and who issued it. Scopes, read-only,
+expiry and the rate limit can be changed later without a new token; revoking
+takes effect on the next request.
+
+```bash
+qfz-auth create-key bob --name class-feed --scopes market-data,events \
+    --read-only --expires-days 30 --rate 600
+```
+
+Over HTTP: `GET /auth/scopes`, `POST /auth/keys` (own),
+`POST /auth/users/{id}/keys` (admins), `PATCH /auth/keys/{id}`,
+`DELETE /auth/keys/{id}`, with the fields `scopes` (list, or `null` for all),
+`read_only`, `expires_in_days` or `expires_at` (`YYYY-MM-DD`), `rate_per_min`
+and `note`. A key can manage keys only with the `admin` scope.
 
 **First run.** Use one of:
 

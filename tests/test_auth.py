@@ -78,6 +78,8 @@ def test_policy():
     assert required_role("GET", "/") is None and required_role("GET", "/login") is None
     assert required_role("GET", "/_next/static/x.js") is None
     assert required_role("GET", "/svc/upq/stock") == "viewer"
+    assert required_role("POST", "/svc/esp/esp/events/query") == "viewer"     # a query, not a write
+    assert required_role("POST", "/svc/pmb/v1/orders") == "researcher"
     assert required_role("POST", "/svc/pmb/v1/orders") == "researcher"
     assert required_role("POST", "/mcp/") == "researcher"
     assert required_role("GET", "/svc/data-admin/data/config") == "admin"

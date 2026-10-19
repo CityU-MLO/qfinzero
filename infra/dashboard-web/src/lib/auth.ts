@@ -5,8 +5,16 @@
 export type Role = "viewer" | "researcher" | "admin";
 export type Me = { id: number; username: string; role: Role; display_name: string };
 export type AuthStatus = { mode: string; has_users: boolean; setup_required: boolean };
+export type KeyUsage = { day: string; requests: number; denied: number };
 export type ApiKey = { id: number; name: string; prefix: string; created_at: number;
-  last_used_at: number | null; revoked: boolean; username?: string };
+  last_used_at: number | null; revoked: boolean; username?: string; user_id?: number;
+  scopes: string[] | null; read_only: boolean; expires_at: number | null; expired: boolean;
+  rate_per_min: number | null; note: string; created_by: string | null;
+  usage?: KeyUsage[]; requests_total?: number };
+export type Scope = { id: string; paths: string[]; min_role: Role; description: string; available: boolean };
+/** What a key may do; ``scopes: null`` is every scope its owner's role allows. */
+export type KeySettings = { name?: string; scopes?: string[] | null; read_only?: boolean;
+  expires_in_days?: number | null; expires_at?: string | null; rate_per_min?: number | null; note?: string };
 export type UserRow = Me & { disabled: boolean; created_at: number; last_login_at: number | null };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -47,8 +55,13 @@ export const auth = {
   changePassword: (current_password: string, new_password: string) =>
     call("/auth/password", { method: "POST", body: JSON.stringify({ current_password, new_password }) }),
   keys: () => call<{ keys: ApiKey[] }>("/auth/keys"),
-  createKey: (name: string) =>
-    call<{ key: ApiKey; token: string }>("/auth/keys", { method: "POST", body: JSON.stringify({ name }) }),
+  createKey: (body: KeySettings) =>
+    call<{ key: ApiKey; token: string }>("/auth/keys", { method: "POST", body: JSON.stringify(body) }),
+  issueKey: (userId: number, body: KeySettings) =>
+    call<{ key: ApiKey; token: string }>(`/auth/users/${userId}/keys`, { method: "POST", body: JSON.stringify(body) }),
+  updateKey: (id: number, body: KeySettings) =>
+    call<{ key: ApiKey }>(`/auth/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  scopes: () => call<{ scopes: Scope[] }>("/auth/scopes"),
   revokeKey: (id: number) => call(`/auth/keys/${id}`, { method: "DELETE" }),
   users: () => call<{ users: UserRow[]; roles: Role[]; keys: ApiKey[] }>("/auth/users"),
   createUser: (body: { username: string; password: string; role: Role; display_name?: string }) =>
@@ -65,6 +78,8 @@ export function safeNext(next: string | null | undefined, fallback = "/chat"): s
   }
   return next;
 }
+
+export const ROLE_RANK: Record<Role, number> = { viewer: 0, researcher: 1, admin: 2 };
 
 export const ROLE_LABEL: Record<Role, string> = {
   viewer: "Viewer",

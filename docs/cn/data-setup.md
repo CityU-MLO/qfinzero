@@ -5,18 +5,35 @@
 *数据导入*（仅管理员，位于控制台顶栏）用于把 Databento 和 massive 的数据导入 QFinZero。每个供应商都支持两种方式：
 
 - **本地文件**：用文件浏览器选择服务器上已有的目录或文件并导入。
-- **下载**：保存密钥，填写下载内容，查看报价后下载。
+- **下载**：填写下载内容，查看报价，用你的某把供应商 key 下载，并查看进度和花费。
 
 两种方式最后都执行与 `qfz-data convert` 相同的增量转换，导入的数据会出现在 *数据可用性*、UPQ 以及所有 MCP 工具中。
 
-## 数据存放位置
+## 数据存放位置：两种目录结构
 
-| 路径 | 作用 |
-|---|---|
-| `RAW_DATABENTO_DIR`、`RAW_MASSIVE_DIR` | 各供应商的*原始库*；下载的文件存放在这里，导入的文件以链接方式加入这里 |
-| `STORAGE_ROOT`（默认 `$QFZ_DATA_ROOT/upq`） | 转换后的 QFinZero 存储，由 UPQ 提供服务 |
+QFinZero 把数据放在两类目录里，**目录** 标签页会列出这两类目录，以及各自的剩余空间和状态：
 
-页面顶部显示这三个路径以及各供应商是否已设置密钥。
+| 结构 | 路径（配置项） | 内容 |
+|---|---|---|
+| RAW，massive | `raw_massive`（`RAW_MASSIVE_DIR`） | massive 原样的 flat files：`<index>/YYYY/MM/YYYY-MM-DD.parquet` |
+| RAW，Databento | `raw_databento`（`RAW_DATABENTO_DIR`） | DBN 文件：`<dataset>/<schema>/<symbol>/<date>.dbn.zst`；`imports/` 存放导入文件的链接 |
+| RAW，Tushare | `raw_tushare` | Tushare 导出文件 |
+| QFZ 存储 | `storage_root`（`STORAGE_ROOT`，默认 `$QFZ_DATA_ROOT/upq`） | 转换后、供 UPQ 查询的结构：`<store>/trade_date=YYYY-MM-DD/*.parquet`，以及 `_state` 和 `_staging` |
+
+下载的数据落在 RAW 库里，导入的文件也链接到 RAW 库；流水线就地读取 RAW 库，从不往里写。只有转换器会写 QFZ 存储。
+
+**初始化** 会把路径保存到数据配置（`$QFZ_DATA_ROOT/_state/qfz.config.json` 的 `dirs`），重启后所有服务和命令都使用同一组路径；同时创建标准子目录，并在每个根目录写入 `.qfz-layout.json` 标记，注明它是什么。标记能在写入前发现错误：已初始化为 RAW 库的目录不能再被选为存储，两个角色也不能共用一个目录。已有文件但没有标记的目录（比如共享数据盘）不会被改动，除非你明确指定它；这类目录会列在结果的 *skipped* 中。
+
+## 供应商密钥
+
+Databento 和 massive 的很多产品是分开订阅的，所以一个人可能有好几把分别对应不同产品的 key，也可能只有一把全权限的 key。**密钥** 标签页为每个供应商维护一个列表：
+
+- **products**：这把 key 能获取什么，用模式表示。Databento 数据集（`OPRA.PILLAR`、`GLBX.*`、`XNAS.ITCH`），massive 指数（`us_options_opra`、`us_stocks_sip`）；`*` 表示全部。下载时使用第一把 products 与数据集或指数匹配的 key，或者你在请求中指定的 key。
+- **测试** 向供应商验证 key：Databento 允许它列出的数据集，或 massive 它能读取的 flat-file 指数。*将密钥范围设为这些产品* 会把 key 的 products 设为测试结果。
+- **月度预算**（Databento）：这把 key 每个自然月的花费上限（美元）。报价超过剩余额度的下载会被拒绝。
+- 密钥由数据服务保存，显示时打码。用打码值（或留空）保存时，保留已存的密钥。旧配置里的单个 key 显示为 `default`。
+
+每次 Databento 下载的花费都记录在 `$QFZ_DATA_ROOT/_state/databento_spend.jsonl`。该标签页按月份和 key 显示花费与预算的对比，以及最近的扣费记录。
 
 ## 导入本地文件
 
@@ -60,7 +77,7 @@ CME Globex（`GLBX.MDP3`）以及 ICE、Nodal 交易所的 Databento 文件会�
 ## 下载
 
 1. 选择供应商和 **下载** 标签。
-2. 填写一次凭证；凭证由数据服务保存在 `$QFZ_DATA_ROOT/_state/qfz.config.json`，之后不再显示。
+2. 先在 **密钥** 标签页添加 key（见上文）。请求默认使用匹配的 key；如果你有多把，可以在 *Key* 中另选。
    - Databento：Databento 门户中的 API 密钥。
    - massive：massive 控制台中 flat files 的 S3 Access Key ID 和 Secret，以及端点
      （`https://files.massive.com`；默认的 `https://files.polygon.io` 也可用）。
@@ -70,9 +87,28 @@ CME Globex（`GLBX.MDP3`）以及 ICE、Nodal 交易所的 Databento 文件会�
    - massive：聚合或报价数据集之一，以及日期。
 4. **报价** / **预览** 显示将要下载的内容：Databento 的费用和计费数据量（报价免费），或 massive 缺少的天数和数据量。
    磁盘上已有的文件不计入。
-5. **下载并转换** 会启动任务。报价超过上限的 Databento 请求会被拒绝；上限默认为 0，所以不填金额时只会下载免费数据。
+5. **下载并转换** 会启动任务。需要付费的 Databento 请求必须勾选 “我同意此次向 Databento 账户支付最多 $X”：勾选后上限设为报价金额。不勾选时上限为 0，只会下载免费数据。key 的月度预算另外生效。
+
+任务会显示进度条（文件数和字节数、速率、剩余时间、正在下载的文件）、阶段（已规划、下载中、转换中），Databento 还会显示目前的花费。**停止** 会在当前文件完成后结束任务；已写入的数据保留，之后的下载会从那里继续。任务历史（包括每次下载的花费）保存在 `$QFZ_DATA_ROOT/_state/jobs/`，重启后仍在；数据服务停止时仍在运行的任务会显示为 *已中断*。
 
 下载使用与命令行（`qfz-data acquire databento …`）相同的目录结构，两者可以接着对方的进度继续。
+
+## 存储格式与压缩
+
+转换器把 QFZ 存储写成 zstd parquet，压缩级别 3，每个 row group 122,880 行。这些参数可以在数据配置里修改（`format`：`compression`、`level`、`row_group_rows`），但默认值是在真实分区上测出来的：
+
+- zstd 9 级的文件小 3–6%，读取速度不变，但写入慢 2–3 倍，所以只用于不再变化的分区。
+- 更大的 row group（50 万行）文件略小，但单个代码的查询慢 2–4 倍。
+- Parquet 格式版本 2 让 `stock_minute` 变大了 66%。
+
+**压缩归档** 把 N 天以前的分区重写为 zstd 9 级，逐个文件核对行数与原文件一致后再替换。可以在 **目录** 标签页运行（*估算* 会先显示文件数和大小），也可以在命令行运行：
+
+```bash
+qfz-data compact --older-than 30 --dry-run
+qfz-data compact --older-than 30 --stores option_minute,option_quote_minute
+```
+
+已压缩的文件按大小和修改时间记录在 `_state/compact.json`，再次运行只处理新增或重新转换过的分区。
 
 ## 存储状态
 

@@ -8,7 +8,8 @@ import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMe } from "@/components/user-menu";
-import { auth, roleLabel, type Role } from "@/lib/auth";
+import { CreateKey, FreshToken, KeyTable } from "@/components/api-keys";
+import { auth, roleLabel, type ApiKey, type Role } from "@/lib/auth";
 import { useLocale, useT } from "@/components/locale-provider";
 
 const input =
@@ -24,6 +25,7 @@ export default function UsersPage() {
   const [form, setForm] = useState({ username: "", password: "", role: "researcher" as Role });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fresh, setFresh] = useState<{ key: ApiKey; token: string } | null>(null);
 
   if (me && me.role !== "admin") return <p className="text-sm text-muted-foreground">{t("Only admins can manage users.", "只有管理员可以管理用户。")}</p>;
 
@@ -125,28 +127,20 @@ export default function UsersPage() {
         </Card>
       </div>
       <Card>
-        <CardHeader><CardTitle>{t("All API keys", "全部 API 密钥")}</CardTitle><CardDescription>{t("Revoke a key from its owner's row on their account page, or here.", "可由所有者在其账户页面吊销密钥，也可在此吊销。")}</CardDescription></CardHeader>
-        <CardContent>
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
-                <tr><th className="px-3 py-2">{t("Owner", "所有者")}</th><th className="px-3 py-2">{t("Name", "名称")}</th><th className="px-3 py-2">{t("Key", "密钥")}</th><th className="px-3 py-2">{t("Last used", "最近使用")}</th><th className="px-3 py-2" /></tr>
-              </thead>
-              <tbody>
-                {(q.data?.keys ?? []).filter((k) => !k.revoked).map((k) => (
-                  <tr key={k.id} className="border-t">
-                    <td className="px-3 py-2">{k.username}</td>
-                    <td className="px-3 py-2 font-medium">{k.name}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{k.prefix}_…</td>
-                    <td className="px-3 py-2 text-xs text-muted-foreground">{k.last_used_at ? new Date(k.last_used_at * 1000).toLocaleString() : t("never", "从未")}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10" onClick={() => run(() => auth.revokeKey(k.id), t(`Revoked ${k.prefix}`, `已吊销 ${k.prefix}`))}>{t("Revoke", "吊销")}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <CardHeader>
+          <CardTitle>{t("API keys", "API 密钥")}</CardTitle>
+          <CardDescription>{t("Issue scoped keys to people and agents, see what each key is used for, and change or revoke it.", "给用户或 agent 发放限定权限的密钥，查看每个密钥的用量，并修改或吊销。")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {fresh && <FreshToken fresh={fresh} onDismiss={() => setFresh(null)} />}
+          <KeyTable keys={q.data?.keys ?? []} showOwner onChanged={refresh}
+                    roleOf={(k) => q.data?.users.find((u) => u.id === k.user_id)?.role ?? "viewer"} />
+          <details className="rounded-lg border p-4">
+            <summary className="cursor-pointer text-sm font-medium">{t("Issue a key", "发放密钥")}</summary>
+            <div className="mt-4">
+              {me && <CreateKey ownerRole={me.role} users={q.data?.users} onCreated={(r) => { setFresh(r); refresh(); }} />}
+            </div>
+          </details>
         </CardContent>
       </Card>
     </div>

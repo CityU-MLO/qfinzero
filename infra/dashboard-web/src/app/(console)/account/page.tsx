@@ -1,32 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Loader2, Trash2 } from "lucide-react";
+import { KeyRound } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMe } from "@/components/user-menu";
+import { CopyButton, CreateKey, FreshToken, KeyTable, useOrigin } from "@/components/api-keys";
 import { auth, roleLabel, type ApiKey } from "@/lib/auth";
 import { useLocale, useT } from "@/components/locale-provider";
 
 const input =
   "w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
-
-function when(ts: number | null, never: string) {
-  return ts ? new Date(ts * 1000).toLocaleString() : never;
-}
-
-function CopyButton({ text }: { text: string }) {
-  const t = useT();
-  const [done, setDone] = useState(false);
-  return (
-    <button type="button" className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs hover:bg-accent"
-            onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}>
-      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {done ? t("Copied", "已复制") : t("Copy", "复制")}
-    </button>
-  );
-}
 
 export default function AccountPage() {
   const { data: me } = useMe();
@@ -34,33 +20,16 @@ export default function AccountPage() {
   const { locale } = useLocale();
   const qc = useQueryClient();
   const keys = useQuery({ queryKey: ["auth", "keys"], queryFn: auth.keys, enabled: !!me });
-  const [keyName, setKeyName] = useState("");
   const [fresh, setFresh] = useState<{ key: ApiKey; token: string } | null>(null);
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [origin, setOrigin] = useState("https://your-host");
-  useEffect(() => setOrigin(window.location.origin), []);
+  const origin = useOrigin();
 
   if (!me) {
     return <p className="text-sm text-muted-foreground">{t("Accounts are managed by the QFinZero hub. Sign in through it to manage keys.", "账户由 QFinZero hub 管理。请通过 hub 登录以管理密钥。")}</p>;
   }
 
-  const createKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      setFresh(await auth.createKey(keyName || "agent"));
-      setKeyName("");
-      await qc.invalidateQueries({ queryKey: ["auth", "keys"] });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const revoke = async (id: number) => {
-    await auth.revokeKey(id);
-    await qc.invalidateQueries({ queryKey: ["auth", "keys"] });
-  };
+  const refresh = () => qc.invalidateQueries({ queryKey: ["auth", "keys"] });
   const changePw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pw.next !== pw.confirm) return setPwMsg({ ok: false, text: t("New passwords do not match", "两次输入的新密码不一致") });
@@ -74,8 +43,7 @@ export default function AccountPage() {
   };
 
   const mcp = JSON.stringify({ mcpServers: { qfinzero: { url: `${origin}/mcp/`,
-    headers: { Authorization: `Bearer ${fresh?.token ?? "qfz_…"}` } } } }, null, 2);
-  const live = (keys.data?.keys ?? []).filter((k) => !k.revoked);
+    headers: { Authorization: "Bearer qfz_…" } } } }, null, 2);
 
   return (
     <>
@@ -83,7 +51,7 @@ export default function AccountPage() {
       title={t("Account", "账户")}
       description={t("Your profile, password and API keys for agents and scripts.", "你的个人资料、密码，以及供 agent 和脚本使用的 API 密钥。")}
     />
-    <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
+    <div className="grid gap-5 xl:grid-cols-[1fr_2fr]">
       <div className="space-y-5">
         <Card>
           <CardHeader>
@@ -120,48 +88,17 @@ export default function AccountPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> {t("API keys", "API 密钥")}</CardTitle>
-            <CardDescription>{t("For agents, scripts and MCP clients. A key acts with your role; the token is shown once.", "供 agent、脚本和 MCP 客户端使用。密钥拥有与你相同的角色权限；令牌只显示一次。")}</CardDescription>
+            <CardDescription>{t("For agents, scripts and MCP clients. A key never exceeds your role and can be narrowed to some services, read-only, an expiry date and a rate limit. The token is shown once.", "供 agent、脚本和 MCP 客户端使用。密钥权限不超过你的角色，并可限定服务范围、只读、到期日和速率。令牌只显示一次。")}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <form onSubmit={createKey} className="flex gap-2">
-              <input className={input} placeholder={t("Key name, e.g. eval-runner", "密钥名称，例如 eval-runner")} value={keyName} onChange={(e) => setKeyName(e.target.value)} />
-              <button disabled={busy} className="flex h-9 flex-none items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-                {busy && <Loader2 className="h-4 w-4 animate-spin" />} {t("Create key", "创建密钥")}
-              </button>
-            </form>
-            {fresh && (
-              <div className="rounded-lg border border-success/30 bg-success/10 p-4">
-                <p className="text-sm font-semibold text-success">
-                  {t("New key", "新密钥")} “{fresh.key.name}”{t(": copy it now, it will not be shown again.", "：请立即复制，之后将不再显示。")}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <code className="flex-1 overflow-x-auto rounded-md bg-card px-2 py-1.5 font-mono text-xs">{fresh.token}</code>
-                  <CopyButton text={fresh.token} />
-                </div>
+          <CardContent className="space-y-5">
+            {fresh && <FreshToken fresh={fresh} onDismiss={() => setFresh(null)} />}
+            <KeyTable keys={keys.data?.keys ?? []} roleOf={() => me.role} onChanged={refresh} />
+            <details className="rounded-lg border p-4 open:pb-5">
+              <summary className="cursor-pointer text-sm font-medium">{t("Create a key", "创建密钥")}</summary>
+              <div className="mt-4">
+                <CreateKey ownerRole={me.role} onCreated={(r) => { setFresh(r); refresh(); }} />
               </div>
-            )}
-            <div className="overflow-hidden rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
-                  <tr><th className="px-3 py-2">{t("Name", "名称")}</th><th className="px-3 py-2">{t("Key", "密钥")}</th><th className="px-3 py-2">{t("Last used", "最近使用")}</th><th className="px-3 py-2" /></tr>
-                </thead>
-                <tbody>
-                  {live.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">{t("No keys yet.", "暂无密钥。")}</td></tr>}
-                  {live.map((k) => (
-                    <tr key={k.id} className="border-t">
-                      <td className="px-3 py-2 font-medium">{k.name}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{k.prefix}_…</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{when(k.last_used_at, t("never", "从未"))}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => revoke(k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10" title={t("Revoke", "吊销")}>
-                          <Trash2 className="h-3.5 w-3.5" /> {t("Revoke", "吊销")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            </details>
           </CardContent>
         </Card>
         <Card>

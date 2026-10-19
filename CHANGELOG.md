@@ -3,6 +3,31 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
+## Unreleased: data utility
+
+Added:
+
+- Two on-disk layouts made explicit: RAW libraries per vendor and the QFZ
+  store. *Data setup → Directories* (and `POST /setup/layout/init`) saves the
+  paths, creates the sub-directories and writes `.qfz-layout.json` markers;
+  existing unmarked data is never initialised unless chosen explicitly.
+- Several keys per vendor, each limited to products (Databento datasets,
+  massive indices), with a live test against the vendor, Databento monthly
+  budgets and a spend ledger (`_state/databento_spend.jsonl`).
+- Download progress (files, bytes, rate, time left, cost so far), a stop
+  button, an explicit charge confirmation for paid Databento requests, and a
+  job history that survives restarts.
+- Configurable store format and archive compaction at zstd 9
+  (`qfz-data compact`): 3-6% smaller at the same read speed.
+- API key distribution: scopes, read-only keys, expiry, per-key rate limits
+  and daily usage; admins issue keys to other users; MCP tool calls are
+  checked against the key's scopes; `qfz-auth create-key --scopes …`.
+
+Changed:
+
+- Viewers may send ESP and UPQ queries as `POST` (they are reads); before,
+  every viewer `POST` was refused.
+
 ## Unreleased: intraday platform
 
 Upgrade notes:
