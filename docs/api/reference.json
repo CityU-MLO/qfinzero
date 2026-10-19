@@ -1062,7 +1062,7 @@
    },
    "base": "/svc/esp",
    "scope": "events",
-   "version": "qfinzero:82692b2",
+   "version": "",
    "intro": "",
    "endpoints": [
     {
@@ -2036,7 +2036,7 @@
    },
    "base": "/svc/pmb",
    "scope": "trading",
-   "version": "qfinzero:82692b2",
+   "version": "",
    "intro": "",
    "endpoints": [
     {

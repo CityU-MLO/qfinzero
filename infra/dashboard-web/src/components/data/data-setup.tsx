@@ -594,7 +594,7 @@ export function DataSetup() {
             ready={(s.keys?.[vendor] ?? 0) > 0} onJob={(j) => setFocus(j.id)} />
         </div>
       )}
-      {tab === "status" && <StorageStatus />}
+      {tab === "status" && <StorageStatus onGoTo={pick} />}
       {(tab === "local" || tab === "download") && <JobsPanel focus={focus} onFocus={setFocus} />}
     </div>
   );

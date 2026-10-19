@@ -41,7 +41,24 @@ export type Source = {
   state: string;
   colour: "green" | "amber" | "red" | "grey";
   will_run?: boolean;
-  last_run?: { status?: string; last_run_ts?: string; rows?: number } | null;
+  behind_days?: number | null;
+  lag_days?: number | null;
+  last_run?: { status?: string; reason?: string; last_run_ts?: string; rows?: number; fetched_days?: number } | null;
+};
+
+/** What updating a source would do: fetch vendor days (massive), convert local days, or nothing. */
+export type RefreshItem = {
+  id: string;
+  raw_max: string | null;
+  store_max: string | null;
+  convert_days: number;
+  action: "fetch" | "convert" | "none" | "manual";
+  message: string;
+  fetch: null | {
+    vendor: "massive"; index: string; start: string; end: string;
+    files?: number; bytes?: number; first?: string | null; last?: string | null;
+    key?: { id: string; label: string }; error?: string;
+  };
 };
 
 export type JobProgress = {
@@ -137,7 +154,9 @@ export const dataAdmin = {
   putConfig: (patch: Partial<Config>) => j<Config>("data/config", { method: "PUT", body: JSON.stringify(patch) }),
   scan: (provider: string) => j<ScanResult>("data/scan", { method: "POST", body: JSON.stringify({ provider }) }),
   sources: () => j<{ sources: Source[] }>("data/status"),
-  startUpdate: (body: { source?: string; market?: string | null; dry_run?: boolean; force?: boolean }) =>
+  refreshPlan: (source: string) =>
+    j<{ items: RefreshItem[] }>("data/refresh/plan", { method: "POST", body: JSON.stringify({ source }) }),
+  startUpdate: (body: { source?: string; market?: string | null; dry_run?: boolean; force?: boolean; fetch?: boolean }) =>
     j<Job>("data/update", { method: "POST", body: JSON.stringify(body) }),
   startAcquire: (body: { target: string; dry_run?: boolean; prod?: boolean; params?: DatabentoAcquireParams }) =>
     j<Job>("data/acquire", { method: "POST", body: JSON.stringify(body) }),

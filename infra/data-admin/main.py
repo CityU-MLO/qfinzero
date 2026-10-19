@@ -84,17 +84,46 @@ def status(source: str = "all", market: str | None = None) -> dict:
 
 
 # ── jobs: update (convert) + acquire (download) ─────────────────────────────
+def _refresh_plan(source: str, market=None) -> list[dict]:
+    from qfinzero.admin import refresh
+    rows = {r["id"]: r for r in _orchestrator().status(source, market)["sources"]}
+    ids = [i for i, r in rows.items() if r.get("domain") == "price"]
+    return refresh.plan(ids, rows)
+
+
+@app.post("/data/refresh/plan")
+def refresh_plan(body: dict = Body(default={})) -> dict:
+    """What an update would do per source: vendor days to fetch (massive),
+    local days to convert, or why nothing happens. Lists remote files only."""
+    try:
+        return {"items": _refresh_plan(str((body or {}).get("source", "prices")), (body or {}).get("market"))}
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @app.post("/data/update")
 def start_update(body: dict = Body(default={})) -> dict:
     source = str((body or {}).get("source", "all"))
     market = (body or {}).get("market")
     dry_run = bool((body or {}).get("dry_run", False))
     force = bool((body or {}).get("force", False))
+    fetch = bool((body or {}).get("fetch", False))
     since = (body or {}).get("since")
-    label = f"update {source}" + (" (dry-run)" if dry_run else "")
+    label = f"update {source}" + (" + fetch" if fetch and not dry_run else "") + (" (dry-run)" if dry_run else "")
 
     def _task(job):
-        job.log(f"[update] source={source} market={market or 'all'} dry_run={dry_run} force={force}")
+        job.log(f"[update] source={source} market={market or 'all'} dry_run={dry_run} force={force} fetch={fetch}")
+        fetched = None
+        if fetch:
+            from qfinzero.admin import refresh
+            items = _refresh_plan(source, market)
+            for it in items:
+                job.log(f"  [plan] {it['id']}: {it['action']}" + (f" - {it['message']}" if it.get("message") else ""))
+            if not dry_run and any(it["action"] == "fetch" for it in items):
+                fetched = refresh.run(items, on_line=job.log, on_progress=job.update, should_stop=job.cancelled)
+            if dry_run:
+                job.log("[update] done (plan only)")
+                return {"ok": True, "dry_run": True, "refresh": items}
         res = _orchestrator().run(source, market=market, since=since, force=force, dry_run=dry_run)
         if res.get("dry_run"):
             for it in res.get("plan", []):
@@ -103,10 +132,27 @@ def start_update(body: dict = Body(default={})) -> dict:
             for r in res.get("results", []):
                 job.log(f"  {r['status']:8} {r['id']}: rows={r.get('rows',0)} partitions={r.get('partitions',0)}"
                         + (f" ERROR {r['error']}" if r.get("error") else ""))
+            converted = sum(r.get("rows", 0) for r in res.get("results", []))
+            if not converted and not (fetched and fetched.get("fetched")):
+                job.log("[update] already up to date: nothing new to fetch or convert")
+        if fetched is not None:
+            res["refresh"] = fetched
+            # the download already converted its days, so the run above found
+            # nothing left; record the fetch as this source's last run instead
+            from qfinzero.update.manifest import UpdateManifest
+            orch = _orchestrator()
+            manifest = UpdateManifest.load(orch.paths.storage)
+            for r in fetched.get("fetched", []):
+                manifest.record(r["id"], status="ok" if r["ok"] else "error", reason="fetched",
+                                fetched_days=r.get("files", 0), fetched_until=r.get("last"), error=r.get("error"))
+            manifest.save()
+            if not fetched["ok"]:
+                res["ok"] = False
+                res["error"] = fetched.get("error")
         job.log("[update] done")
         return res
 
-    return registry.submit("update", label, _task).snapshot()
+    return registry.submit("update", label, _task, meta={"source": source, "fetch": fetch}).snapshot()
 
 
 @app.post("/data/acquire")
