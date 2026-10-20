@@ -38,7 +38,7 @@ Databento 和 massive 的很多产品是分开订阅的，所以一个人可能�
 ## 扫描与索引（不转换）
 
 *数据导入* → *扫描与索引*（或 `qfz-data index [目录 ...]`）在数据原来的位置登记行情文件。每个文件按内容由 adapter 识别：
-massive 的 K 线、报价和全球 csv.gz，Databento 的 DBN 和 parquet 导出，以及附带 `qfz.dataset.yaml` 的自定义 parquet。
+massive 的 K 线、报价、逐笔成交和全球 csv.gz，Databento 的 DBN 和 parquet 导出，以及附带 `qfz.dataset.yaml` 的自定义 parquet。
 不转换格式，也不会往扫描的目录里写任何东西；索引放在 `$STORAGE_ROOT/_state/index/`：
 
 | 文件 | 内容 |
@@ -90,7 +90,7 @@ A 股代码写成 `SH600519`、`SZ000001`、`BJ430047`。要达到 `L2`，每个
 
 导入的具体行为：
 
-- massive 的日文件以链接方式加入 `RAW_MASSIVE_DIR/<dataset>/YYYY/MM/`；`.csv.gz` 文件会在这里转换为 zstd parquet。
+- massive 的日文件以链接方式加入 `RAW_MASSIVE_DIR/<dataset>/YYYY/MM/`；`.csv.gz` 文件（包括加密货币和外汇）会在这里转换为排好序、带 page index 的 zstd parquet。
   之后按导入的日期范围转换每个数据集。
 - Databento 的选择以链接方式加入 `RAW_DATABENTO_DIR/imports/`，然后对整个原始库执行 Databento 转换。
   因为每次导入都保留在原始库中，后续导入不会丢失之前导入的数据。文件是链接而不是复制，请保留原文件。

@@ -47,7 +47,10 @@ UPQ 引擎（`infra/upq`，Rust）并不知道某一行来自哪家供应商，�
 
 ## 加密货币与外汇（massive 全球 flat files）
 
-massive 的 `global_crypto` 和 `global_forex` flat files 转换成五个存储，直接从 `RAW_MASSIVE_DIR` 读取 massive 原样的 gzip CSV：
+massive 的 `global_crypto` 和 `global_forex` flat files 转换成五个存储。massive 提供的是 gzip CSV，下载器下载后会在同一目录转成
+parquet（`YYYY-MM-DD.parquet`：按代码再按时间排序，每个 row group 122,880 行，带 page index，查询快）。以前下载的文件用
+`qfz-data massive-parquet` 转换，每个文件都会和原 CSV 核对（行数和每一行的哈希）；加 `--delete-csv` 会在核对通过后删除对应的 CSV。
+只有 `.csv.gz` 的日期照样可以读。
 
 | 原始数据 | 存储 | 说明 |
 |---|---|---|

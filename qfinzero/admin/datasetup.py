@@ -6,7 +6,7 @@ Two ways in, one way through:
   allowed roots; :func:`inspect` describes a selection; :func:`import_local`
   links it into the vendor's *raw library* (the configured raw directory) and
   converts it. massive ``.csv.gz`` flat files are converted to parquet on the
-  way in; everything else is linked, never copied.
+  way in (sorted and page-indexed, see :func:`massive_dl.csv_to_parquet`); everything else is linked, never copied.
 * **Download.** Databento through :mod:`databento_dl` (cost-quoted, capped) and
   massive flat files through :mod:`massive_dl`; both write into the raw library.
 
@@ -321,26 +321,12 @@ def import_local(vendor: str, paths: list[str], *, on_line: Optional[OnLine] = N
     say(f"[import] {vendor}: {len(sel)} selection(s) -> raw library {lib}")
     plans: list[dict[str, Any]] = []
     if vendor == "massive":
-        from .massive_dl import INDICES, KEEP_CSV, csv_to_parquet
+        from .massive_dl import INDICES, csv_to_parquet
         groups, ignored = _massive_files(sel)
         if ignored:
             say(f"  {ignored} files are not massive day/minute aggregates and are skipped")
         for idx, files in sorted(groups.items()):
             asset, res = INDICES[idx]
-            if idx.startswith(KEEP_CSV):
-                # crypto and FX stay gzip CSV in the library (the converter reads them as is)
-                linked = kept = 0
-                for d, f in files:
-                    dst = lib / idx / d[:4] / d[5:7] / f.name
-                    if f.resolve().is_relative_to(lib_real) or not _link(f, dst):
-                        kept += 1
-                    else:
-                        linked += 1
-                dates = sorted(d for d, _ in files)
-                say(f"  {idx}: {len(files)} days {dates[0]}..{dates[-1]}  linked={linked} already={kept}")
-                plans.append({"vendor": "massive", "asset": asset, "resolution": res,
-                              "start": dates[0], "end": dates[-1]})
-                continue
             if res == "quotes":
                 written = 0
                 for d, f in files:

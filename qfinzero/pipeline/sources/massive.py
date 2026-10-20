@@ -3,8 +3,9 @@
 Raw layout (read in place):
   us_stocks_sip/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.parquet
   us_options_opra/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.parquet
-  global_crypto/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz   (X:BTC-USD)
-  global_forex/{day,minute}_aggs_v1, quotes_v1/...csv.gz           (C:EUR-USD)
+  global_crypto/{day,minute}_aggs_v1/YYYY/MM/YYYY-MM-DD.parquet   (X:BTC-USD)
+  global_forex/{day,minute}_aggs_v1, quotes_v1/...parquet          (C:EUR-USD)
+  (a day massive shipped as .csv.gz and not yet converted is read as is)
   economy/treasury_yields.jsonl
   corporate_actions/{splits,dividends}/<TICKER>.jsonl
 

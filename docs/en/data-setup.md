@@ -66,7 +66,7 @@ and key against the budgets, and the latest charges.
 
 *Data setup* → *Scan & index* (or `qfz-data index [DIR ...]`) catalogues market
 data where it already is. Each file is recognised from its contents by an
-adapter: massive aggregates, quotes and global csv.gz, Databento DBN and
+adapter: massive aggregates, quotes, trades and global csv.gz, Databento DBN and
 parquet exports, and your own parquet with a `qfz.dataset.yaml`.
 Nothing is converted and nothing is written into the scanned directories; the
 index is kept under `$STORAGE_ROOT/_state/index/`:
@@ -133,7 +133,8 @@ This step only builds the index; queries still read the converted stores.
 What import does:
 
 - massive day files are linked into `RAW_MASSIVE_DIR/<dataset>/YYYY/MM/`;
-  `.csv.gz` flat files are converted to zstd parquet there. Then each dataset
+  `.csv.gz` flat files (crypto and FX included) are converted to sorted,
+  page-indexed zstd parquet there. Then each dataset
   is converted for the date range that was imported.
 - Databento selections are linked under `RAW_DATABENTO_DIR/imports/`, and the
   Databento conversion runs over the whole library. Because every import stays

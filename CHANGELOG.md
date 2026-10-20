@@ -44,6 +44,12 @@ Added:
 
 Changed:
 
+- massive crypto and FX flat files are stored as parquet: downloads and local
+  imports convert them like the U.S. files, sorted by ticker and time with
+  122,880-row groups and a page index (index level L2). `qfz-data
+  massive-parquet` converts `.csv.gz` already in the library, verifying each
+  file against its CSV; `--delete-csv` then removes the CSV. The FX quote
+  parquet is smaller than massive's gzip CSV.
 - Databento downloads land in
   `<asset>/<dataset>/<schema>/<SYMBOL>/<YYYY-MM-DD>.dbn.zst` (asset `options`,
   `equity` or `futures` from the dataset; option and futures roots, stock codes
@@ -66,6 +72,10 @@ Changed:
   `UPQ_DUCKDB_THREADS`, `UPQ_QUEUE_TIMEOUT_S`).
 - Greeks use the latest yield curve on or before the date instead of none.
 - Day suggestions in the broker's date picker rank by traded value.
+
+Fixed:
+
+- `qfz-data scan <provider>` ran the index scan instead of the reachability check.
 
 ## Unreleased: data utility
 

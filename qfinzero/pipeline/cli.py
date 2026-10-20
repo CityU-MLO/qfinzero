@@ -295,7 +295,7 @@ def default_scan_roots() -> list[str]:
     return [r for r in dict.fromkeys(roots) if r and Path(r).is_dir()]
 
 
-def _do_scan(args) -> int:
+def _do_index(args) -> int:
     from ..index import catalog
     paths = resolve(args.massive, args.tushare, args.storage, args.databento)
     roots = args.dirs or default_scan_roots()
@@ -321,6 +321,19 @@ def _do_scan(args) -> int:
           + (f", e.g. {u['examples'][0]}" if u["examples"] else ""))
     print(f"{rep['files']:,} files ({rep['read']:,} read, {rep['reused']:,} unchanged) in {rep['elapsed_s']} s -> {rep['index']}")
     return 0
+
+
+def _do_massive_parquet(args) -> int:
+    from ..admin import massive_dl
+    root = resolve(args.massive, args.tushare, args.storage, args.databento).massive
+    rep = massive_dl.convert_library(Path(root), indices=args.indices or None, workers=args.workers,
+                                     delete_csv=args.delete_csv, on_line=None if args.json else print)
+    if args.json:
+        return _emit(rep, args)
+    print(f"\n{rep['files']:,} csv.gz: {rep['converted']:,} converted, {rep['verified']:,} already converted "
+          f"(verified), {rep['deleted']:,} csv.gz removed, {rep['failed']:,} failed"
+          + (f", {len(rep['unsorted']):,} too large to sort" if rep["unsorted"] else ""))
+    return 0 if rep["ok"] else 1
 
 
 def _do_acquire(args) -> int:
@@ -438,7 +451,16 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--no-symbols", action="store_true", help="skip per-file symbol lists (faster)")
     sc.add_argument("--threads", type=int, default=8)
     sc.add_argument("--json", action="store_true", help="emit the report as JSON")
-    sc.set_defaults(func=_do_scan)
+    sc.set_defaults(func=_do_index)
+
+    mp = sub.add_parser("massive-parquet",
+                        help="convert massive .csv.gz flat files in the raw library to sorted, page-indexed parquet")
+    mp.add_argument("indices", nargs="*", help="e.g. global_forex/quotes_v1 (default: the whole library)")
+    mp.add_argument("--workers", type=int, default=4)
+    mp.add_argument("--delete-csv", action="store_true",
+                    help="remove each .csv.gz once its parquet is verified (default: keep both)")
+    mp.add_argument("--json", action="store_true", help="emit the report as JSON")
+    mp.set_defaults(func=_do_massive_parquet)
 
     ac = sub.add_parser("acquire", help="trigger a raw-download script (dry-run by default)")
     ac.add_argument("target", nargs="?", help="news | databento")

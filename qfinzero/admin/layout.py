@@ -35,7 +35,7 @@ LAYOUT_VERSION = 1
 # vendor -> (config key, sub-directories created at init, what it holds)
 RAW = {
     "massive": ("raw_massive", ["us_stocks_sip", "us_options_opra", "global_crypto", "global_forex"],
-                "massive flat files: <index>/YYYY/MM/YYYY-MM-DD.parquet (global_*: .csv.gz)"),
+                "massive flat files: <index>/YYYY/MM/YYYY-MM-DD.parquet"),
     "databento": ("raw_databento", ["imports"],
                   "Databento DBN: <asset>/<dataset>/<schema>/<symbol>/<YYYY-MM-DD>.dbn.zst with asset in "
                   "equity|options|futures; _meta/ logs; imports/ holds links"),

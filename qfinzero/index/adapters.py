@@ -158,10 +158,13 @@ def massive_quotes(path: Path, symbols: bool = True) -> Optional[Described]:
     d = m.group(1) if m else None
     rgs, ordered, pidx = _row_groups(md, schema.get_field_index("ticker"))
     level, note = _level(rgs, ordered, pidx)
-    ts_col = "sip_timestamp" if "sip_timestamp" in schema.names else "window_start"
-    lo, hi = _ns_range(md, schema, ts_col)
-    return Described(adapter="massive.quotes", vendor="massive", kind="quote", asset_class=_massive_asset(path),
-                     market="us", schema="quotes_v1", resolution="tick", trade_date_min=d, trade_date_max=d,
+    ts_col = next((c for c in ("sip_timestamp", "participant_timestamp", "window_start") if c in schema.names), None)
+    lo, hi = _ns_range(md, schema, ts_col) if ts_col else (None, None)
+    asset = _massive_asset(path)
+    return Described(adapter="massive.quotes", vendor="massive", kind="quote", asset_class=asset,
+                     market="global" if asset in ("crypto", "fx") else "us",
+                     dataset=next((p for p in MASSIVE_ASSET if p in path.parts), None),
+                     schema="quotes_v1", resolution="tick", trade_date_min=d, trade_date_max=d,
                      ts_min=lo, ts_max=hi, rows=md.num_rows, access="seek", level=level, note=note,
                      row_groups=rgs, symbols_listed=False)
 
@@ -170,15 +173,18 @@ def massive_trades(path: Path, symbols: bool = True) -> Optional[Described]:
     if not path.name.endswith(".parquet") or "trades_v1" not in path.parts:
         return None
     _, md, schema = _pq_meta(path)
-    if not {"ticker", "price", "size", "sip_timestamp"} <= set(schema.names):
+    # US trades carry the SIP time; crypto trades only the exchange's (participant) time
+    ts_col = next((c for c in ("sip_timestamp", "participant_timestamp") if c in schema.names), None)
+    if ts_col is None or not {"ticker", "price", "size"} <= set(schema.names):
         return None
     m = DATE_RE.search(path.name)
     d = m.group(1) if m else None
     rgs, ordered, pidx = _row_groups(md, schema.get_field_index("ticker"))
     level, note = _level(rgs, ordered, pidx)
-    lo, hi = _ns_range(md, schema, "sip_timestamp")
-    return Described(adapter="massive.trades", vendor="massive", kind="trade", asset_class=_massive_asset(path),
-                     market="us", dataset=next((p for p in MASSIVE_ASSET if p in path.parts), None),
+    lo, hi = _ns_range(md, schema, ts_col)
+    asset = _massive_asset(path)
+    return Described(adapter="massive.trades", vendor="massive", kind="trade", asset_class=asset,
+                     market="global" if asset in ("crypto", "fx") else "us", dataset=next((p for p in MASSIVE_ASSET if p in path.parts), None),
                      schema="trades_v1", resolution="tick", trade_date_min=d, trade_date_max=d, ts_min=lo, ts_max=hi,
                      rows=md.num_rows, access="seek", level=level, note=note, row_groups=rgs, symbols_listed=False)
 
@@ -221,7 +227,8 @@ def massive_global(path: Path, symbols: bool = True) -> Optional[Described]:
                                   if p in path.parts), None),
                      resolution="tick" if (quotes or trades) else ("1m" if "minute_aggs_v1" in path.parts else "1d"),
                      trade_date_min=d, trade_date_max=d, access="whole", level="L0",
-                     note="gzip CSV: read whole (materialised)", symbols_listed=False)
+                     note="gzip CSV: read whole (materialised); `qfz-data massive-parquet` converts it",
+                     symbols_listed=False)
 
 
 # ── Databento ─────────────────────────────────────────────────────────────

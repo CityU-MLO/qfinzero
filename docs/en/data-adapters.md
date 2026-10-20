@@ -63,8 +63,13 @@ glob. Two consequences follow:
 ## Crypto and FX (massive global flat files)
 
 massive's `global_crypto` and `global_forex` flat files convert into five
-stores. They are read in place as massive ships them (gzip CSV) from
-`RAW_MASSIVE_DIR`:
+stores. massive ships them as gzip CSV; the downloader converts each file to
+parquet next to where it lands (`YYYY-MM-DD.parquet`: rows by ticker then
+time, row groups of 122,880 rows, a page index, so lookups are fast). For
+files downloaded before, `qfz-data massive-parquet` converts the `.csv.gz` in
+the library and checks every file against its CSV (row count and a hash of
+every row); add `--delete-csv` to remove each CSV once its parquet checks out.
+A day still kept only as `.csv.gz` is read as it is.
 
 | raw | store | notes |
 |---|---|---|

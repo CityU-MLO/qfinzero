@@ -27,7 +27,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from . import adapters
 
-VERSION = 2   # bump when an adapter changes: cached rows are then read again
+VERSION = 3   # bump when an adapter changes: cached rows are then read again
 SKIP_DIRS = {"_state", "_staging", ".git", "__pycache__", "node_modules"}
 CATALOG_COLUMNS = ["path", "root", "size", "mtime_ns", "head_hash", "adapter", "vendor", "kind", "asset_class",
                    "market", "dataset", "schema", "resolution", "trade_date_min", "trade_date_max", "ts_min",

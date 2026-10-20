@@ -1,4 +1,4 @@
-"""Crypto and FX: massive global flat files (gzip CSV) -> pair stores, coverage."""
+"""Crypto and FX: massive global flat files (gzip CSV, or the parquet converted from it) -> pair stores, coverage."""
 
 from __future__ import annotations
 
@@ -47,12 +47,16 @@ def _raw(massive: Path) -> None:
               f"C:EUR-USD,48,1.1800,48,1.1799,{ws - 1_000_000_000}"])
 
 
-@pytest.fixture
-def stores(tmp_path):
+@pytest.fixture(params=["csv", "parquet"])
+def stores(tmp_path, request):
     from qfinzero.pipeline.convert import Converter
     from qfinzero.pipeline.paths import resolve
     massive = tmp_path / "massive"
     _raw(massive)
+    if request.param == "parquet":
+        from qfinzero.admin import massive_dl
+        rep = massive_dl.convert_library(massive, delete_csv=True)
+        assert rep["ok"] and rep["converted"] == rep["deleted"] == 10 and not list(massive.rglob("*.csv.gz"))
     (tmp_path / "tushare").mkdir()
     paths = resolve(massive, tmp_path / "tushare", tmp_path / "upq")
     with Converter(paths) as cv:
@@ -121,7 +125,7 @@ def test_registry_and_coverage_see_the_pairs(stores):
     assert c["kind"] == "fx" and c["quote_span"]["first_ns"] == DAY0 and c["option_expiries"] == []
 
 
-def test_massive_downloads_keep_global_files_as_csv(tmp_path):
+def test_massive_downloads_convert_global_files_to_parquet(tmp_path):
     from datetime import date
     from qfinzero.admin import massive_dl
 
@@ -133,9 +137,74 @@ def test_massive_downloads_keep_global_files_as_csv(tmp_path):
             return P()
     (tmp_path / "global_forex/day_aggs_v1/2026/02").mkdir(parents=True)
     files = massive_dl.plan(S3(), "global_forex/day_aggs_v1", date(2026, 2, 1), date(2026, 2, 28), tmp_path)
-    assert files[0]["path"].endswith("2026-02-24.csv.gz") and not files[0]["exists"]
+    assert files[0]["path"].endswith("2026-02-24.parquet") and not files[0]["exists"]
+    # a day still kept as massive shipped it counts as present (convert_library converts it)
     (tmp_path / "global_forex/day_aggs_v1/2026/02/2026-02-24.csv.gz").write_bytes(b"x")
     assert massive_dl.plan(S3(), "global_forex/day_aggs_v1", date(2026, 2, 1), date(2026, 2, 28), tmp_path)[0]["exists"]
+
+
+def test_csv_to_parquet_sorts_types_and_indexes(tmp_path, monkeypatch):
+    import pyarrow.parquet as pq
+    from qfinzero.admin import massive_dl
+    from qfinzero.index import adapters
+    monkeypatch.setattr(massive_dl, "ROW_GROUP", 3)
+    src = tmp_path / "global_crypto/trades_v1/2026/02/2026-02-24.csv.gz"
+    rows = [f"X:{t}-USD,{c},1,{i},{DAY0 + n},0.5,{s}" for i, (t, n, c, s) in enumerate(
+        [("BTC", 1, 2, 0.25), ("BTC", 1, 1, 3), ("BTC", 5, "", 1.5), ("ETH", 2, 2, 7), ("SOL", 0, 1, 2), ("ZEC", 9, 1, 1)])]
+    _csv(src, "ticker,conditions,exchange,id,participant_timestamp,price,size", rows)
+    dst = src.with_name("2026-02-24.parquet")
+    assert massive_dl.csv_to_parquet(src, dst) == {"rows": 6, "sorted": True}
+    pf = pq.ParquetFile(dst)
+    assert [pf.metadata.row_group(i).num_rows for i in range(pf.metadata.num_row_groups)] == [3, 3]
+    assert pf.metadata.row_group(0).column(0).has_offset_index
+    sch = pf.schema_arrow
+    assert (str(sch.field("size").type), str(sch.field("id").type), str(sch.field("conditions").type)) == \
+        ("double", "string", "string")
+    assert massive_dl.verify_parquet(src, dst)["rows"] == 6
+    d = adapters.massive_trades(dst)
+    assert (d.kind, d.market, d.asset_class, d.level, d.ts_min, d.ts_max) == \
+        ("trade", "global", "crypto", "L2", DAY0, DAY0 + 9)
+
+    # out of order: sorted by ticker then time, ties keep their file order
+    _csv(src, "ticker,conditions,exchange,id,participant_timestamp,price,size",
+         [rows[3], rows[1], rows[0], rows[5], rows[4], rows[2]])
+    dst.unlink()
+    assert massive_dl.csv_to_parquet(src, dst) == {"rows": 6, "sorted": True}
+    got = pq.read_table(dst).to_pydict()
+    assert got["id"] == ["1", "0", "2", "3", "4", "5"] and got["ticker"][-1] == "X:ZEC-USD"
+    massive_dl.verify_parquet(src, dst)
+    # a larger file than may be sorted in memory is written as it comes
+    dst.unlink()
+    assert massive_dl.csv_to_parquet(src, dst, sort_limit=0) == {"rows": 6, "sorted": False}
+    assert adapters.massive_trades(dst).level == "L1"
+
+    # a quiet day: a header without a line break, no rows
+    empty = src.with_name("2026-02-25.csv.gz")
+    with gzip.open(empty, "wt") as f:
+        f.write("ticker,conditions,exchange,id,participant_timestamp,price,size")
+    assert massive_dl.csv_to_parquet(empty, empty.with_name("2026-02-25.parquet")) == {"rows": 0, "sorted": True}
+    assert pq.read_table(empty.with_name("2026-02-25.parquet")).schema == sch
+    assert massive_dl.verify_parquet(empty, empty.with_name("2026-02-25.parquet"))["rows"] == 0
+
+    # a parquet that lost a row fails verification
+    import pyarrow as pa
+    pq.write_table(pa.Table.from_pydict({k: v[:-1] for k, v in got.items()}), dst)
+    with pytest.raises(ValueError, match="differs"):
+        massive_dl.verify_parquet(src, dst)
+
+
+def test_converted_fx_quotes_are_indexed_as_global(tmp_path):
+    from qfinzero.admin import massive_dl
+    from qfinzero.index import adapters
+    _raw(tmp_path)
+    src = tmp_path / "global_forex/quotes_v1/2026/02/2026-02-24.csv.gz"
+    dst = src.with_name("2026-02-24.parquet")
+    massive_dl.csv_to_parquet(src, dst)
+    d = adapters.massive_quotes(dst)
+    assert (d.market, d.asset_class, d.dataset, d.level, d.ts_min) == \
+        ("global", "fx", "global_forex", "L2", DAY0 - 1_000_000_000)
+    a = adapters.massive_aggs(dst.parent.parent.parent.parent.parent / "minute_aggs_v1/2026/02/2026-02-24.csv.gz")
+    assert a is None                                    # gzip CSV stays with massive.global until converted
 
 
 def test_local_import_recognises_global_files(tmp_path):
