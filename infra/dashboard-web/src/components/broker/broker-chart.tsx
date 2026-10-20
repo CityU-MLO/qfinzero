@@ -8,7 +8,7 @@
 
 import * as React from "react";
 
-import { TradingChart, type Indicators, type PriceLineSpec, type TradeMark } from "@/components/charts/trading-chart";
+import { ChartCredit, TradingChart, type Indicators, type PriceLineSpec, type TradeMark } from "@/components/charts/trading-chart";
 import { useT } from "@/components/locale-provider";
 import { aggregate, mergeBars, type Bar, type Interval } from "@/lib/bars";
 import { addDays, loadBars } from "@/lib/qfzview";
@@ -108,6 +108,7 @@ export function BrokerChart({ symbol, isFuture, candles, startTs, trades, orders
         <span className="ml-auto text-[11px] text-muted-foreground">
           {t("History before the session start · scroll to zoom, drag to pan", "会话开始前的历史 · 滚轮缩放，拖动平移")}
         </span>
+        <ChartCredit />
       </div>
       <div className="min-h-0 flex-1">
         <TradingChart bars={bars} zone="et" indicators={ind} marks={marks} priceLines={lines} onNeedOlder={older}

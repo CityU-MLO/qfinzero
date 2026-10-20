@@ -18,7 +18,7 @@ import {
 
 import { useLocale, useT } from "@/components/locale-provider";
 import {
-  SESSION_LABEL, SESSION_SHADE, TradingChart, type Indicators, type Overlay,
+  ChartCredit, SESSION_LABEL, SESSION_SHADE, TradingChart, type Indicators, type Overlay,
 } from "@/components/charts/trading-chart";
 import {
   aggregate, filterSessions, INTERVALS, mergeBars, SESSIONS, type Bar, type Interval, type SessionFilter,
@@ -456,6 +456,7 @@ export function QFZView() {
               ))}
             </dl>
             <p className="mt-2 text-[11px] text-muted-foreground">{t("Ranges are per store; a symbol may cover less. Scroll left for older bars.", "范围按存储统计，单个代码可能更短。向左拖动加载更早的数据。")}</p>
+            <ChartCredit className="mt-2 block" />
           </div>
         </aside>
       </div>

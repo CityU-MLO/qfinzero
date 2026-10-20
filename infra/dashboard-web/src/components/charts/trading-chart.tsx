@@ -20,6 +20,17 @@ import {
 } from "@/lib/bars";
 import { cn } from "@/lib/utils";
 
+/** The library's licence asks for a visible credit; pages showing the chart carry this link
+ * instead of the logo on the chart itself. */
+export function ChartCredit({ className }: { className?: string }) {
+  return (
+    <a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener noreferrer"
+       className={cn("text-[10px] text-muted-foreground/70 hover:text-muted-foreground", className)}>
+      Charts by TradingView Lightweight Charts™
+    </a>
+  );
+}
+
 export interface Indicators { ma: number[]; ema: number[]; bb: boolean; vwap: boolean }
 export const DEFAULT_INDICATORS: Indicators = { ma: [20], ema: [], bb: false, vwap: false };
 
@@ -210,7 +221,7 @@ export function TradingChart({
     colors.current = c;
     const chart = createChart(host.current, {
       autoSize: true,
-      layout: { background: { color: c.bg }, textColor: c.text, fontSize: 11, attributionLogo: true },
+      layout: { background: { color: c.bg }, textColor: c.text, fontSize: 11, attributionLogo: false },
       grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
       rightPriceScale: { borderColor: c.border, scaleMargins: { top: 0.08, bottom: 0.25 } },
       // appended pages (scrolling right after a jump) must not drag the view along
