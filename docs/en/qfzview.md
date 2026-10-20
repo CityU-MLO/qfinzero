@@ -27,6 +27,12 @@ popular crypto and FX pairs. The watchlist on the right is kept in the browser.
 - Scroll to zoom, drag to pan; the legend shows the bar under the cursor.
   Reaching the first loaded bar loads the page before it, so history goes back
   as far as the store does.
+- **Go to date** opens the chart at a day (09:30 ET for US markets, 00:00 UTC
+  for crypto and FX); scrolling right from there loads the following pages,
+  and **Latest** returns to the newest data. The date is in the URL (`&d=`).
+- The moon button switches the view to a dark background (kept in the
+  browser); the expand button fills the window, and the browser's full screen
+  where it allows it (Esc leaves).
 - Indicators: MA20, MA50, EMA9, EMA21, Bollinger bands (20, 2), VWAP (restarts
   each trading day).
 - **Sessions** (US stocks, intraday intervals): the chart shades the overnight

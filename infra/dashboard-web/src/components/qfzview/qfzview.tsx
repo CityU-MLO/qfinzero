@@ -12,7 +12,9 @@
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CandlestickChart, Info, Layers, Loader2, Plus, Search, Star, X } from "lucide-react";
+import {
+  ArrowLeft, CalendarSearch, CandlestickChart, Info, Layers, Loader2, Maximize2, Minimize2, Moon, Plus, Search, Star, Sun, X,
+} from "lucide-react";
 
 import { useLocale, useT } from "@/components/locale-provider";
 import {
@@ -22,7 +24,8 @@ import {
   aggregate, filterSessions, INTERVALS, mergeBars, SESSIONS, type Bar, type Interval, type SessionFilter,
 } from "@/lib/bars";
 import {
-  addDays, extent as loadExtent, isoDay, kindOf, LEVELS, loadBars, loadQuotes, parseOption, suggest, zoneOf, type Kind,
+  addDays, DAILY_SPAN_DAYS, etToUtcIso, extent as loadExtent, isoDay, kindOf, LEVELS, loadBars, loadQuotes,
+  MINUTE_SPAN_DAYS, parseOption, suggest, zoneOf, type Kind,
 } from "@/lib/qfzview";
 import { OptionChainPanel } from "@/components/qfzview/option-chain-panel";
 import { cn } from "@/lib/utils";
@@ -94,7 +97,11 @@ function SymbolSearch({ onPick }: { onPick: (s: string) => void }) {
   );
 }
 
-interface Series { key: string; bars: Bar[]; start: string | null; done: boolean; error?: string }
+interface Series {
+  key: string; bars: Bar[]; start: string | null; done: boolean; error?: string;
+  /** last day loaded (inclusive); newer pages load from here up to the store's end */
+  end: string | null;
+}
 
 export function QFZView() {
   const t = useT();
@@ -110,6 +117,13 @@ export function QFZView() {
   const [showQuotes, setShowQuotes] = React.useState(false);
   const [sessFilter, setSessFilter] = useStored<SessionFilter>("qfzview.sessions", "all");
   const [chainOpen, setChainOpen] = React.useState(false);
+  const [dark, setDark] = useStored<boolean>("qfzview.dark", false);
+  const [full, setFull] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  // a date to look at ("d" in the URL); otherwise the latest data
+  const jumpDay = /^\d{4}-\d{2}-\d{2}$/.test(params.get("d") ?? "") ? params.get("d")! : null;
+  const [jumpInput, setJumpInput] = React.useState(jumpDay ?? "");
+  React.useEffect(() => setJumpInput(jumpDay ?? ""), [jumpDay]);
   const opt = kind === "option" ? parseOption(symbol) : null;
   const chainUnderlying = kind === "stock" ? symbol : opt?.underlying ?? null;
   const ext = useQuery({ queryKey: ["qfzview", "extent"], queryFn: loadExtent, staleTime: 5 * 60_000 });
@@ -125,14 +139,54 @@ export function QFZView() {
   const storeEnd = (daily ? stores[levels.daily ?? ""] : stores[levels.minute ?? ""])?.end ?? isoDay(new Date());
   // a contract stops trading at its expiry: start there when the store reaches further
   const optExpiry = kind === "option" ? parseOption(symbol)?.expiry : undefined;
-  const lastDay = optExpiry && optExpiry < storeEnd ? optExpiry : storeEnd;
+  const latestDay = optExpiry && optExpiry < storeEnd ? optExpiry : storeEnd;
+  const span = daily ? DAILY_SPAN_DAYS : MINUTE_SPAN_DAYS[interval] ?? 10;
+  // a jump loads a page reaching a little past the date, so there is context on both sides
+  const lastDay = jumpDay && jumpDay < latestDay
+    ? (addDays(jumpDay, Math.ceil(span / 3)) < latestDay ? addDays(jumpDay, Math.ceil(span / 3)) : latestDay)
+    : latestDay;
+  const focusNs = jumpDay
+    ? (daily ? Date.UTC(+jumpDay.slice(0, 4), +jumpDay.slice(5, 7) - 1, +jumpDay.slice(8, 10)) * 1e6
+      : zone === "et" ? Date.parse(etToUtcIso(jumpDay, "09:30")) * 1e6
+        : Date.UTC(+jumpDay.slice(0, 4), +jumpDay.slice(5, 7) - 1, +jumpDay.slice(8, 10)) * 1e6)
+    : null;
 
-  const set = React.useCallback((next: { s?: string; i?: number }) => {
+  const set = React.useCallback((next: { s?: string; i?: number; d?: string | null }) => {
     const p = new URLSearchParams(params.toString());
     if (next.s) p.set("s", next.s);
     if (next.i) p.set("i", String(next.i));
+    if (next.d !== undefined) {
+      if (next.d) p.set("d", next.d); else p.delete("d");
+    }
     router.replace(`/view?${p.toString()}`, { scroll: false });
   }, [params, router]);
+
+  // full screen: the view fills the window at once; the browser's own full screen is
+  // asked for too and, when granted, leaving it (Esc) leaves both
+  const native = React.useRef(false);
+  React.useEffect(() => {
+    const onChange = () => {
+      if (document.fullscreenElement === rootRef.current) native.current = true;
+      else if (native.current) { native.current = false; setFull(false); }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFull = React.useCallback(() => {
+    if (full) {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      setFull(false);
+      return;
+    }
+    setFull(true);
+    void rootRef.current?.requestFullscreen?.().catch(() => undefined);
+  }, [full]);
+  React.useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.fullscreenElement) setFull(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
 
   // fall back to an interval the symbol's kind has
   React.useEffect(() => {
@@ -140,24 +194,26 @@ export function QFZView() {
   }, [ext.data, offered, interval, set]);
 
   // raw bars (minute or daily) for the symbol, paged backwards
-  const key = `${symbol}|${daily ? "D" : "M"}|${interval}`;
-  const [series, setSeries] = React.useState<Series>({ key: "", bars: [], start: null, done: false });
+  const key = `${symbol}|${daily ? "D" : "M"}|${interval}|${jumpDay ?? ""}`;
+  const [series, setSeries] = React.useState<Series>({ key: "", bars: [], start: null, done: false, end: null });
   // one generation per symbol/interval: answers from an earlier one are dropped
   const gen = React.useRef(0);
   const loading = React.useRef(false);
   const empties = React.useRef(0);
 
-  const loadPage = React.useCallback(async (end: string, reset: boolean) => {
+  const loadPage = React.useCallback(async (end: string, reset: boolean, forward = false) => {
     if (loading.current) return;
     loading.current = true;
     const g = gen.current;
     try {
       const page = await loadBars(symbol, interval, end);
       if (gen.current !== g) return;
-      empties.current = page.bars.length ? 0 : empties.current + 1;
+      if (!forward) empties.current = page.bars.length ? 0 : empties.current + 1;
       setSeries((s) => ({
-        key, bars: reset ? page.bars : mergeBars(page.bars, s.bars), start: page.start,
-        done: empties.current >= (daily ? 2 : 6), error: undefined,
+        key, bars: reset ? page.bars : mergeBars(s.bars, page.bars),
+        start: forward && s.start ? s.start : page.start,
+        end: forward || reset || !s.end ? end : s.end,
+        done: forward ? s.done : empties.current >= (daily ? 2 : 6), error: undefined,
       }));
     } catch (e) {
       if (gen.current === g) setSeries((s) => ({ ...s, key, error: (e as Error).message, done: true }));
@@ -171,7 +227,7 @@ export function QFZView() {
     gen.current += 1;
     empties.current = 0;
     loading.current = false;
-    setSeries({ key, bars: [], start: null, done: false });
+    setSeries({ key, bars: [], start: null, done: false, end: null });
     void loadPage(lastDay, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ext.data, lastDay]);
@@ -180,6 +236,13 @@ export function QFZView() {
     if (series.key !== key || !series.start || series.done) return;
     void loadPage(addDays(series.start, -1), false);
   }, [series.key, series.start, series.done, key, loadPage]);
+
+  // after a jump back, scrolling right loads the following pages up to the latest data
+  const newer = React.useCallback(() => {
+    if (series.key !== key || !series.end || series.end >= latestDay || loading.current) return;
+    const next = addDays(series.end, span);
+    void loadPage(next < latestDay ? next : latestDay, false, true);
+  }, [series.key, series.end, key, latestDay, span, loadPage]);
 
   // keep paging through empty stretches (weekends, holidays) until something shows up
   React.useEffect(() => {
@@ -235,7 +298,10 @@ export function QFZView() {
   const intl = locale === "zh" ? "zh-CN" : "en-US";
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-12 z-10 flex flex-col bg-background">
+    <div ref={rootRef}
+         className={cn("flex flex-col overflow-hidden bg-background text-foreground",
+           full ? "fixed inset-0 z-50" : "h-[calc(100vh-7.5rem)] min-h-[520px] rounded-lg border",
+           dark && "qfz-dark")}>
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b bg-card px-3 py-2">
         <span className="mr-1 flex items-center gap-1.5 text-[13px] font-semibold"><CandlestickChart className="h-4 w-4 text-primary" />QFZView</span>
@@ -313,16 +379,38 @@ export function QFZView() {
             <Layers className="h-3.5 w-3.5" />{t("Option chain", "期权链")}
           </button>
         )}
+        <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); if (jumpInput) set({ d: jumpInput }); }}>
+          <CalendarSearch className="h-3.5 w-3.5 text-muted-foreground" />
+          <input type="date" value={jumpInput} onChange={(e) => setJumpInput(e.target.value)} max={latestDay}
+                 aria-label={t("Go to date", "跳转到日期")}
+                 className="h-7 rounded-md border bg-background px-1.5 font-mono text-[12px]" />
+          <button type="submit" disabled={!jumpInput} className="rounded-md border px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-accent disabled:opacity-40">
+            {t("Go", "跳转")}
+          </button>
+          {jumpDay && (
+            <button type="button" onClick={() => set({ d: null })} title={t("Back to the latest data", "回到最新数据")}
+                    className="rounded-md border px-2 py-0.5 text-[12px] text-primary hover:bg-primary/10">{t("Latest", "最新")}</button>
+          )}
+        </form>
         <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           {loading.current && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {shownBars.length > 0 && <span>{t(`${bars.length.toLocaleString()} bars · ${zone === "et" ? "ET" : "UTC"}`, `${bars.length.toLocaleString()} 根 · ${zone === "et" ? "美东时间" : "UTC"}`)}</span>}
+          <button onClick={() => setDark(!dark)} title={dark ? t("Light background", "浅色背景") : t("Dark background", "深色背景")}
+                  className="rounded-md border p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+            {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          </button>
+          <button onClick={toggleFull} title={full ? t("Exit full screen (Esc)", "退出全屏（Esc）") : t("Full screen", "全屏")}
+                  className="rounded-md border p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
+            {full ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </button>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
         {/* chart */}
         <div className="relative min-w-0 flex-1">
-          <TradingChart bars={bars} daily={daily} zone={zone} indicators={ind} overlays={overlays} onNeedOlder={older}
+          <TradingChart key={dark ? "dark" : "light"} bars={bars} daily={daily} zone={zone} indicators={ind} overlays={overlays}
+                        onNeedOlder={older} onNeedNewer={newer} focusNs={focusNs}
                         viewKey={key} sessions={sessionsOn ? { minutes: interval } : undefined}
                         empty={ext.isLoading || (!series.done && !series.error) ? <Loader2 className="h-5 w-5 animate-spin" />
                           : series.error ? <span className="text-destructive">{series.error}</span>

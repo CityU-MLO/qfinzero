@@ -43,6 +43,36 @@
   --chart-5: 0 68% 52%;
 }
 
+/* A dark palette for one subtree (QFZView's dark background): the same tokens,
+ * so components and the chart (which reads tokens from its own element) follow. */
+.qfz-dark {
+  color-scheme: dark;
+  --background: 222 24% 8%;
+  --foreground: 220 16% 90%;
+  --card: 222 22% 11%;
+  --card-foreground: 220 16% 90%;
+  --popover: 222 22% 12%;
+  --popover-foreground: 220 16% 90%;
+  --primary: 217 80% 62%;
+  --primary-foreground: 222 24% 8%;
+  --secondary: 222 16% 18%;
+  --secondary-foreground: 220 16% 88%;
+  --muted: 222 16% 16%;
+  --muted-foreground: 220 10% 62%;
+  --accent: 222 16% 19%;
+  --accent-foreground: 220 16% 92%;
+  --up: 152 52% 48%;
+  --down: 0 72% 60%;
+  --border: 222 14% 22%;
+  --input: 222 14% 26%;
+  --ring: 217 80% 62%;
+  --chart-1: 217 80% 62%;
+  --chart-2: 152 52% 50%;
+  --chart-3: 32 92% 58%;
+  --chart-4: 270 60% 70%;
+  --chart-5: 0 72% 64%;
+}
+
 * {
   @apply border-border;
 }

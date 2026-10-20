@@ -14,7 +14,9 @@ Added:
   (deepest to lightest) and filter to all sessions, the extended day or the
   regular session; the broker's chart shades them too. The option chain of a
   stock (or of an option's underlying) opens beside the chart at a chosen ET
-  minute, and clicking a contract charts it.
+  minute, and clicking a contract charts it. The view sits in the page width
+  like the other console pages, with a full-screen mode, a dark background and
+  "go to date" (scrolling right from a past date loads the following pages).
 - MCP: `data_extent`, `data_coverage` and `data_day` say what the store
   holds (by data level, as runs of trading days, stock minutes by session),
   `upq_option_expiries` lists an underlying's expiries on a day,

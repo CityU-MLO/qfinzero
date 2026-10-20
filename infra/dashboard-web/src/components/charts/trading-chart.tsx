@@ -27,23 +27,25 @@ export interface TradeMark { ns: number; side: "buy" | "sell"; text?: string }
 export interface PriceLineSpec { price: number; title: string; tone: "up" | "down" | "accent" | "muted"; dashed?: boolean }
 export interface Overlay { id: string; title: string; tone: "up" | "down" | "accent" | "muted"; points: { ns: number; value: number }[] }
 
-/** A CSS colour from a design token (canvas needs concrete colours). */
-function tokenColor(name: string, alpha = 1): string {
+/** A CSS colour from a design token (canvas needs concrete colours), resolved inside
+ * ``within`` so a subtree with its own palette (QFZView's dark background) is honoured. */
+function tokenColor(name: string, alpha = 1, within?: HTMLElement | null): string {
   if (typeof document === "undefined") return "#888";
   const el = document.createElement("span");
   el.style.color = `hsl(var(--${name}) / ${alpha})`;
-  document.body.appendChild(el);
+  (within ?? document.body).appendChild(el);
   const c = getComputedStyle(el).color;
   el.remove();
   return c || "#888";
 }
 
-function palette() {
+function palette(within?: HTMLElement | null) {
+  const c = (name: string, alpha = 1) => tokenColor(name, alpha, within);
   return {
-    up: tokenColor("up"), down: tokenColor("down"), upVol: tokenColor("up", 0.35), downVol: tokenColor("down", 0.35),
-    text: tokenColor("muted-foreground"), grid: tokenColor("border", 0.6), border: tokenColor("border"),
-    bg: tokenColor("card"), accent: tokenColor("primary"), muted: tokenColor("muted-foreground", 0.8),
-    lines: [tokenColor("chart-3"), tokenColor("chart-1"), tokenColor("chart-4"), tokenColor("chart-2"), tokenColor("chart-5")],
+    up: c("up"), down: c("down"), upVol: c("up", 0.35), downVol: c("down", 0.35),
+    text: c("muted-foreground"), grid: c("border", 0.6), border: c("border"),
+    bg: c("card"), accent: c("primary"), muted: c("muted-foreground", 0.8),
+    lines: [c("chart-3"), c("chart-1"), c("chart-4"), c("chart-2"), c("chart-5")],
   };
 }
 
@@ -128,6 +130,13 @@ class SessionBands implements ISeriesPrimitive<Time> {
   }
 }
 
+/** Index of the first bar at or after ``ns`` when the bars reach it, else ``null``. */
+function focusIndex(bars: Bar[], ns: number | null | undefined): number | null {
+  if (ns == null || !bars.length || ns < bars[0].ns || ns > bars[bars.length - 1].ns + 86_400e9) return null;
+  const i = bars.findIndex((b) => b.ns >= ns);
+  return i < 0 ? bars.length - 1 : i;
+}
+
 /** Price decimals from the typical price: FX needs 5, BTC needs 2. */
 function precisionFor(bars: Bar[]): number {
   const p = bars.length ? Math.abs(bars[bars.length - 1].close) : 100;
@@ -148,6 +157,10 @@ export interface TradingChartProps {
   overlays?: Overlay[];
   /** called when the view reaches the first loaded bar (load older data) */
   onNeedOlder?: () => void;
+  /** called when the view reaches the last loaded bar (load newer data, after a jump back) */
+  onNeedNewer?: () => void;
+  /** bring the bar at or after this time (ns) into view, once per value */
+  focusNs?: number | null;
   /** keep the latest bar in view as bars are appended (replays) */
   follow?: boolean;
   className?: string;
@@ -160,7 +173,7 @@ export interface TradingChartProps {
 
 export function TradingChart({
   bars, daily = false, zone = "et", indicators = DEFAULT_INDICATORS, marks = [], priceLines = [], overlays = [],
-  onNeedOlder, follow = false, className, empty, viewKey = "", sessions,
+  onNeedOlder, onNeedNewer, focusNs, follow = false, className, empty, viewKey = "", sessions,
 }: TradingChartProps) {
   const tr = useT();
   const host = React.useRef<HTMLDivElement>(null);
@@ -174,6 +187,14 @@ export function TradingChart({
   const colors = React.useRef<ReturnType<typeof palette> | null>(null);
   const older = React.useRef(onNeedOlder);
   older.current = onNeedOlder;
+  const newer = React.useRef(onNeedNewer);
+  newer.current = onNeedNewer;
+  const count = React.useRef(0);
+  count.current = bars.length;
+  const focused = React.useRef<number | null>(null);
+  // while a jump target is not shown yet, reaching the right edge must not page forward
+  const focusPending = React.useRef(false);
+  focusPending.current = focusNs != null && focused.current !== focusNs;
   const firstNs = React.useRef<number | null>(null);
   const lastKey = React.useRef<string | null>(null);
   const [legend, setLegend] = React.useState<Bar | null>(null);
@@ -185,14 +206,16 @@ export function TradingChart({
   // create once
   React.useEffect(() => {
     if (!host.current) return;
-    const c = palette();
+    const c = palette(host.current);
     colors.current = c;
     const chart = createChart(host.current, {
       autoSize: true,
       layout: { background: { color: c.bg }, textColor: c.text, fontSize: 11, attributionLogo: true },
       grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
       rightPriceScale: { borderColor: c.border, scaleMargins: { top: 0.08, bottom: 0.25 } },
-      timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      // appended pages (scrolling right after a jump) must not drag the view along
+      timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false, rightOffset: 4,
+                   shiftVisibleRangeOnNewBar: false },
       crosshair: { mode: 0 },
     });
     candles.current = chart.addSeries(CandlestickSeries, {
@@ -207,6 +230,7 @@ export function TradingChart({
 
     const onRange = (r: LogicalRange | null) => {
       if (r && r.from < 5 && older.current) older.current();
+      if (r && count.current && r.to > count.current - 5 && newer.current && focusPending.current !== true) newer.current();
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     return () => {
@@ -232,10 +256,10 @@ export function TradingChart({
     const fills: Partial<Record<Session, string>> = {};
     const labels: Partial<Record<Session, string>> = {};
     for (const [k, a] of Object.entries(SESSION_SHADE) as [Session, number][]) {
-      if (a > 0) fills[k] = tokenColor("foreground", a);
+      if (a > 0) fills[k] = tokenColor("foreground", a, host.current);
       if (k !== "regular") labels[k] = tr(...SESSION_LABEL[k]);
     }
-    bands.current.set(sessionRuns(bars, sessionMinutes), fills, labels, tokenColor("muted-foreground", 0.9));
+    bands.current.set(sessionRuns(bars, sessionMinutes), fills, labels, tokenColor("muted-foreground", 0.9, host.current));
   }, [bars, sessionMinutes, tr]);
 
   // legend follows the crosshair (or shows the last bar)
@@ -266,16 +290,35 @@ export function TradingChart({
       const shift = bars.length - before;
       chartRef.current?.timeScale().setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
     } else if (!sameView) {
-      chartRef.current?.timeScale().fitContent();
-      if (bars.length > 300) {
-        chartRef.current?.timeScale().setVisibleLogicalRange({ from: bars.length - 240, to: bars.length + 4 });
+      // a new view opens at the jump target when there is one, else on the latest bars
+      const fi = focusIndex(bars, focusNs);
+      if (fi != null) {
+        const width = daily ? 120 : 240;
+        focused.current = focusNs ?? null;
+        chartRef.current?.timeScale().setVisibleLogicalRange({ from: fi - Math.round(width * 0.15), to: fi + Math.round(width * 0.85) });
+      } else {
+        chartRef.current?.timeScale().fitContent();
+        if (bars.length > 300) {
+          chartRef.current?.timeScale().setVisibleLogicalRange({ from: bars.length - 240, to: bars.length + 4 });
+        }
       }
     } else if (follow && range && range.to >= before - 2) {
       chartRef.current?.timeScale().scrollToRealTime();
     }
     firstNs.current = first;
     if (bars.length) lastKey.current = viewKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, t, follow, viewKey]);
+
+  // a jump to a date: show the bars from there on (once per target, after the data arrives)
+  React.useEffect(() => {
+    if (focusNs == null || focused.current === focusNs || !chartRef.current) return;
+    const i = focusIndex(bars, focusNs);
+    if (i == null) return;
+    focused.current = focusNs;
+    const width = daily ? 120 : 240;
+    chartRef.current.timeScale().setVisibleLogicalRange({ from: i - Math.round(width * 0.15), to: i + Math.round(width * 0.85) });
+  }, [focusNs, bars, daily]);
 
   // indicators and overlays
   React.useEffect(() => {
