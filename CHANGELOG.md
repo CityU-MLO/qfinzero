@@ -90,6 +90,13 @@ Changed:
 
 Fixed:
 
+- The chat's simulation time only reached the system prompt, so the model could
+  ask the tools for later data and get it (a 2026-01-01 cutoff returned bars to
+  2026-02-24). The time is now a hard lock on the chat's MCP server
+  (`QFZ_TIME_LOCK_AS_OF`); MCP connections can set the same lock with the
+  `X-QFZ-As-Of` header. Under it the coverage tools end at the lock, tools that
+  describe today's store are refused, day-based PMB accounts stay on days
+  closed before it and sessions end by it.
 - `qfz-data scan <provider>` ran the index scan instead of the reachability check.
 
 ## Unreleased: data utility

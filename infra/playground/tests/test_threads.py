@@ -28,10 +28,12 @@ class FakeLLM:
 
 LLM = FakeLLM()
 SEEN: list[list] = []
+LOCKS: list = []
 
 
-async def fake_stream(llm, messages):
+async def fake_stream(llm, messages, as_of=None):
     SEEN.append(messages)
+    LOCKS.append(as_of)
     yield {"type": "step_start", "t": 1000}
     yield {"type": "llm_chunk", "content": "Let me check. "}
     yield {"type": "step_end", "t": 1100, "text": "Let me check. ",
@@ -48,7 +50,7 @@ async def fake_stream(llm, messages):
            "usage": {"input_tokens": 1000, "output_tokens": 12}}
 
 
-async def slow_stream(llm, messages):
+async def slow_stream(llm, messages, as_of=None):
     yield {"type": "step_start", "t": 1}
     yield {"type": "llm_chunk", "content": "Thinking about it"}
     await asyncio.sleep(30)
@@ -91,6 +93,7 @@ def test_chat_stores_steps_and_rebuilds_tool_context(app):
     (user, asst) = detail["messages"]
     assert asst["steps"][0]["tool_calls"][0]["output"] == [{"close": 500.0}]
 
+    assert LOCKS[-1] == "2026-08-20T14:00:00Z"        # the cutoff locks the tools, not just the prompt
     _chat(app, "And QQQ?", thread_id=tid)
     second = SEEN[-1]
     ai = [m for m in second if isinstance(m, AIMessage)]
@@ -166,3 +169,10 @@ async def test_auto_compaction_and_interrupt(tmp_path, monkeypatch):
     # the interrupted turn is in the next context, marked as such
     msgs = ctx.turn_messages(last, 1000)
     assert ctx.INTERRUPTED_NOTE in msgs[-1].content
+
+
+def test_mcp_server_is_started_with_the_thread_cutoff_as_its_time_lock(monkeypatch):
+    import mcp_tools
+    monkeypatch.setenv("QFZ_TIME_LOCK_AS_OF", "2030-01-01T00:00:00Z")      # never inherited
+    assert mcp_tools.get_mcp_server_params("2026-01-01T14:00:00Z").env["QFZ_TIME_LOCK_AS_OF"] == "2026-01-01T14:00:00Z"
+    assert "QFZ_TIME_LOCK_AS_OF" not in mcp_tools.get_mcp_server_params(None).env

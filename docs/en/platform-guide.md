@@ -41,11 +41,30 @@ With a bound session, `upq_*` tools pass `as_of`, ESP tools run with
 their date range. Set `QFZ_REQUIRE_SESSION=1` to refuse data queries that are
 not bound to any session.
 
+**A fixed time.** Without a session, the `X-QFZ-As-Of` header (an ISO time,
+UTC unless it carries an offset) or the `QFZ_TIME_LOCK_AS_OF` environment
+variable locks every data tool at that time; the chat sets it to the thread's
+simulation time. With both a session and a fixed time the earlier one wins.
+Under a fixed time:
+
+- `data_extent`, `data_coverage` end at the lock, `data_day` takes only days
+  that ended before it, and `upq_freshness` and `admin_data_catalog` (which
+  describe the store as it is today) are refused;
+- a day-based PMB account (`pmb_create_account`, `pmb_next_day`,
+  `pmb_quote`, `pmb_trade`, status and positions) may only stand on a day
+  whose 16:00 ET close lies before the lock, because it fills and values at
+  that close;
+- `pmb_create_session` ends the session at the last bar (or, for daily
+  sessions, the last day) closed by the lock, and stepping or loading a
+  session that ends later is refused.
+
 ```json
 { "mcpServers": { "qfinzero": {
     "url": "https://your-host/mcp/",
     "headers": { "Authorization": "Bearer qfz_…", "X-QFZ-Session": "sess_3f2a9c1e" } } } }
 ```
+
+or, for a fixed time, `"X-QFZ-As-Of": "2026-01-01T09:00:00-05:00"`.
 
 Intraday Greeks also stay point-in-time: they use the underlying's minute close
 at the same time, not the end-of-day close.

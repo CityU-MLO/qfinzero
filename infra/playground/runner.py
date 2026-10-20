@@ -167,7 +167,7 @@ async def _run(store: Store, run: Run, thread: dict, llm_cfg: LLMConfig, as_of: 
                                          auto_compact, run.publish)
         record["context_tokens"] = ctx.total_tokens(messages)
         run.publish({"type": "context", "tokens": record["context_tokens"], "budget": budget})
-        async for ev in stream_agent(llm, messages):
+        async for ev in stream_agent(llm, messages, as_of=as_of or None):
             out = _apply(record, ev, run_ids)
             if out is not None:
                 run.publish(out)

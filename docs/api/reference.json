@@ -4612,7 +4612,7 @@
   {
    "name": "upq_freshness",
    "group": "Market data",
-   "summary": "Check data freshness of the UPQ market data service.",
+   "summary": "Check data freshness of the UPQ market data service (not under a time lock).",
    "description": "",
    "params": [],
    "returns": "JSON with latest timestamps, record counts, and partition info per data source.",
@@ -5341,7 +5341,14 @@
      "name": "end",
      "type": "string",
      "required": true,
-     "description": "Last date \"YYYY-MM-DD\""
+     "description": "Last date \"YYYY-MM-DD\" (capped at the time lock)"
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
     }
    ],
    "returns": "JSON {ticker: {\"kind\": ..., \"levels\": {level: [[first, last], ...]}}} with levels as in data_extent (stock minute bars also by session: minute:overnight, minute:pre, minute:regular, minute:post).",
@@ -5369,7 +5376,14 @@
      "name": "date",
      "type": "string",
      "required": true,
-     "description": "\"YYYY-MM-DD\""
+     "description": "\"YYYY-MM-DD\" (under a time lock, a day that has fully passed)"
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
     }
    ],
    "returns": "",
@@ -5383,7 +5397,15 @@
    "group": "Data coverage",
    "summary": "Which data the store holds: first and last date (and number of days) of each level.",
    "description": "Levels: daily, minute, quotes, overnight_daily (Blue Ocean sessions) for US\n    stocks; options_eod, options_minute, options_quotes; futures_daily,\n    futures_minute, futures_quotes; crypto_daily, crypto_minute; fx_daily,\n    fx_minute, fx_quotes. Ranges are per store: a symbol may cover less (use\n    data_coverage for one symbol). Also lists frequently traded symbols.",
-   "params": [],
+   "params": [
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to (ranges end at the lock; the day counts and suggestions are left out then).",
+     "nullable": true
+    }
+   ],
    "returns": "JSON with stores {level: {start, end, days} | null} and suggested symbols.",
    "example": {}
   },
@@ -7268,7 +7290,7 @@
    "name": "admin_data_catalog",
    "group": "Data administration",
    "summary": "The raw-data index: every market-data dataset found in the raw libraries.",
-   "description": "One row per (vendor, dataset, schema): kind, asset class, resolution, file\n    count, size, first and last date, index levels (L0 read whole, L1 indexed,\n    L2 fast) and scope (in, or out for data QFinZero does not use such as MBO).\n    From the last scan (Data setup -> Scan & index, or `qfz-data index`).\n    Needs the admin scope.",
+   "description": "One row per (vendor, dataset, schema): kind, asset class, resolution, file\n    count, size, first and last date, index levels (L0 read whole, L1 indexed,\n    L2 fast) and scope (in, or out for data QFinZero does not use such as MBO).\n    From the last scan (Data setup -> Scan & index, or `qfz-data index`).\n    Needs the admin scope; not available under a time lock.",
    "params": [],
    "returns": "",
    "example": {}

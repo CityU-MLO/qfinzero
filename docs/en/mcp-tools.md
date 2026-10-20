@@ -70,7 +70,7 @@ Query dividend history for stocks/ETFs.
 
 ### upq_freshness
 
-Check data freshness of the UPQ market data service.
+Check data freshness of the UPQ market data service (not under a time lock).
 
 ### upq_future_daily
 
@@ -287,7 +287,8 @@ Which data levels each symbol has, as runs of consecutive trading days.
 |---|---|---|---|---|
 | `tickers` | list[str] | yes |  | Symbols in coverage form: stocks "SPY", futures "/CL", crypto "X:BTC-USD", FX "C:EUR-USD" (up to 50) |
 | `start` | str | yes |  | First date "YYYY-MM-DD" |
-| `end` | str | yes |  | Last date "YYYY-MM-DD" |
+| `end` | str | yes |  | Last date "YYYY-MM-DD" (capped at the time lock) |
+| `session_id` | str |  | `null` | Optional PMB session to time-lock this query to. |
 
 ### data_day
 
@@ -296,11 +297,16 @@ What the store has for one symbol on one day.
 | parameter | type | required | default | description |
 |---|---|---|---|---|
 | `ticker` | str | yes |  | Coverage-form symbol, e.g. "SPY", "/CL", "X:BTC-USD" |
-| `date` | str | yes |  | "YYYY-MM-DD" |
+| `date` | str | yes |  | "YYYY-MM-DD" (under a time lock, a day that has fully passed) |
+| `session_id` | str |  | `null` | Optional PMB session to time-lock this query to. |
 
 ### data_extent
 
 Which data the store holds: first and last date (and number of days) of each level.
+
+| parameter | type | required | default | description |
+|---|---|---|---|---|
+| `session_id` | str |  | `null` | Optional PMB session to time-lock this query to (ranges end at the lock; the day counts and suggestions are left out then). |
 
 ## Calendar
 

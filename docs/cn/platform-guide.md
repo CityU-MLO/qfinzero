@@ -32,11 +32,23 @@
 
 设置 `QFZ_REQUIRE_SESSION=1` 后，没有绑定任何 session 的数据查询一律拒绝。
 
+**固定时间。** 没有 session 时，`X-QFZ-As-Of` header（ISO 时间，不带时区偏移时按 UTC）或环境变量 `QFZ_TIME_LOCK_AS_OF`
+会把所有数据工具锁在这个时间；对话会把它设为该对话的模拟时间。同时有 session 和固定时间时，取较早的那个。固定时间下：
+
+- `data_extent`、`data_coverage` 截到锁定时间，`data_day` 只接受在它之前已经结束的日子，`upq_freshness` 和 `admin_data_catalog`
+  （反映存储当前的样子）直接拒绝；
+- 日级 PMB 账户（`pmb_create_account`、`pmb_next_day`、`pmb_quote`、`pmb_trade`、账户状态和持仓）只能停在 16:00 ET 收盘早于锁定时间的交易日，
+  因为它按当天收盘价成交和估值；
+- `pmb_create_session` 会把 session 的结束时间截到锁定时间之前最后一根已收盘的 bar（日级 session 截到最后一个已收盘的交易日），
+  结束时间更晚的 session 不能推进或加载数据。
+
 ```json
 { "mcpServers": { "qfinzero": {
     "url": "https://your-host/mcp/",
     "headers": { "Authorization": "Bearer qfz_…", "X-QFZ-Session": "sess_3f2a9c1e" } } } }
 ```
+
+固定时间则用 `"X-QFZ-As-Of": "2026-01-01T09:00:00-05:00"`。
 
 日内 Greeks 同样符合时间点：使用同一时刻标的的分钟收盘价，而不是当天收盘价。
 

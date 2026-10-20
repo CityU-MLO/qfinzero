@@ -1,9 +1,14 @@
-"""Time lock: bind data queries to a simulation session's clock.
+"""Time lock: bind data queries to a simulation session's clock or a fixed time.
 
 An agent trading inside a PMB session must not see data from after the bar it
 is deciding on. The time lock turns a session into an ``as_of`` timestamp that
 the UPQ service enforces on every query (see ``infra/upq/.../as_of.rs``) and
 that ESP queries use as ``now_utc`` and as the upper end of their windows.
+
+A *fixed* lock caps every query at a set time without a session: the
+``X-QFZ-As-Of`` header of the connection or the ``QFZ_TIME_LOCK_AS_OF``
+environment variable (the chat sets it to the thread's cutoff). With both a
+session and a fixed lock the earlier time wins.
 
 Where the session comes from, highest priority first:
 
@@ -29,6 +34,8 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 HEADER = "x-qfz-session"
+AS_OF_HEADER = "x-qfz-as-of"
+AS_OF_ENV = "QFZ_TIME_LOCK_AS_OF"
 
 
 class TimeLockError(ValueError):
@@ -53,6 +60,42 @@ def as_of_for_clock(clock: dict) -> Optional[str]:
     else:
         out = _parse_iso(cur).astimezone(timezone.utc) + timedelta(seconds=60)
     return out.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _iso_z(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def fixed_as_of(header_value: Optional[str] = None) -> Optional[str]:
+    """The fixed lock (ISO UTC ``...Z``) from the header, else ``QFZ_TIME_LOCK_AS_OF``; ``None`` without one.
+    A value that is not a date-time is refused rather than ignored."""
+    raw = (header_value or os.environ.get(AS_OF_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        return _iso_z(_parse_iso(raw))
+    except ValueError as e:
+        raise TimeLockError(f"time lock {raw!r} is not an ISO date-time") from e
+
+
+def earliest(*times: Optional[str]) -> Optional[str]:
+    """The earliest of the ISO times given (``None`` entries ignored)."""
+    vals = [t for t in times if t]
+    return min(vals, key=_parse_iso) if vals else None
+
+
+def last_closed_day(as_of: str) -> str:
+    """The latest ET date whose 16:00 ET close is at or before ``as_of`` (daily bars,
+    closing prices and the day's valuation are known from then on)."""
+    et = _parse_iso(as_of).astimezone(ET)
+    d = et.date() if et.time() >= time(16, 0) else et.date() - timedelta(days=1)
+    return d.isoformat()
+
+
+def day_complete(day: str, as_of: str) -> bool:
+    """Whether the whole ET day ``day`` (through after-hours) lies before ``as_of``."""
+    nxt = datetime.combine(datetime.fromisoformat(day).date() + timedelta(days=1), time(0, 0), tzinfo=ET)
+    return _parse_iso(as_of) >= nxt
 
 
 def bound_session(header_session: Optional[str], session_id: Optional[str]) -> Optional[str]:

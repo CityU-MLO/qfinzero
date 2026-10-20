@@ -66,7 +66,7 @@ def build_system_prompt(as_of_date: str) -> str:
         f"The current simulation time is {utc_str} UTC ({et_str}). "
         f"All tool datetime parameters use UTC. Convert user-mentioned times "
         f"(e.g. '10:00 AM') from ET to UTC before calling tools. "
-        f"Do not use data beyond this timestamp. "
+        f"Do not use data beyond this timestamp: the tools are locked to it and return nothing after it. "
         f"When calling tools that accept a 'now_utc' parameter, always pass '{utc_str}' "
         f"to ensure backtesting data boundaries are respected. "
         f"Use the available tools to answer questions about stocks, futures, options, news, "
@@ -108,8 +108,9 @@ def _tool_output(raw: Any) -> Any:
         return str(raw)[:4000]
 
 
-async def run_agent_stream(llm, messages: list[BaseMessage]) -> AsyncIterator[dict]:
-    """Run the ReAct agent over ``messages`` (system prompt first) and yield:
+async def run_agent_stream(llm, messages: list[BaseMessage], as_of: str | None = None) -> AsyncIterator[dict]:
+    """Run the ReAct agent over ``messages`` (system prompt first), with the MCP
+    tools time-locked at ``as_of`` (the thread's cutoff), and yield:
 
         {"type": "step_start", "t"}                     a model call begins
         {"type": "llm_chunk", "content"}
@@ -119,7 +120,7 @@ async def run_agent_stream(llm, messages: list[BaseMessage]) -> AsyncIterator[di
 
     Errors propagate to the caller.
     """
-    async with get_tools() as tools:
+    async with get_tools(as_of) as tools:
         agent = create_react_agent(llm, tools)
         pending: dict[str, list[str]] = {}       # tool name -> ids of the step's calls, FIFO
         async for event in agent.astream_events({"messages": messages}, version="v2"):

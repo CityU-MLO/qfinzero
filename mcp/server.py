@@ -82,7 +82,9 @@ mcp = FastMCP(
         "Before querying, data_extent / data_coverage say which dates and data "
         "levels the store has, upq_option_expiries lists an underlying's expiries, "
         "and market_calendar gives trading days and the ET session hours "
-        "(overnight 20:00-04:00 on Blue Ocean, pre-market, regular, after-hours)."
+        "(overnight 20:00-04:00 on Blue Ocean, pre-market, regular, after-hours). "
+        "A time lock (a PMB session's clock, or a fixed X-QFZ-As-Of time) caps every "
+        "data tool; data after it is not returned."
     ),
 )
 
@@ -99,12 +101,21 @@ mcp = FastMCP(
 # queries run "as of" that time, so an agent cannot read the future.
 # QFZ_REQUIRE_SESSION=1 refuses unbound data queries. See qfinzero/timelock.py.
 
-def _header_session(ctx: Optional[Context]) -> Optional[str]:
+def _header(ctx: Optional[Context], name: str) -> Optional[str]:
     try:
         request = ctx.request_context.request if ctx is not None else None
-        return request.headers.get(timelock.HEADER) if request is not None else None
+        return request.headers.get(name) if request is not None else None
     except Exception:  # noqa: BLE001 - stdio transport / no request context
         return None
+
+
+def _header_session(ctx: Optional[Context]) -> Optional[str]:
+    return _header(ctx, timelock.HEADER)
+
+
+def _fixed(ctx: Optional[Context]) -> Optional[str]:
+    """The fixed time lock (X-QFZ-As-Of header or QFZ_TIME_LOCK_AS_OF), if any."""
+    return timelock.fixed_as_of(_header(ctx, timelock.AS_OF_HEADER))
 
 
 _IDENTITY = ("x-qfz-user", "x-qfz-role", "x-qfz-user-id")
@@ -127,14 +138,70 @@ def _pmb(ctx: Optional[Context] = None) -> PMBClient:
 
 
 def _lock(ctx: Optional[Context], session_id: Optional[str]) -> Optional[str]:
-    """``as_of`` for this call, or None when unlocked (raises TimeLockError)."""
+    """``as_of`` for this call, or None when unlocked (raises TimeLockError):
+    the bound session's clock and the fixed lock, whichever is earlier."""
+    fixed = _fixed(ctx)
     session = timelock.bound_session(_header_session(ctx), session_id)
+    if fixed and not session:
+        return fixed
 
     def fetch(sid: str) -> dict:
         with _pmb(ctx) as client:
             return client.get_session_state(sid)["clock"]
 
-    return timelock.resolve(session, fetch)
+    return timelock.earliest(timelock.resolve(session, fetch), fixed)
+
+
+def _refuse_when_locked(ctx: Optional[Context], what: str) -> None:
+    """Some tools describe the store as it is today, which a time-locked agent must not see."""
+    if _lock(ctx, None):
+        raise timelock.TimeLockError(f"{what} is not available under a time lock (it shows data after the lock)")
+
+
+def _day_guard(ctx: Optional[Context], day: Optional[str], what: str) -> None:
+    """Under a fixed lock a day-based account may only stand on days that have closed before it
+    (its fills and valuations use that day's close)."""
+    fixed = _fixed(ctx)
+    if fixed and day:
+        last = timelock.last_closed_day(fixed)
+        if str(day)[:10] > last:
+            raise timelock.TimeLockError(
+                f"time lock {fixed}: {what} {str(day)[:10]} is after the last day closed by then ({last})")
+
+
+def _account_guard(ctx: Optional[Context], client: PMBClient, account_id: str) -> None:
+    if _fixed(ctx):
+        a = client.get_account(account_id) or {}
+        _day_guard(ctx, a.get("current_date") or (a.get("account") or {}).get("current_date"), "the account's trading day")
+
+
+def _session_cap(fixed: str, frequency: str) -> str:
+    """Latest session end a fixed lock allows: the last minute bar closing by then, or the last closed day."""
+    if frequency == "1d":
+        return timelock.last_closed_day(fixed)
+    from datetime import datetime as _dt, timedelta as _td
+    t = _dt.fromisoformat(fixed.replace("Z", "+00:00")) - _td(seconds=60)
+    return t.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _ts_after(ts: str, cap: str) -> bool:
+    """Whether session time ``ts`` (UTC; a date or a date-time) is after ``cap``."""
+    if len(cap) == 10:
+        return str(ts)[:10] > cap
+    return timelock.utc_iso(ts if "T" in str(ts) else f"{ts}T00:00:00") > cap
+
+
+def _session_guard(ctx: Optional[Context], client: PMBClient, session_id: str) -> None:
+    """Under a fixed lock, refuse to advance or load a session that runs past it."""
+    fixed = _fixed(ctx)
+    if not fixed:
+        return
+    clock = (client.get_session_state(session_id) or {}).get("clock") or {}
+    cap = _session_cap(fixed, str(clock.get("frequency") or "1m"))
+    if clock.get("end_ts") and _ts_after(clock["end_ts"], cap):
+        raise timelock.TimeLockError(
+            f"time lock {fixed}: session {session_id} ends at {clock['end_ts']}, after the lock; "
+            f"create a session that ends by {cap}")
 
 
 @mcp.tool()
@@ -145,12 +212,13 @@ def upq_health() -> str:
 
 
 @mcp.tool()
-def upq_freshness() -> str:
-    """Check data freshness of the UPQ market data service.
+def upq_freshness(ctx: Context = None) -> str:
+    """Check data freshness of the UPQ market data service (not under a time lock).
 
     Returns:
         JSON with latest timestamps, record counts, and partition info per data source.
     """
+    _refuse_when_locked(ctx, "upq_freshness")
     with UPQClient(UPQ_URL) as client:
         return json.dumps(client.freshness())
 
@@ -1296,6 +1364,7 @@ def pmb_create_account(
         JSON with: account_id (a unique 10-digit number), market, created_at, account.
         Save the account_id — you'll need it for all subsequent calls.
     """
+    _day_guard(ctx, start_date, "start_date")
     with _pmb(ctx) as client:
         return json.dumps(
             client.create_account(
@@ -1321,6 +1390,7 @@ def pmb_get_account(account_id: str,
                    margin_status, positions summary
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.get_account(account_id))
 
 
@@ -1338,6 +1408,7 @@ def pmb_get_positions(account_id: str,
         symbol, qty, avg_cost, market_value, unrealized_pnl, side
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.get_positions(account_id))
 
 
@@ -1398,6 +1469,7 @@ def pmb_get_status(account_id: str,
         trades_today. When status is FROZEN you must call pmb_next_day before trading.
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.get_status(account_id))
 
 
@@ -1448,6 +1520,7 @@ def pmb_trade(
         JSON with the executed fill (incl. price_source) and updated account status.
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.trade(account_id, symbol, side, qty, price, note=note))
 
 
@@ -1467,6 +1540,7 @@ def pmb_quote(account_id: str, symbols: str,
         JSON with as_of date, the price rule, prices per symbol, and any missing.
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.quote(account_id, symbols))
 
 
@@ -1497,6 +1571,7 @@ def pmb_end_day(account_id: str,
         JSON with the closed day record and the updated (frozen) account status.
     """
     with _pmb(ctx) as client:
+        _account_guard(ctx, client, account_id)
         return json.dumps(client.end_day(account_id))
 
 
@@ -1517,6 +1592,14 @@ def pmb_next_day(account_id: str, date: Optional[str] = None,
         JSON with the updated (active) account status on the new trading day.
     """
     with _pmb(ctx) as client:
+        if _fixed(ctx):
+            from datetime import date as _date, timedelta as _td
+            nxt = date
+            if not nxt:      # PMB moves to the next weekday
+                a = client.get_account(account_id) or {}
+                cur = _date.fromisoformat(str(a.get("current_date") or (a.get("account") or {}).get("current_date"))[:10])
+                nxt = (cur + _td(days=3 if cur.weekday() == 4 else 2 if cur.weekday() == 5 else 1)).isoformat()
+            _day_guard(ctx, nxt, "the next trading day")
         return json.dumps(client.next_day(account_id, date=date))
 
 
@@ -1553,6 +1636,13 @@ def pmb_create_session(
         JSON with: session_id, account_id, clock (frequency, current_ts, end_ts, status)
         Save the session_id — you'll need it to step and place orders.
     """
+    fixed = _fixed(ctx)
+    if fixed:        # the session may not run past the lock
+        cap = _session_cap(fixed, frequency)
+        if _ts_after(start_ts, cap):
+            raise timelock.TimeLockError(f"time lock {fixed}: start_ts {start_ts} is after the last bar closed by then ({cap})")
+        if _ts_after(end_ts, cap):
+            end_ts = cap
     universe: dict = {}
     if stock_universe:
         universe["stocks"] = stock_universe
@@ -1602,6 +1692,7 @@ def pmb_step_session(
             RISK_EVENT       — margin calls or risk alerts
     """
     with _pmb(ctx) as client:
+        _session_guard(ctx, client, session_id)
         result = client.step(session_id=session_id, n=n)
         return json.dumps(result._raw)
 
@@ -1632,6 +1723,7 @@ def pmb_step_until(
         order/trade/risk events seen, last_tick (latest bars) and account.
     """
     with _pmb(ctx) as client:
+        _session_guard(ctx, client, session_id)
         return json.dumps(client.step_until(
             session_id, until_ts=until_ts, max_steps=max_steps, stop_on_fill=stop_on_fill,
             price_triggers=price_triggers, stop_on_segment=stop_on_segment))
@@ -1712,6 +1804,7 @@ def pmb_add_stocks(session_id: str, symbols: List[str],
         JSON with {ok, loaded, skipped}.
     """
     with _pmb(ctx) as client:
+        _session_guard(ctx, client, session_id)
         return json.dumps(client.add_stocks(session_id, symbols))
 
 
@@ -1732,6 +1825,7 @@ def pmb_add_contracts(session_id: str, contracts: List[str],
         JSON with {ok, loaded, skipped}.
     """
     with _pmb(ctx) as client:
+        _session_guard(ctx, client, session_id)
         return json.dumps(client.add_contracts(session_id, contracts))
 
 
@@ -2082,7 +2176,7 @@ def _spans(days: list[str]) -> list[list[str]]:
 
 
 @mcp.tool()
-def data_extent() -> str:
+def data_extent(session_id: Optional[str] = None, ctx: Context = None) -> str:
     """Which data the store holds: first and last date (and number of days) of each level.
 
     Levels: daily, minute, quotes, overnight_daily (Blue Ocean sessions) for US
@@ -2091,10 +2185,24 @@ def data_extent() -> str:
     fx_minute, fx_quotes. Ranges are per store: a symbol may cover less (use
     data_coverage for one symbol). Also lists frequently traded symbols.
 
+    Args:
+        session_id: Optional PMB session to time-lock this query to (ranges end at
+            the lock; the day counts and suggestions are left out then).
+
     Returns:
         JSON with stores {level: {start, end, days} | null} and suggested symbols.
     """
+    as_of = _lock(ctx, session_id)
     d = _data_admin("/coverage/extent")
+    if as_of:
+        cap = timelock.clamp_date(None, as_of)
+        stores = {}
+        for k, v in (d.get("stores") or {}).items():
+            if not v or v.get("start", "") > cap:
+                stores[k] = None
+            else:
+                stores[k] = {"start": v["start"], "end": min(v.get("end") or cap, cap), "days": None}
+        return json.dumps({"stores": stores, "time_lock": as_of})
     return json.dumps({"stores": d.get("stores"), "default_range": d.get("default"),
                        "suggested": [x.get("ticker") for x in d.get("suggested") or []],
                        "suggested_futures": d.get("suggested_futures"), "suggested_crypto": d.get("suggested_crypto"),
@@ -2102,7 +2210,8 @@ def data_extent() -> str:
 
 
 @mcp.tool()
-def data_coverage(tickers: list[str], start: str, end: str) -> str:
+def data_coverage(tickers: list[str], start: str, end: str, session_id: Optional[str] = None,
+                  ctx: Context = None) -> str:
     """Which data levels each symbol has, as runs of consecutive trading days.
 
     Use it before a query or a session to pick dates that have data: e.g. the
@@ -2112,13 +2221,17 @@ def data_coverage(tickers: list[str], start: str, end: str) -> str:
         tickers: Symbols in coverage form: stocks "SPY", futures "/CL",
                  crypto "X:BTC-USD", FX "C:EUR-USD" (up to 50)
         start: First date "YYYY-MM-DD"
-        end: Last date "YYYY-MM-DD"
+        end: Last date "YYYY-MM-DD" (capped at the time lock)
+        session_id: Optional PMB session to time-lock this query to.
 
     Returns:
         JSON {ticker: {"kind": ..., "levels": {level: [[first, last], ...]}}}
         with levels as in data_extent (stock minute bars also by session:
         minute:overnight, minute:pre, minute:regular, minute:post).
     """
+    end = timelock.clamp_date(end, _lock(ctx, session_id)) or end
+    if end < start:
+        return json.dumps({t: {"kind": None, "levels": {}} for t in tickers})
     m = _data_admin("/coverage/matrix", {"tickers": ",".join(tickers), "start": start, "end": end,
                                          "events": "false"})
     out: dict = {}
@@ -2137,7 +2250,7 @@ def data_coverage(tickers: list[str], start: str, end: str) -> str:
 
 
 @mcp.tool()
-def data_day(ticker: str, date: str) -> str:
+def data_day(ticker: str, date: str, session_id: Optional[str] = None, ctx: Context = None) -> str:
     """What the store has for one symbol on one day.
 
     Rows per level and session, the first and last quote, the option expiries
@@ -2145,8 +2258,12 @@ def data_day(ticker: str, date: str) -> str:
 
     Args:
         ticker: Coverage-form symbol, e.g. "SPY", "/CL", "X:BTC-USD"
-        date: "YYYY-MM-DD"
+        date: "YYYY-MM-DD" (under a time lock, a day that has fully passed)
+        session_id: Optional PMB session to time-lock this query to.
     """
+    as_of = _lock(ctx, session_id)
+    if as_of and not timelock.day_complete(date, as_of):
+        raise timelock.TimeLockError(f"time lock {as_of}: {date} has not ended by then")
     return json.dumps(_data_admin("/coverage/cell", {"ticker": ticker, "date": date}))
 
 
@@ -2239,15 +2356,16 @@ def market_calendar(start: str, end: str) -> str:
 
 
 @mcp.tool()
-def admin_data_catalog() -> str:
+def admin_data_catalog(ctx: Context = None) -> str:
     """The raw-data index: every market-data dataset found in the raw libraries.
 
     One row per (vendor, dataset, schema): kind, asset class, resolution, file
     count, size, first and last date, index levels (L0 read whole, L1 indexed,
     L2 fast) and scope (in, or out for data QFinZero does not use such as MBO).
     From the last scan (Data setup -> Scan & index, or `qfz-data index`).
-    Needs the admin scope.
+    Needs the admin scope; not available under a time lock.
     """
+    _refuse_when_locked(ctx, "admin_data_catalog")
     rep = (_data_admin("/setup/index") or {}).get("report") or {}
     groups = [{k: g.get(k) for k in ("vendor", "dataset", "schema", "kind", "asset_class", "resolution", "files",
                                      "bytes", "first", "last", "levels", "scope")} for g in rep.get("groups") or []]
