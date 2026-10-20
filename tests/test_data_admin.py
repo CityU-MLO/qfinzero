@@ -126,9 +126,11 @@ def test_acquire_unknown_and_missing_binary(store):
     assert acquire.run_stream(["/definitely/not/here"])["returncode"] == 127
 
 
-def test_acquire_missing_config(store):
+def test_acquire_missing_config(store, monkeypatch):
     from qfinzero.admin import acquire
-    # databento needs an API key; with none set it should refuse before launching.
+    # databento needs an API key; with none set it should refuse before launching
+    # (another test may have left one in the environment through apply_to_env).
+    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
     res = acquire.acquire("databento", dry_run=True)
     assert res["ok"] is False and "missing config" in res["error"]
     assert "us_prices" not in {t["id"] for t in acquire.targets()}

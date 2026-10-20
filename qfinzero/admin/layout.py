@@ -37,7 +37,8 @@ RAW = {
     "massive": ("raw_massive", ["us_stocks_sip", "us_options_opra", "global_crypto", "global_forex"],
                 "massive flat files: <index>/YYYY/MM/YYYY-MM-DD.parquet (global_*: .csv.gz)"),
     "databento": ("raw_databento", ["imports"],
-                  "Databento DBN: <dataset>/<schema>/<symbol>/<date>.dbn.zst; imports/ holds links"),
+                  "Databento DBN: <asset>/<dataset>/<schema>/<symbol>/<YYYY-MM-DD>.dbn.zst with asset in "
+                  "equity|options|futures; _meta/ logs; imports/ holds links"),
     "tushare": ("raw_tushare", [], "Tushare dumps"),
 }
 
@@ -162,8 +163,11 @@ def init(paths: dict[str, str] | None = None) -> dict[str, Any]:
         mk(root)
         for s in subs:
             mk(root / s)
-        _write_marker(root, {"kind": "raw", "vendor": vendor, "layout_version": LAYOUT_VERSION,
-                             "holds": what, "created_at": now})
+        body = {"kind": "raw", "vendor": vendor, "layout_version": LAYOUT_VERSION, "holds": what, "created_at": now}
+        if vendor == "databento":
+            from .databento_dl import LAYOUT
+            body["databento_layout"] = LAYOUT
+        _write_marker(root, body)
     store = Path(d["storage_root"])
     if store.exists():
         _check_marker(store, "qfz", None)

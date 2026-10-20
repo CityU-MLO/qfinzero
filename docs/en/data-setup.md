@@ -21,7 +21,7 @@ both with their free space and state:
 | layout | path (config key) | holds |
 |---|---|---|
 | RAW, massive | `raw_massive` (`RAW_MASSIVE_DIR`) | massive flat files as massive ships them: `<index>/YYYY/MM/YYYY-MM-DD.parquet` |
-| RAW, Databento | `raw_databento` (`RAW_DATABENTO_DIR`) | DBN files: `<dataset>/<schema>/<symbol>/<date>.dbn.zst`; `imports/` holds links to imported files |
+| RAW, Databento | `raw_databento` (`RAW_DATABENTO_DIR`) | DBN files: `<asset>/<dataset>/<schema>/<symbol>/<YYYY-MM-DD>.dbn.zst`, one symbol-day per file (see [Data adapters](data-adapters.md#the-databento-adapter)); `_meta/` download logs; `imports/` holds links to imported files |
 | RAW, Tushare | `raw_tushare` | Tushare dumps |
 | QFZ store | `storage_root` (`STORAGE_ROOT`, default `$QFZ_DATA_ROOT/upq`) | the converted, query-ready layout UPQ serves: `<store>/trade_date=YYYY-MM-DD/*.parquet`, plus `_state` and `_staging` |
 

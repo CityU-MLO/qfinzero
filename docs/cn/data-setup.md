@@ -16,7 +16,7 @@ QFinZero 把数据放在两类目录里，**目录** 标签页会列出这两类
 | 结构 | 路径（配置项） | 内容 |
 |---|---|---|
 | RAW，massive | `raw_massive`（`RAW_MASSIVE_DIR`） | massive 原样的 flat files：`<index>/YYYY/MM/YYYY-MM-DD.parquet` |
-| RAW，Databento | `raw_databento`（`RAW_DATABENTO_DIR`） | DBN 文件：`<dataset>/<schema>/<symbol>/<date>.dbn.zst`；`imports/` 存放导入文件的链接 |
+| RAW，Databento | `raw_databento`（`RAW_DATABENTO_DIR`） | DBN 文件：`<asset>/<dataset>/<schema>/<symbol>/<YYYY-MM-DD>.dbn.zst`，一个文件是一个标的的一天（见[数据适配器](data-adapters.md#databento-适配器)）；`_meta/` 存下载日志；`imports/` 存放导入文件的链接 |
 | RAW，Tushare | `raw_tushare` | Tushare 导出文件 |
 | QFZ 存储 | `storage_root`（`STORAGE_ROOT`，默认 `$QFZ_DATA_ROOT/upq`） | 转换后、供 UPQ 查询的结构：`<store>/trade_date=YYYY-MM-DD/*.parquet`，以及 `_state` 和 `_staging` |
 

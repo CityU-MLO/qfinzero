@@ -49,6 +49,15 @@ Added:
 
 Changed:
 
+- Databento downloads land in
+  `<asset>/<dataset>/<schema>/<SYMBOL>/<YYYY-MM-DD>.dbn.zst` (asset `options`,
+  `equity` or `futures` from the dataset; option and futures roots, stock codes
+  with spaces as dots), one symbol-day per file for every schema, OHLCV
+  included. Blue Ocean files are one 20:00-04:00 ET session named by the ET date
+  it opens. Missing days are requested in runs and split losslessly into day
+  files (`qfinzero/admin/dbn_split.py`, verified record for record); empty days
+  are remembered in `_meta/qfz_downloads.jsonl`; a day file lacking a requested
+  symbol is replaced by the union. Requests bypass `HTTP(S)_PROXY`.
 - Removed the Rust `upq-ingest` crate, `scripts/upq_flatfiles.sh`, the
   `us_prices` acquire target and the store-conversion design documents: the
   data pipeline (`qfz-data`) builds every store, and the raw-data index design

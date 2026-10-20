@@ -123,8 +123,23 @@ Parquet exports also convert without the `databento` package.
 
 Every `*.dbn`, `*.dbn.zst` and Databento-exported `*.parquet` under
 `RAW_DATABENTO_DIR` (default `/data/databento`) is identified from its own header
-or columns, so any folder layout works. Folders that start with `_` or `.` are
-skipped, for example Databento's `_tmp` batch scratch. Header reads are cached in
+or columns, so any folder layout works. Downloads use the library layout:
+
+```
+<asset>/<dataset>/<schema>/<SYMBOL>/<YYYY-MM-DD>.dbn.zst
+```
+
+- `asset` follows the dataset: `options` (`OPRA.*`), `futures` (`GLBX.*`,
+  `IFUS.*`, `IFEU.*`, `IFLL.*`, `NDEX.*`, `XCBF.*`, `XEUR.*`, `XEEE.*`), `equity`
+  (the US venues and consolidated feeds, Blue Ocean included).
+- `SYMBOL` is the stock code with spaces as dots (`BRK.B`), the option root
+  (`SPY`) or the futures product root (`ZN` for `ZN.v.0` or `ZNZ6`).
+- A file is one symbol's day for every schema, OHLCV included: the UTC date of
+  `ts_recv` (`ts_event` without it), as Databento cuts its files. Blue Ocean
+  files are one 20:00–04:00 ET session each, named by the ET date it opens.
+
+Folders that start with `_` or `.` are skipped, for example `_meta` and
+Databento's `_tmp` batch scratch, and so are `.part` files. Header reads are cached in
 `$STORAGE_ROOT/_state/databento_index.json`. A first scan of about 6,600 files
 takes about two minutes, and later scans take about one second.
 
@@ -301,9 +316,14 @@ qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
 `acquire` is a dry run unless `--run` is given. It prints the quoted cost first.
 It refuses any request whose quote exceeds `--max-cost`, which defaults to 0, so
 only free data downloads without an explicit ceiling. Files already on disk are
-not quoted or fetched again. Downloads land in
-`<dataset>/<schema>/<symbol>/<date>.dbn.zst`, with one file per weekday for tick
-schemas and one file per range for OHLCV.
+not quoted or fetched again. Every request carries about 30 s of latency, so the
+missing days of a symbol are asked for in runs (a week for tick schemas, a month
+for OHLCV and other small schemas) and split losslessly into day files, checked
+record for record; a one-day request is kept exactly as Databento sent it. Days
+that come back empty (weekends, holidays) are noted in
+`_meta/qfz_downloads.jsonl` and not asked for again. A day file that lacks a
+requested symbol is replaced by one holding both. Requests never go through a
+proxy: `HTTP(S)_PROXY` and `ALL_PROXY` are cleared while Databento is called.
 
 ### Known limits
 

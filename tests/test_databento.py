@@ -350,43 +350,38 @@ def test_scan_databento_states():
     assert bad["ok"] is False and "401" in bad["error"]
 
 
-class _FakeClient:
-    def __init__(self, cost):
-        self.calls = []
-        meta = NS(get_cost=lambda **kw: cost, get_billable_size=lambda **kw: 1000)
-        self.metadata = meta
-        self.timeseries = NS(get_range=self._get_range)
-
-    def _get_range(self, path, **kw):
-        self.calls.append(kw)
-        Path(path).write_bytes(b"DBN")
-
-
 def test_databento_download_is_cost_gated(tmp_path):
+    pytest.importorskip("databento_dbn")
+    from datetime import datetime as _dt, timezone as _tz
+
     from qfinzero.admin import databento_dl
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_databento_dl import FakeDatabento
     params = {"dataset": "XNAS.ITCH", "schema": "trades", "symbols": "SPY,QQQ",
               "start": "2025-01-02", "end": "2025-01-06"}
     jobs = databento_dl.plan(params, tmp_path)
-    assert len(jobs) == 6   # 3 weekdays x 2 symbols (Jan 4/5 are a weekend)
-    assert jobs[0]["path"].endswith("XNAS.ITCH/trades/SPY/2025-01-02.dbn.zst")
+    assert len(jobs) == 10   # 5 calendar days x 2 symbols: empty days are learnt, not guessed
+    assert jobs[0]["path"].endswith("equity/XNAS.ITCH/trades/SPY/2025-01-02.dbn.zst")
 
-    paid = _FakeClient(cost=1.5)
+    trading = [int(_dt(2025, 1, d, 15, tzinfo=_tz.utc).timestamp()) * S for d in (2, 3, 6)]
+    paid = FakeDatabento(trading, cost=1.5)
     dry = databento_dl.download(params, api_key="k", root=tmp_path, client_factory=lambda k: paid)
-    assert dry["ok"] and dry["to_fetch"] == 6 and not paid.calls
+    assert dry["ok"] and dry["to_fetch"] == 10 and dry["requests"] == 2 and not paid.calls
     refused = databento_dl.download(params, api_key="k", root=tmp_path, dry_run=False,
                                     client_factory=lambda k: paid)
     assert refused["ok"] is False and "max_cost" in refused["error"] and not paid.calls
 
-    free = _FakeClient(cost=0.0)
+    free = FakeDatabento(trading)
     done = databento_dl.download(params, api_key="k", root=tmp_path, dry_run=False,
                                  client_factory=lambda k: free)
-    assert done["ok"] and done["written"] == 6
+    assert done["ok"] and (done["written"], done["empty"]) == (6, 4) and len(free.calls) == 2
     again = databento_dl.download(params, api_key="k", root=tmp_path, dry_run=False,
                                   client_factory=lambda k: free)
-    assert again["to_fetch"] == 0 and len(free.calls) == 6   # existing files never re-bought
+    assert again["to_fetch"] == 0 and len(free.calls) == 2   # existing files never re-bought
 
     ohlcv = databento_dl.plan({**params, "schema": "ohlcv-1m"}, tmp_path)
-    assert len(ohlcv) == 2 and ohlcv[0]["end"] == "2025-01-07"
+    runs = databento_dl.runs(ohlcv, "XNAS.ITCH", "ohlcv-1m")
+    assert len(runs) == 2 and runs[0]["end"] == "2025-01-07T00:00:00+00:00"   # one day file each, one request
 
 
 def test_update_registry_has_databento_source():

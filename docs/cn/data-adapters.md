@@ -89,7 +89,19 @@ UPQ 的接口是 `/crypto`、`/crypto/daily`、`/fx`、`/fx/daily` 和 `/fx/quot
 ### 读取哪些文件
 
 `RAW_DATABENTO_DIR`（默认 `/data/databento`）下的每个 `*.dbn`、`*.dbn.zst` 和 Databento 导出的 `*.parquet`，
-都按文件自身的头信息或列来识别，所以目录怎么组织都可以。以 `_` 或 `.` 开头的目录会跳过，例如 Databento 批量下载的 `_tmp`。
+都按文件自身的头信息或列来识别，所以目录怎么组织都可以。下载使用以下布局：
+
+```
+<asset>/<dataset>/<schema>/<SYMBOL>/<YYYY-MM-DD>.dbn.zst
+```
+
+- `asset` 由数据集决定：`options`（`OPRA.*`）、`futures`（`GLBX.*`、`IFUS.*`、`IFEU.*`、`IFLL.*`、`NDEX.*`、`XCBF.*`、`XEUR.*`、`XEEE.*`）、
+  `equity`（美国各交易所和合并数据，含 Blue Ocean）。
+- `SYMBOL`：股票代码（空格换成点，如 `BRK.B`）、期权的 root（`SPY`）、期货的产品 root（`ZN.v.0` 和 `ZNZ6` 都是 `ZN`）。
+- 每个文件是一个标的的一天，所有 schema 都一样，包括 OHLCV：按 `ts_recv`（没有则用 `ts_event`）的 UTC 日期，和 Databento 切文件的方式一致。
+  Blue Ocean 的文件是一个美东 20:00–04:00 夜盘时段，文件名用开盘那天的美东日期。
+
+以 `_` 或 `.` 开头的目录会跳过，例如 `_meta` 和 Databento 批量下载的 `_tmp`，`.part` 文件也会跳过。
 头信息缓存在 `$STORAGE_ROOT/_state/databento_index.json`。首次扫描约 6,600 个文件大约两分钟，之后约一秒。
 
 ### schema 对应关系
@@ -209,8 +221,10 @@ qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
 ```
 
 `acquire` 不加 `--run` 时只做演练，先打印报价。报价超过 `--max-cost` 的请求会被拒绝，`--max-cost` 默认为 0，
-所以不给上限时只会下载免费数据。磁盘上已有的文件不会再报价或下载。下载文件存为
-`<dataset>/<schema>/<symbol>/<date>.dbn.zst`：tick 类 schema 每个工作日一个文件，OHLCV 每个区间一个文件。
+所以不给上限时只会下载免费数据。磁盘上已有的文件不会再报价或下载。每个请求约有 30 秒的固定延迟，所以同一标的缺的日子会合并成一个请求
+（tick 类 schema 一周，OHLCV 等小 schema 一个月），再无损拆成日文件并逐条核对；只请求一天时直接保留 Databento 发来的文件。
+没有数据的日子（周末、假日）记在 `_meta/qfz_downloads.jsonl`，之后不会再请求。某天的文件缺少要下载的代码时，会改成同时包含两者的文件。
+请求不经过代理：调用 Databento 时会清掉 `HTTP(S)_PROXY` 和 `ALL_PROXY`。
 
 ### 已知限制
 

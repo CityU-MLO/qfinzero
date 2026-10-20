@@ -97,14 +97,34 @@ class FakeDatabento:
                            list_datasets=lambda: ["GLBX.MDP3", "OPRA.PILLAR"])
         self.timeseries = NS(get_range=self._get)
 
-    def _get(self, path, symbols, start, **_k):
+    def _get(self, path, symbols, start, end=None, dataset="GLBX.MDP3", schema="mbo", **_k):
+        """A real (tiny) DBN file: one trade per symbol at 15:00 UTC of each day asked for."""
+        from datetime import datetime, timedelta
+        import databento_dbn as d
+        import zstandard
         self.calls.append((symbols[0], start))
         if symbols[0] in self.fail:
             raise RuntimeError("no entitlement")
-        Path(path).write_bytes(b"x" * 2048)
+        lo, hi = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        days = [(lo + timedelta(days=i)).date() for i in range((hi - lo).days)]
+        md = d.Metadata(dataset=dataset, start=int(lo.timestamp()) * 10**9, end=int(hi.timestamp()) * 10**9,
+                        stype_in=d.SType.CONTINUOUS, stype_out=d.SType.INSTRUMENT_ID, schema=d.Schema.from_str(schema),
+                        symbols=list(symbols),
+                        mappings=[NS(raw_symbol=sym, intervals=[NS(start_date=days[0], end_date=days[-1] + timedelta(days=1),
+                                                                   symbol=str(100 + i))]) for i, sym in enumerate(symbols)])
+        def rec(i, ts):
+            if schema == "mbo":
+                return d.MBOMsg(1, 100 + i, ts, 7, 10**11, 1, d.Action.TRADE, d.Side.NONE, ts)
+            if schema == "mbp-1":
+                return d.MBP1Msg(1, 100 + i, ts, 10**11, 1, d.Action.TRADE, d.Side.NONE, 0, ts)
+            return d.TradeMsg(1, 100 + i, ts, 10**11, 1, d.Action.TRADE, d.Side.NONE, 0, ts)
+        recs = [rec(i, ts) for day in days for i, _ in enumerate(symbols)
+                for ts in [int(datetime(day.year, day.month, day.day, 15).timestamp()) * 10**9]]
+        Path(path).write_bytes(zstandard.ZstdCompressor().compress(bytes(md.encode()) + b"".join(bytes(r) for r in recs)))
 
 
 def test_databento_download_progress_budget_and_spend(env):
+    pytest.importorskip("databento_dbn")
     from qfinzero.admin import config_store as cs, databento_dl, vendor_keys
     k = cs.save_key("databento", {"label": "fut", "products": ["GLBX.MDP3"], "api_key": "db-1", "monthly_budget_usd": 1.0})
     params = {"dataset": "GLBX.MDP3", "schema": "mbp-1", "symbols": "ZN.v.0,CL.v.0", "stype_in": "continuous",
@@ -120,7 +140,10 @@ def test_databento_download_progress_budget_and_spend(env):
                               on_progress=lambda **f: events.append(f), key_id=k["id"], job_id="download-1")
     assert r["ok"] and r["written"] == 2 and r["spent_usd"] == 1.5
     assert any(e.get("files_total") == 2 for e in events) and events[-1]["stage"] == "done"
-    assert any(e.get("files_done") == 2 and e.get("bytes_done") == 4096 for e in events)
+    assert any(e.get("files_done") == 2 and e.get("bytes_done", 0) > 0 for e in events)
+    # one directory per product root, in the asset's tree
+    assert (lib / "futures/GLBX.MDP3/mbp-1/ZN/2026-09-01.dbn.zst").exists()
+    assert (lib / "futures/GLBX.MDP3/mbp-1/CL/2026-09-01.dbn.zst").exists()
     s = vendor_keys.spend()
     assert s["by_key"][k["id"]] == 1.5 and s["recent"][0]["job"] == "download-1"
     assert vendor_keys.budget_left(k["id"]) == 1.5
@@ -136,7 +159,8 @@ def test_databento_download_progress_budget_and_spend(env):
         return stop["n"] > 1
     r = databento_dl.download(p2, api_key="db-1", root=lib, dry_run=False, client_factory=lambda _k: FakeDatabento(0),
                               should_stop=should_stop, key_id=k["id"])
-    assert r["ok"] is False and r["written"] == 1 and "stopped" in r["error"]
+    # the first request (ZN, both days) completes; CL is not asked for
+    assert r["ok"] is False and r["written"] == 2 and "stopped" in r["error"]
 
 
 def test_key_test_and_massive_progress(env):

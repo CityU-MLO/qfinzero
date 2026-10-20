@@ -57,7 +57,7 @@ TARGETS: dict[str, AcquireTarget] = {
     "databento": AcquireTarget(
         id="databento", label="Databento historical API (US stocks / OPRA options)",
         script="", base_args=[],
-        writes_to="$RAW_DATABENTO_DIR/<dataset>/<schema>/<symbol>/ (DBN, read in place)",
+        writes_to="$RAW_DATABENTO_DIR/<asset>/<dataset>/<schema>/<symbol>/<YYYY-MM-DD>.dbn.zst (read in place)",
         needs=("databento.api_key",), supports_prod=False, python=True,
     ),
     "tiingo": AcquireTarget(
