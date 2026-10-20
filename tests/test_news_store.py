@@ -123,6 +123,7 @@ def test_content_levels_and_filters():
 
 def test_search_indexes_give_esp_order_and_carry_the_filters():
     from qfinzero.admin import news_store as ns
-    window, by_ticker = ns.SEARCH_INDEXES
+    window, by_ticker, by_level = ns.SEARCH_INDEXES
+    assert by_level[0] == ("content_level", 1)
     assert window[:2] == [("published_utc", 1), ("_id", 1)] and ("title", 1) in window and ("content_level", 1) in window
     assert by_ticker[:3] == [("tickers", 1), ("published_utc", 1), ("_id", 1)]

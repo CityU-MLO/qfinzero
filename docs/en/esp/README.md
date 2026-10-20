@@ -109,7 +109,8 @@ the fields on them with `python -m qfinzero.update.loaders.news
 
 **Query performance.** ESP reads news in (`published_utc`, `_id`) order. The
 vendor collections carry the indexes `(published_utc, _id, content_level,
-title)` and `(tickers, published_utc, _id, content_level)`, so a page stops
+title)`, `(tickers, published_utc, _id, content_level)` and `(content_level,
+published_utc, _id)`, so a page stops
 after its `limit` rows instead of sorting the whole window, and the content
 and keyword filters are applied to index keys (only matching documents are
 read from disk). Each collection is searched at once, for at most

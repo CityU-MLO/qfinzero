@@ -96,7 +96,7 @@ QFZ 不会修改它：**设置 → 新闻存储** 把各数据商的数据从中
 可以用 `python -m qfinzero.update.loaders.news --backfill-content` 给它们补上字段。
 
 **查询性能。** ESP 按（`published_utc`，`_id`）顺序读取新闻。数据商集合带有索引 `(published_utc, _id, content_level, title)`
-和 `(tickers, published_utc, _id, content_level)`：一页读够 `limit` 条就停，不用对整个窗口排序；内容等级和关键词过滤在索引键上完成，
+、`(tickers, published_utc, _id, content_level)` 和 `(content_level, published_utc, _id)`：一页读够 `limit` 条就停，不用对整个窗口排序；内容等级和关键词过滤在索引键上完成，
 只从磁盘读取匹配的文档。各集合同时查询，每个最多 `ESP_NEWS_SEARCH_MAX_MS`（20 秒），超时的集合会在 `warnings` 里说明。
 
 ## 快速示例

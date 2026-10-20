@@ -42,6 +42,9 @@ INDEXES = [
 SEARCH_INDEXES = [
     [("published_utc", 1), ("_id", 1), ("content_level", 1), ("title", 1)],
     [("tickers", 1), ("published_utc", 1), ("_id", 1), ("content_level", 1)],
+    # a content filter that matches little (full text in a collection of headlines) jumps
+    # straight to its level instead of scanning the window
+    [("content_level", 1), ("published_utc", 1), ("_id", 1)],
 ]
 # superseded by SEARCH_INDEXES (dropped when the indexes are ensured)
 OBSOLETE_INDEXES = ("published_utc_-1_title_1",)
