@@ -159,6 +159,8 @@ async def get_account(account_id: str, request: Request):
                     "qty": o.qty,
                     "limit_price": o.limit_price,
                     "status": o.status.value,
+                    "trading_hours": o.trading_hours.value,
+                    "time_in_force": o.time_in_force.value,
                 }
                 for o in state.order_manager.get_open_orders()
             ]

@@ -84,7 +84,15 @@ export interface OpenOrder {
   qty: number;
   limit_price: number | null;
   status: string;
+  trading_hours?: TradingHours;
+  time_in_force?: string;
 }
+
+/** Where an order may execute: REGULAR 09:30-16:00 ET (any type); EXTENDED 04:00-20:00
+ * and OVERNIGHT 24/5 incl. Blue Ocean 20:00-04:00 (LIMIT only). */
+export type TradingHours = "REGULAR" | "EXTENDED" | "OVERNIGHT";
+/** Session segment of the clock's bar (PMB ``clock.segment``). */
+export type Segment = "OVERNIGHT" | "PRE" | "REGULAR" | "POST";
 
 export interface StockQuote {
   symbol: string;
@@ -116,6 +124,8 @@ export interface Clock {
   end_ts: string;
   status: string;
   is_done: boolean;
+  segment?: Segment;
+  trading_date?: string;
 }
 
 export interface FullState {
@@ -239,6 +249,7 @@ export function placeOrder(p: {
   order_type: "MARKET" | "LIMIT";
   limit_price?: number | null;
   instrument_type?: "STOCK" | "FUTURE";
+  trading_hours?: TradingHours;
 }) {
   return req<{ ok: boolean; order_id: string; status: string }>("/orders", {
     method: "POST",
@@ -251,6 +262,7 @@ export function placeOrder(p: {
         order_type: p.order_type,
         qty: p.qty,
         limit_price: p.order_type === "LIMIT" ? p.limit_price : null,
+        ...(p.trading_hours && p.instrument_type !== "FUTURE" ? { trading_hours: p.trading_hours } : {}),
       },
     }),
   });

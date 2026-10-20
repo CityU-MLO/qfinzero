@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LogOut,
   TrendingUp,
@@ -33,17 +33,26 @@ import {
   fmtET,
   type FullState,
   type Position,
+  type TradingHours,
 } from "./api";
 import { PriceChart, type PricePoint } from "./price-chart";
 import { type Candle } from "./candle-chart";
 import { BrokerChart } from "./broker-chart";
-import { ClockBar } from "./clock-bar";
+import { ClockBar, SEGMENT_LABEL, type StartPoint } from "./clock-bar";
 import { OptionChain } from "./option-chain";
 import { AccountPanel } from "./account-panel";
 
 import { useT } from "@/components/locale-provider";
 
 const MARKET_OPEN_ET = 9 * 60 + 30; // 09:30 ET
+const PRE_OPEN_ET = 4 * 60;          // 04:00 ET
+const POST_CLOSE_ET = 20 * 60;       // 20:00 ET: the overnight session (Blue Ocean) starts
+
+const HOURS_LABEL: Record<TradingHours, { label: readonly [string, string]; hint: readonly [string, string] }> = {
+  REGULAR: { label: ["Regular", "常规"], hint: ["09:30-16:00 ET, any order type", "美东 09:30-16:00，任意委托类型"] },
+  EXTENDED: { label: ["Extended", "盘前盘后"], hint: ["04:00-20:00 ET, limit orders only", "美东 04:00-20:00，仅限价单"] },
+  OVERNIGHT: { label: ["24/5", "含夜盘"], hint: ["Around the clock incl. Blue Ocean 20:00-04:00 ET, limit orders only", "全天候，含 Blue Ocean 美东 20:00-04:00 夜盘，仅限价单"] },
+};
 
 type Blotter = "positions" | "orders" | "trades";
 
@@ -134,6 +143,7 @@ export function Terminal({
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [qty, setQty] = useState(100);
   const [orderType, setOrderType] = useState<"MARKET" | "LIMIT">("MARKET");
+  const [hours, setHours] = useState<TradingHours>("REGULAR");
   const [limit, setLimit] = useState<number | "">("");
   const busy2Ref = useRef(false);
 
@@ -293,9 +303,22 @@ export function Terminal({
     [sessionId, timeline, apply],
   );
 
-  const onStart = useCallback(async () => {
-    // Open at the regular-session open (09:30 ET), then let time flow.
-    let openIdx = timeline.findIndex((ts) => etMinutes(ts) >= MARKET_OPEN_ET);
+  // segments the day's bars cover, so the clock can start at the overnight session or pre-market too
+  const starts = useMemo<StartPoint[]>(() => {
+    const mins = timeline.map(etMinutes);
+    const out: StartPoint[] = [];
+    if (mins.some((m) => m >= POST_CLOSE_ET || m < PRE_OPEN_ET)) out.push("OVERNIGHT");
+    if (mins.some((m) => m >= PRE_OPEN_ET && m < MARKET_OPEN_ET)) out.push("PRE");
+    out.push("REGULAR");
+    return out;
+  }, [timeline]);
+
+  const onStart = useCallback(async (at: StartPoint = "REGULAR") => {
+    // Open at the chosen point (09:30 ET by default), then let time flow. The
+    // day's timeline starts with the overnight session (20:00 ET the evening before).
+    let openIdx = at === "OVERNIGHT" ? 0
+      : at === "PRE" ? timeline.findIndex((ts) => { const m = etMinutes(ts); return m >= PRE_OPEN_ET && m < POST_CLOSE_ET; })
+        : timeline.findIndex((ts) => etMinutes(ts) >= MARKET_OPEN_ET && etMinutes(ts) < POST_CLOSE_ET);
     if (openIdx < 0) openIdx = 0;
     setStarted(true);
     await seek(openIdx);
@@ -325,6 +348,7 @@ export function Terminal({
         order_type: orderType,
         limit_price: orderType === "LIMIT" ? Number(limit) : null,
         instrument_type: futs.includes(selected) ? "FUTURE" : "STOCK",
+        trading_hours: hours,
       });
       const s = await getState(sessionId);
       apply(s, true);
@@ -353,7 +377,7 @@ export function Terminal({
       setErr(e instanceof Error ? e.message : String(e));
       notify(e instanceof Error ? e.message : String(e), "down");
     }
-  }, [sessionId, accountId, selected, side, qty, orderType, limit, futs, apply, notify, t]);
+  }, [sessionId, accountId, selected, side, qty, orderType, limit, futs, hours, apply, notify, t]);
 
   const tradeContract = useCallback(
     async (contract: string, oside: "BUY" | "SELL") => {
@@ -850,7 +874,10 @@ export function Terminal({
                 <button
                   key={ot}
                   onClick={() => setOrderType(ot)}
-                  className={`rounded-lg py-1.5 text-xs font-semibold ${
+                  disabled={ot === "MARKET" && !selFut && hours !== "REGULAR"}
+                  title={ot === "MARKET" && !selFut && hours !== "REGULAR"
+                    ? t("Extended and overnight hours take limit orders only", "盘前盘后和夜盘只接受限价单") : undefined}
+                  className={`rounded-lg py-1.5 text-xs font-semibold disabled:opacity-40 ${
                     orderType === ot ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground"
                   }`}
                 >
@@ -859,6 +886,31 @@ export function Terminal({
               ))}
             </div>
           </TicketField>
+
+          {!selFut && (
+            <TicketField label={t("Trading hours", "交易时段")}>
+              <div className="grid grid-cols-3 gap-2">
+                {(Object.keys(HOURS_LABEL) as TradingHours[]).map((h) => (
+                  <button
+                    key={h}
+                    title={t(...HOURS_LABEL[h].hint)}
+                    onClick={() => { setHours(h); if (h !== "REGULAR") setOrderType("LIMIT"); }}
+                    className={`rounded-lg py-1.5 text-xs font-semibold ${
+                      hours === h ? "bg-secondary text-foreground" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {t(...HOURS_LABEL[h].label)}
+                  </button>
+                ))}
+              </div>
+              {state?.clock.segment && state.clock.segment !== "REGULAR" && hours === "REGULAR" && (
+                <p className="mt-1.5 text-[11px] leading-snug text-warning">
+                  {t(`It is ${SEGMENT_LABEL[state.clock.segment][0].toLowerCase()} now: a regular-hours order waits for the 09:30 ET open.`,
+                     `现在是${SEGMENT_LABEL[state.clock.segment][1]}：常规时段的委托要等美东 09:30 开盘才成交。`)}
+                </p>
+              )}
+            </TicketField>
+          )}
 
           {orderType === "LIMIT" && (
             <TicketField label={t("Limit price", "限价")}>
@@ -1007,6 +1059,7 @@ export function Terminal({
         playing={playing}
         speed={speed}
         onStart={onStart}
+        starts={starts}
         onPlayPause={() => (playing ? pause() : play())}
         onStepOne={() => doStep(1)}
         onSpeed={setSpeed}
@@ -1131,6 +1184,7 @@ function OrdersTable({
           <th className="pb-1">{t("Type", "类型")}</th>
           <th className="pb-1 text-right">{t("Qty", "数量")}</th>
           <th className="pb-1 text-right">{t("Limit", "限价")}</th>
+          <th className="pb-1">{t("Hours", "时段")}</th>
           <th className="pb-1 text-right">{t("Status", "状态")}</th>
           <th className="pb-1"></th>
         </tr>
@@ -1143,6 +1197,8 @@ function OrdersTable({
             <td className="text-muted-foreground">{enumLabel(t, o.order_type)}</td>
             <td className="py-1 text-right">{o.qty}</td>
             <td className="py-1 text-right">{o.limit_price ? num(o.limit_price) : "—"}</td>
+            <td className="py-1 pl-2 text-muted-foreground">{o.trading_hours && !o.instrument_id.startsWith("FUTURE:")
+              ? t(...HOURS_LABEL[o.trading_hours].label) : "—"}</td>
             <td className="py-1 text-right text-muted-foreground">{enumLabel(t, o.status)}</td>
             <td className="py-1 text-right">
               <button onClick={() => onCancel(o.order_id)} title={t("Cancel order", "撤单")} className="text-muted-foreground hover:text-down">

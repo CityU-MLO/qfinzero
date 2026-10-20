@@ -28,7 +28,7 @@ The landing page has two actions:
 | **Watchlist** | Live quotes with **% change from the open**. Add a symbol in the box at the bottom (loads its bars into the live session); remove with the trash icon. |
 | **Chart** | Toggle **Candles** (K-line, built minute-by-minute) or **Line**. Candles overlay **MA5/MA20** moving averages and a **volume** histogram, with price axis, last-price marker and ET time axis. |
 | **Option chain** | Toggle from *Chart*. See §4. |
-| **Order ticket** | BUY/SELL, quantity, **MARKET**/**LIMIT**. Shows est. cost/proceeds and **buying power after** the order. |
+| **Order ticket** | BUY/SELL, quantity, **MARKET**/**LIMIT**, and for stocks the **trading hours**: *Regular* (09:30–16:00 ET, any type), *Extended* (04:00–20:00) or *24/5* (with the Blue Ocean overnight session, 20:00–04:00); extended and 24/5 take limit orders only. Shows est. cost/proceeds and **buying power after** the order. |
 | **Blotter** | *Positions* (with one-click **Flatten**), *Orders* (with **Cancel all**), *Trades*. **Close all** flattens every position. |
 | **Account** | Full detail overlay — details, holdings (mkt value / weight / P&L), and history (live **equity curve** + trade log). |
 
@@ -37,6 +37,12 @@ The landing page has two actions:
 The status bar at the bottom is the market clock:
 
 - **Open market** — seeks to the regular-session open (09:30 ET) and starts time.
+  **From overnight** starts at 20:00 ET the evening before (the day's session
+  opens with Blue Ocean's overnight session) and **From pre-market** at 04:00
+  ET, when the day has bars there. The clock shows the segment it is in
+  (overnight, pre-market, regular, after-hours); the chart shades the same
+  segments. A regular-hours order placed outside 09:30–16:00 waits for the
+  open, and the ticket says so; the Orders tab lists each order's hours.
 - **Play / Pause**, single **step**, and a **speed slider** (1×–60× =
   market-minutes per second).
 - **Timeline scrubber** — drag it. Dragging **back rewinds time and undoes every

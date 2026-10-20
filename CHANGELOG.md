@@ -12,7 +12,14 @@ Added:
   zoom and pan, paged history, MA/EMA/Bollinger/VWAP and a bid/ask overlay.
   US stock charts shade the overnight, pre-market and after-hours sessions
   (deepest to lightest) and filter to all sessions, the extended day or the
-  regular session; the broker's chart shades them too.
+  regular session; the broker's chart shades them too. The option chain of a
+  stock (or of an option's underlying) opens beside the chart at a chosen ET
+  minute, and clicking a contract charts it.
+- Broker: orders choose their trading hours (regular, extended, 24/5 with the
+  Blue Ocean overnight session), the clock can start from the overnight
+  session or pre-market and shows the current segment, and the session state
+  carries `clock.segment`, `clock.trading_date` and each open order's
+  `trading_hours` and `time_in_force`.
 - The broker's chart uses the same component: history from before the session
   (time-locked), zoom, intervals, fill markers, working-order and average-price
   lines. Orders report their outcome, including fills on later bars.

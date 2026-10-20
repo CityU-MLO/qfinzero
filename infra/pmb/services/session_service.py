@@ -789,6 +789,8 @@ class SessionService:
                 "qty": o.qty,
                 "limit_price": o.limit_price,
                 "status": o.status.value,
+                "trading_hours": o.trading_hours.value,
+                "time_in_force": o.time_in_force.value,
             }
             for o in state.order_manager.get_open_orders()
         ]
@@ -1369,6 +1371,8 @@ class SessionService:
                 "qty": o.qty,
                 "limit_price": o.limit_price,
                 "status": o.status.value,
+                "trading_hours": o.trading_hours.value,
+                "time_in_force": o.time_in_force.value,
             }
             for o in state.order_manager.get_open_orders()
         ]
@@ -1389,6 +1393,7 @@ class SessionService:
                 "end_ts": state.config.end_ts,
                 "status": state.status.value,
                 "is_done": state.clock.is_done,
+                **self._session_info(state),
             },
             "account": snapshot.model_dump(),
             "positions": [p.model_dump() for p in state.ledger.positions_list()],
