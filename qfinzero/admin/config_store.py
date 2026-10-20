@@ -66,7 +66,6 @@ def _defaults() -> dict[str, Any]:
             "raw_massive": os.environ.get("RAW_MASSIVE_DIR", "/data/massive_data"),
             "raw_tushare": os.environ.get("RAW_TUSHARE_DIR", "/data/tushare_data"),
             "raw_databento": os.environ.get("RAW_DATABENTO_DIR", "/data/databento"),
-            "raw_tiingo": os.environ.get("RAW_TIINGO_DIR", "/data/tiingo"),
             "storage_root": os.environ.get("STORAGE_ROOT", f"{root}/upq"),
         },
         # MASSIVE / Polygon flat-files (US stocks, options, rates, corp actions).
@@ -98,10 +97,6 @@ def _defaults() -> dict[str, Any]:
         "schedule": {
             "prices": {"enabled": False, "cron": "30 17 * * 1-5"},   # weekdays 17:30
             "news": {"enabled": False, "cron": "0 6 * * *"},          # daily 06:00
-            # Tiingo BOATS overnight. Cron runs on server time, so the recorder is
-            # started every 10 minutes and does nothing outside 20:00-04:00 ET.
-            "tiingo_quotes": {"enabled": False, "cron": "*/10 * * * *"},
-            "tiingo_prices": {"enabled": False, "cron": "0 18 * * 1-5"},   # after 04:00 ET on a UTC+8 box
         },
     }
 
@@ -208,7 +203,6 @@ def apply_to_env(cfg: dict[str, Any] | None = None) -> None:
         "RAW_MASSIVE_DIR": d.get("raw_massive", ""),
         "RAW_TUSHARE_DIR": d.get("raw_tushare", ""),
         "RAW_DATABENTO_DIR": d.get("raw_databento", ""),
-        "RAW_TIINGO_DIR": d.get("raw_tiingo", ""),
         "STORAGE_ROOT": d.get("storage_root", ""),
         # MASSIVE flat-files S3 (the names the massive downloads read).
         "POLYGON_S3_ACCESS_KEY_ID": m.get("s3_access_key_id", ""),
@@ -274,18 +268,14 @@ def databento_key(dataset: str | None = None) -> str:
 KEY_SECRETS = {
     "databento": ("api_key",),
     "massive": ("s3_access_key_id", "s3_secret_access_key", "rest_api_key"),
-    "tiingo": ("api_key",),
 }
 KEY_FIELDS = {
     "databento": ("label", "products", "monthly_budget_usd", "note"),
     "massive": ("label", "products", "s3_endpoint", "note"),
-    "tiingo": ("label", "products", "note"),
 }
 
 
 def _legacy_key(vendor: str, cfg: dict[str, Any]) -> dict[str, Any] | None:
-    if vendor == "tiingo":           # keys only (no single-key section)
-        return None
     if vendor == "databento":
         v = (cfg.get("databento", {}) or {}).get("api_key", "")
         return {"id": "default", "label": "default", "products": ["*"], "api_key": v} if v else None

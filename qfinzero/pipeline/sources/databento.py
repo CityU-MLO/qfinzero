@@ -1464,16 +1464,11 @@ STORE_ASSET = {s: a for m in (STORES_FOR_ASSET, QUOTE_STORES_FOR_ASSET)
                for a, stores in m.items() for s in stores}
 
 
-# parts that fill behind Databento (Tiingo's overnight data): never displace ours
-LOWER_PRIORITY_PARTS = ("part-tiingo-",)
-
-
 def sibling_parts(partition_dir: Path) -> list[Path]:
-    """Other vendors' part files in a partition that take precedence over ours."""
+    """Other vendors' part files in a partition (everything but ours)."""
     if not partition_dir.is_dir():
         return []
-    return sorted(p for p in partition_dir.glob("*.parquet")
-                  if p.name != PART_NAME and not p.name.startswith(LOWER_PRIORITY_PARTS))
+    return sorted(p for p in partition_dir.glob("*.parquet") if p.name != PART_NAME)
 
 
 def fingerprint(files: Iterable[Path]) -> str:

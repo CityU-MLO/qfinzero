@@ -561,8 +561,8 @@ function IndexPanel({ selected, onRemove, onJob }: { selected: string[]; onRemov
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><ScanSearch className="h-4 w-4" />{t("Scan & index", "扫描与索引")}</CardTitle>
         <CardDescription>
-          {t("QFinZero reads market data in place: a scan recognises each file (massive, Databento, Tiingo, or your own parquet with a qfz.dataset.yaml) and catalogues it. Nothing is converted or written into your directories; the index lives under the storage root.",
-            "QFinZero 直接读取原始行情文件：扫描会识别每个文件（massive、Databento、Tiingo，或附带 qfz.dataset.yaml 的自定义 parquet）并登记到索引。不转换格式，也不会写入你的目录；索引放在存储根目录下。")}
+          {t("QFinZero reads market data in place: a scan recognises each file (massive, Databento, or your own parquet with a qfz.dataset.yaml) and catalogues it. Nothing is converted or written into your directories; the index lives under the storage root.",
+            "QFinZero 直接读取原始行情文件：扫描会识别每个文件（massive、Databento，或附带 qfz.dataset.yaml 的自定义 parquet）并登记到索引。不转换格式，也不会写入你的目录；索引放在存储根目录下。")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

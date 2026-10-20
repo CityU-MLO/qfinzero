@@ -38,7 +38,7 @@ Databento 和 massive 的很多产品是分开订阅的，所以一个人可能�
 ## 扫描与索引（不转换）
 
 *数据导入* → *扫描与索引*（或 `qfz-data index [目录 ...]`）在数据原来的位置登记行情文件。每个文件按内容由 adapter 识别：
-massive 的 K 线、报价和全球 csv.gz，Databento 的 DBN 和 parquet 导出，Tiingo BOATS，以及附带 `qfz.dataset.yaml` 的自定义 parquet。
+massive 的 K 线、报价和全球 csv.gz，Databento 的 DBN 和 parquet 导出，以及附带 `qfz.dataset.yaml` 的自定义 parquet。
 不转换格式，也不会往扫描的目录里写任何东西；索引放在 `$STORAGE_ROOT/_state/index/`：
 
 | 文件 | 内容 |

@@ -74,7 +74,7 @@ def _print_status(args) -> int:
 
 
 def _do_convert(args) -> int:
-    paths = resolve(args.massive, args.tushare, args.storage, args.databento, getattr(args, "tiingo", None))
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
     print(f"[{now_iso()}] converting -> {paths.storage}")
     with Converter(paths, threads=args.threads) as cv:
         results = []
@@ -82,7 +82,7 @@ def _do_convert(args) -> int:
         do_all = args.all
         want = set(([args.asset] if args.asset else []))
 
-        vendors = set(args.vendor or ("massive", "tushare", "databento", "tiingo"))
+        vendors = set(args.vendor or ("massive", "tushare", "databento"))
 
         def want_asset(a):
             return do_all or a in want
@@ -135,10 +135,6 @@ def _do_convert(args) -> int:
                 results.append(cv.convert_databento(
                     args.start, args.end, args.force, jobs=args.jobs, assets=assets,
                     quote_interval=intervals))
-        if market in (None, "us") and "tiingo" in vendors and (
-                want_asset("stock") or (args.asset is None and args.vendor)):
-            # BOATS overnight fills behind every other vendor, so it runs last
-            results.append(cv.convert_tiingo(args.start, args.end, args.force))
         if market in (None, "cn") and "tushare" in vendors:
             if want_asset("stock"):
                 results.append(cv.convert_cn_stock_daily(args.start, args.end, args.force))
@@ -294,7 +290,7 @@ def default_scan_roots() -> list[str]:
     from ..admin import config_store
     cfg = config_store.load()
     d = cfg.get("dirs", {}) or {}
-    roots = [d.get(k) for k in ("raw_massive", "raw_databento", "raw_tiingo")]
+    roots = [d.get(k) for k in ("raw_massive", "raw_databento")]
     roots += list((cfg.get("index", {}) or {}).get("roots") or [])
     return [r for r in dict.fromkeys(roots) if r and Path(r).is_dir()]
 
@@ -333,9 +329,6 @@ def _do_acquire(args) -> int:
         return _emit({"targets": acquire.targets()}, args)
     on_line = None if args.json else (lambda ln: print(ln))
     params = None
-    if args.target == "tiingo":
-        params = {"kind": args.kind, "start": args.start, "end": args.end, "symbols": args.symbols,
-                  "minutes": args.minutes}
     if args.target == "databento":
         params = {
             "dataset": args.dataset, "schema": args.schema,
@@ -384,7 +377,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--tushare", help="override RAW_TUSHARE_DIR")
     ap.add_argument("--storage", help="override STORAGE_ROOT")
     ap.add_argument("--databento", help="override RAW_DATABENTO_DIR")
-    ap.add_argument("--tiingo", help="override RAW_TIINGO_DIR")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("status", help="show raw data + conversion state")
@@ -407,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--corp-actions", action="store_true", help="also build corporate actions")
     c.add_argument("--force", action="store_true", help="reconvert even if unchanged")
     c.add_argument("--threads", type=int, default=None)
-    c.add_argument("--vendor", action="append", choices=["massive", "tushare", "databento", "tiingo"],
+    c.add_argument("--vendor", action="append", choices=["massive", "tushare", "databento"],
                    help="limit to one raw vendor (repeatable; default: all present)")
     c.add_argument("--jobs", type=int, default=None,
                    help="worker processes for Databento file extraction (default 1)")
@@ -449,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=_do_scan)
 
     ac = sub.add_parser("acquire", help="trigger a raw-download script (dry-run by default)")
-    ac.add_argument("target", nargs="?", help="news | databento | tiingo")
+    ac.add_argument("target", nargs="?", help="news | databento")
     ac.add_argument("--list", action="store_true", help="list acquire targets + readiness")
     ac.add_argument("--run", action="store_true", help="actually run (default is --dry-run)")
     ac.add_argument("--prod", action="store_true", help="use the script's production paths")
@@ -463,11 +455,6 @@ def build_parser() -> argparse.ArgumentParser:
     dbg.add_argument("--end", help="YYYY-MM-DD inclusive")
     dbg.add_argument("--max-cost", type=float, default=None,
                      help="refuse to download when the quoted cost (USD) exceeds this")
-    tg = ac.add_argument_group("tiingo target (BOATS overnight; --start/--end/--symbols as above)")
-    tg.add_argument("--kind", choices=["prices", "quotes"], default="prices",
-                    help="prices: overnight minute bars (history); quotes: record the top of book "
-                         "once a minute until the session ends")
-    tg.add_argument("--minutes", type=int, default=None, help="quotes: stop after N snapshots")
     ac.set_defaults(func=_do_acquire)
 
     # ── admin: schedule ──

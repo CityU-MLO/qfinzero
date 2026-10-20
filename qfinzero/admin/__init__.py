@@ -10,7 +10,7 @@ surface the QFinZero Console drives:
   and applied to ``os.environ`` so the pipeline, scripts and services see them.
 * :mod:`~qfinzero.admin.scan` — provider reachability / permission scans
   (MASSIVE S3 + REST, Tushare token).
-* :mod:`~qfinzero.admin.acquire` — trigger downloads (Databento, Tiingo, the news
+* :mod:`~qfinzero.admin.acquire` — trigger downloads (Databento, the news
   script ``news_data.sh``) with streamed logs ("own it end to end").
 * :mod:`~qfinzero.admin.scheduler` — cron-backed update cadence.
 * :mod:`~qfinzero.admin.explore` — UPQ store / ESP coverage summaries.

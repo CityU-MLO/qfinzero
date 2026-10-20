@@ -67,7 +67,7 @@ and key against the budgets, and the latest charges.
 *Data setup* → *Scan & index* (or `qfz-data index [DIR ...]`) catalogues market
 data where it already is. Each file is recognised from its contents by an
 adapter: massive aggregates, quotes and global csv.gz, Databento DBN and
-parquet exports, Tiingo BOATS, and your own parquet with a `qfz.dataset.yaml`.
+parquet exports, and your own parquet with a `qfz.dataset.yaml`.
 Nothing is converted and nothing is written into the scanned directories; the
 index is kept under `$STORAGE_ROOT/_state/index/`:
 

@@ -3,7 +3,7 @@
 Each adapter's ``describe(path)`` returns a :class:`Described` (one catalogue
 row, the parquet row-group statistics, the symbols with row counts) or
 ``None`` when the file is not its kind. Paths only break ties (massive's
-asset class, Tiingo's feed); a file is never accepted on its name alone.
+asset class); a file is never accepted on its name alone.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ MONTH_RE = re.compile(r"(?<!\d)(\d{4}-\d{2})(?!-\d)")
 MANIFEST = "qfz.dataset.yaml"
 # row groups this size or smaller (or a page index) make a sorted file fast to look up (L2)
 FAST_ROW_GROUP = 131_072
-# Per-file symbol lists pay off for files cut per symbol (Databento, Tiingo, most
+# Per-file symbol lists pay off for files cut per symbol (Databento, most
 # custom data). A whole-market day file (massive: up to a million OPRA contracts)
 # is not listed; its row groups' symbol ranges already prune lookups.
 MAX_LISTED_SYMBOLS = 10_000
@@ -261,34 +261,6 @@ def databento(path: Path, symbols: bool = True) -> Optional[Described]:
         symbols={s: 0 for s in info.symbols})
 
 
-# ── Tiingo BOATS ──────────────────────────────────────────────────────────
-
-def tiingo(path: Path, symbols: bool = True) -> Optional[Described]:
-    if not path.name.endswith(".json.gz") or "boats" not in path.parts:
-        return None
-    if "prices" in path.parts:
-        m = MONTH_RE.search(path.parent.name)
-        t = path.name[: -len(".json.gz")].upper()
-        start = f"{m.group(1)}-01" if m else None
-        return Described(adapter="tiingo.boats", vendor="tiingo", kind="bar", asset_class="stock", market="us",
-                         dataset="BOATS", schema="prices", resolution="1m", trade_date_min=start,
-                         trade_date_max=_month_end(m.group(1)) if m else None, access="whole", level="L0",
-                         note="gzip JSON: read whole (materialised)", symbols={t: 0})
-    if "quotes" in path.parts:
-        d = path.parent.name if DATE_RE.fullmatch(path.parent.name) else None
-        return Described(adapter="tiingo.boats", vendor="tiingo", kind="quote", asset_class="stock", market="us",
-                         dataset="BOATS", schema="quotes", resolution="snapshot", trade_date_min=d,
-                         trade_date_max=d, access="whole", level="L0", note="top-of-book snapshot",
-                         symbols_listed=False)
-    return None
-
-
-def _month_end(ym: str) -> str:
-    y, m = int(ym[:4]), int(ym[5:])
-    nxt = date(y + (m == 12), m % 12 + 1, 1)
-    return date.fromordinal(nxt.toordinal() - 1).isoformat()
-
-
 # ── QFZ standard (custom data with a manifest) ────────────────────────────
 
 REQUIRED = {"bar": ("ticker", "open", "high", "low", "close"), "quote": ("ticker", "bid_price", "ask_price"),
@@ -369,7 +341,6 @@ ADAPTERS: list[tuple[str, Callable[..., Optional[Described]]]] = [
     ("massive.global", massive_global),
     ("massive.reference", massive_reference),
     ("databento", databento),
-    ("tiingo.boats", tiingo),
 ]
 
 

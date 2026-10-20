@@ -6,7 +6,7 @@ Output (rewritten atomically on every scan):
   resolution, trade-date and time range, rows, access, level, scope, note;
 * ``row_groups.parquet`` parquet row groups: rows, symbol min/max;
 * ``symbols.parquet``    (symbol, path, rows) - rows is 0 when only the header
-  names the symbol (Databento, Tiingo);
+  names the symbol (Databento);
 * ``scan.json``          the last scan's report.
 
 A file whose size and mtime are unchanged is not read again. Files are only

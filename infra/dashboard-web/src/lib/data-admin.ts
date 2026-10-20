@@ -145,12 +145,9 @@ export type IndexReport = {
   index: string; groups: IndexGroup[]; unknown: { files: number; bytes: number; examples: string[] };
 };
 
-/** Vendors with keys in Data setup -> Vendor keys (Tiingo has keys but no import flow). */
-export type KeyVendor = Vendor | "tiingo";
-
 export type KeysView = {
-  keys: Record<KeyVendor, VendorKey[]>;
-  catalog: Record<KeyVendor, { product: string; name: string }[]>;
+  keys: Record<Vendor, VendorKey[]>;
+  catalog: Record<Vendor, { product: string; name: string }[]>;
   spend: Spend;
 };
 
@@ -228,10 +225,10 @@ export const dataAdmin = {
   compact: (older_than_days: number, dry_run: boolean) =>
     j<Job & { files?: number; bytes?: number; cutoff?: string; ok?: boolean }>("setup/compact", {
       method: "POST", body: JSON.stringify({ older_than_days, dry_run }) }),
-  saveKey: (vendor: KeyVendor, key: Partial<VendorKey> & Record<string, unknown>) =>
+  saveKey: (vendor: Vendor, key: Partial<VendorKey> & Record<string, unknown>) =>
     j<VendorKey>(`setup/keys/${vendor}`, { method: "POST", body: JSON.stringify(key) }),
-  deleteKey: (vendor: KeyVendor, id: string) => j<{ ok: boolean }>(`setup/keys/${vendor}/${id}`, { method: "DELETE" }),
-  testKey: (vendor: KeyVendor, id: string) =>
+  deleteKey: (vendor: Vendor, id: string) => j<{ ok: boolean }>(`setup/keys/${vendor}/${id}`, { method: "DELETE" }),
+  testKey: (vendor: Vendor, id: string) =>
     j<{ ok: boolean; error?: string; datasets?: number; note?: string; access?: Record<string, boolean> }>(
       `setup/keys/${vendor}/${id}/test`, { method: "POST", body: "{}" }),
   setupStatus: () => j<SetupStatus>("setup/status"),

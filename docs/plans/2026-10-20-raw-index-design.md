@@ -1,4 +1,4 @@
-# QFZ 行情数据索引格式（草案 v0.2，2026-10-20）
+# QFZ 行情数据索引格式（v0.3，2026-10-20）
 
 目标：用户指定一个或多个数据目录，QFZ 自动扫描并建立索引，**不做格式转换**，直接读原生文件。支持 massive 和 Databento 的原生格式，也让用户按一套标准字段提供自定义数据。
 
@@ -19,8 +19,8 @@
 数据目录（用户的，只读）        索引（QFZ 的）                逻辑数据集（对外不变）
 /data/massive_data      ─┐   _state/index/catalog.parquet   stock_minute
 /data/databento         ─┼─► _state/index/symbols.parquet ─► option_minute
-/data/tiingo            ─┤   _state/index/pidx/…  (sidecar) stock_quote_minute
-/data/my_custom_bars    ─┘   _state/index/derived/…         stock_overnight_daily …
+/data/my_custom_bars    ─┤   _state/index/pidx/…  (sidecar) stock_quote_minute
+                         ┘   _state/index/views/…           option_day …
 ```
 
 - **数据目录**：QFZ 只读，不在用户目录里写任何东西。
@@ -38,7 +38,6 @@
 | `massive.global` | `global_crypto|global_forex/…csv.gz` | CSV 表头 + 路径 |
 | `databento.dbn` | `*.dbn`、`*.dbn.zst` | DBN header（dataset、schema、时间范围、symbology） |
 | `databento.parquet` | Databento 导出的 parquet | 有 `rtype, ts_event, symbol` |
-| `tiingo.boats` | `boats/prices|quotes/…json.gz` | 路径 + JSON 字段 |
 | `qfz.standard` | 带 `qfz.dataset.yaml` 的目录里的 parquet | 清单文件（§5） |
 
 认不出的文件会列在扫描报告里（例如"未识别 12 个文件"），**不会静默忽略**。Databento 的 `cmbp-1` 和非 Blue Ocean 的 `mbo` 会被识别并登记，但标记为"不在范围内"（已经这样实现了）。
@@ -209,7 +208,6 @@ massive 期权分钟 K 原档是 L1，加上 sidecar 后到 L2。Databento 原�
 | massive `csv.gz`（加密货币、外汇） | gzip 不能跳读，要解析文本 | 实体化 | — |
 | Databento `ohlcv-1m`、`cbbo-1m`、`tcbbo` | 单 zstd frame | 实体化成分钟数据 | 一次查询要解压整个文件 0.1–0.6 秒 |
 | Databento Blue Ocean `mbo` | 单 frame，逐笔委托 | 派生：分钟 BBO、夜盘 K（已实现） | 417 个文件 31 秒 |
-| Tiingo BOATS | gzip JSON | 实体化，优先级排在 Databento 之后（已实现） | — |
 | `qfz.standard` 自定义数据 | 看用户写法 | L2 原地读；L0/L1 可选实体化 | — |
 
 另外有两个已知的原生格式问题，扫描时会登记，读取时修正：
@@ -221,7 +219,7 @@ massive 期权分钟 K 原档是 L1，加上 sidecar 后到 L2。Databento 原�
 
 - 同一逻辑数据集有多个来源时，**每个（代码，交易日，时段）只用一个来源**，不逐行混用。
 - 来源由高到低：清单里的 `priority`；内置默认值是"交易所原始 > 全市场合并 > 聚合商"。
-- 现在的实现已经是这样：Databento 补 massive 没有的代码，Tiingo 排在 Databento 后面。
+- 现在的实现已经是这样：Databento 补 massive 没有的代码。
 - 冲突和被替换的来源会写进目录，UI 可以显示"这一格的数据来自哪里"。
 
 **写入位置**：索引和 sidecar 都只写在 QFZ 的 `_state/index/`（已决定）。
@@ -247,3 +245,6 @@ massive 期权分钟 K 原档是 L1，加上 sidecar 后到 L2。Databento 原�
 2. `volume` 维持整数，碎股成交量四舍五入。
 3. 自定义数据只支持 parquet。
 4. A 股代码写成 `SH600519` / `SZ000001` / `BJ430047`。
+5. **范围**：数据来源是 massive 和 Databento 混合，同一个（代码、交易日、时段）只用一个来源；最高级别是分钟 K、BBO 和日 K，不支持 MBO、MBP（Blue Ocean 也一样，之后重新下载它的 K 线和 BBO）；不接 Tiingo。
+6. **不转存**：行情只有一套索引，本地不再写转换后的 store；派生数据只保留查询时现算的部分。
+7. **massive 统一成 parquet**：`global_crypto`、`global_forex` 的 csv.gz 在原始库里转成 parquet（按代码和时间排序、row group 12 万行、带 page index，也就是 L2），之后下载器下载完就转；原本的 csv.gz 经确认后删除。

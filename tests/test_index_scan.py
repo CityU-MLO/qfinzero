@@ -42,9 +42,8 @@ def _library(tmp: Path) -> Path:
     _aggs(opt, ["O:SPY260821C00500000", "O:SPY260821P00500000"], rows_per=3)
     big = root / "massive" / "us_stocks_sip" / "minute_aggs_v1" / "2026" / "08" / "2026-08-04.parquet"
     _aggs(big, [f"T{i:05d}" for i in range(140)], volume_type=pa.float64(), rows_per=1000)
-    tiingo = root / "tiingo" / "boats" / "prices" / "2026-08" / "AAPL.json.gz"
-    tiingo.parent.mkdir(parents=True)
-    tiingo.write_bytes(gzip.compress(json.dumps([{"date": "2026-08-04T00:00:00.000Z", "close": 1}]).encode()))
+    day = root / "other" / "us_stocks_sip" / "day_aggs_v1" / "2026" / "08" / "2026-08-05.parquet"
+    _aggs(day, ["AAPL", "MSFT"])
     custom = root / "my_cn"
     (custom / "2026-08-03").mkdir(parents=True)
     (custom / "qfz.dataset.yaml").write_text(
@@ -79,7 +78,7 @@ def test_scan_recognises_each_source(tmp_path):
     assert stk["level"] == "L1" and "row groups up to 140,000 rows" in stk["note"]
     assert "fractional volume" in stk["note"]
 
-    assert (by["AAPL.json.gz"]["adapter"], by["AAPL.json.gz"]["trade_date_max"]) == ("tiingo.boats", "2026-08-31")
+    assert (by["2026-08-05.parquet"]["adapter"], by["2026-08-05.parquet"]["resolution"]) == ("massive.aggs", "1d")
 
     bars = by["bars.parquet"]
     assert (bars["adapter"], bars["vendor"], bars["dataset"], bars["market"], bars["scope"], bars["level"]) \
@@ -92,7 +91,7 @@ def test_scan_recognises_each_source(tmp_path):
     assert by["qfz.dataset.yaml"]["kind"] == "manifest" and by["qfz.dataset.yaml"]["scope"] == "in"
 
     syms = {(r["symbol"], Path(r["path"]).name): r["rows"] for r in _rows(storage, "symbols.parquet")}
-    assert syms == {("SH600519", "bars.parquet"): 1, ("SZ000001", "bars.parquet"): 1, ("AAPL", "AAPL.json.gz"): 0}
+    assert syms == {("SH600519", "bars.parquet"): 1, ("SZ000001", "bars.parquet"): 1}
     assert by["bars.parquet"]["symbols"] == 2
     rgs = [r for r in _rows(storage, "row_groups.parquet") if r["path"].endswith("2026-08-03.parquet")]
     assert rgs == [{"path": str(opt["path"]), "rg": 0, "rows": 6, "symbol_min": "O:SPY260821C00500000",
@@ -138,10 +137,10 @@ def test_massive_trades_and_reference_files(tmp_path):
 
 def test_scanning_one_directory_keeps_the_others(tmp_path):
     root, storage = _library(tmp_path), tmp_path / "storage"
-    catalog.scan([root / "massive", root / "tiingo"], storage, threads=2)
-    rep = catalog.scan([root / "tiingo"], storage, threads=2)
-    assert rep["files"] == 3 and rep["read"] == 0 and rep["scanned"] == [str((root / "tiingo").resolve())]
-    assert {Path(r).name for r in rep["roots"]} == {"massive", "tiingo"}
+    catalog.scan([root / "massive", root / "other"], storage, threads=2)
+    rep = catalog.scan([root / "other"], storage, threads=2)
+    assert rep["files"] == 3 and rep["read"] == 0 and rep["scanned"] == [str((root / "other").resolve())]
+    assert {Path(r).name for r in rep["roots"]} == {"massive", "other"}
 
 
 def test_unsorted_row_groups_are_level_one(tmp_path):
