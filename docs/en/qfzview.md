@@ -38,6 +38,12 @@ popular crypto and FX pairs. The watchlist on the right is kept in the browser.
   *All* shows every session, *Extended* drops the overnight session, *Regular*
   keeps 09:30–16:00 only; the choice is kept in the browser. The broker's chart
   shades the sessions too.
+- **Option chain** (stocks and option contracts): opens the underlying's chain
+  beside the chart for one expiry at a chosen ET minute, on the days the store
+  has the underlying's option minutes: calls | strike | puts with bid/ask,
+  last trade, volume so far, IV and delta, the at-the-money strike marked.
+  Clicking a contract charts it; an option contract's chart shows its expiry,
+  strike and right, links back to the underlying and starts at its expiry.
 - **Bid/Ask** draws the last quote of each bar (up to 15-minute bars) for
   stocks, futures, FX and option contracts when the store has quotes.
 - The panel under the watchlist lists the date range of each data level of the

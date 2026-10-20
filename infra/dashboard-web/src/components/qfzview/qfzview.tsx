@@ -6,11 +6,13 @@
 // those the store has data for. Scroll left to load older history. US stock
 // minute charts shade the overnight (Blue Ocean), pre-market and after-hours
 // sessions and can show all of them, the extended day or the regular session.
+// Stocks and option contracts open the underlying's option chain beside the
+// chart; clicking a contract charts it.
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { CandlestickChart, Info, Loader2, Plus, Search, Star, X } from "lucide-react";
+import { ArrowLeft, CandlestickChart, Info, Layers, Loader2, Plus, Search, Star, X } from "lucide-react";
 
 import { useLocale, useT } from "@/components/locale-provider";
 import {
@@ -20,8 +22,9 @@ import {
   aggregate, filterSessions, INTERVALS, mergeBars, SESSIONS, type Bar, type Interval, type SessionFilter,
 } from "@/lib/bars";
 import {
-  addDays, extent as loadExtent, isoDay, kindOf, LEVELS, loadBars, loadQuotes, suggest, zoneOf, type Kind,
+  addDays, extent as loadExtent, isoDay, kindOf, LEVELS, loadBars, loadQuotes, parseOption, suggest, zoneOf, type Kind,
 } from "@/lib/qfzview";
+import { OptionChainPanel } from "@/components/qfzview/option-chain-panel";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_WATCH = ["SPY", "QQQ", "AAPL", "NVDA", "/CL", "/ZN", "X:BTC-USD", "X:ETH-USD", "C:EUR-USD", "C:USD-JPY"];
@@ -106,6 +109,9 @@ export function QFZView() {
   const [ind, setInd] = useStored<Indicators>("qfzview.indicators", { ma: [20], ema: [], bb: false, vwap: false });
   const [showQuotes, setShowQuotes] = React.useState(false);
   const [sessFilter, setSessFilter] = useStored<SessionFilter>("qfzview.sessions", "all");
+  const [chainOpen, setChainOpen] = React.useState(false);
+  const opt = kind === "option" ? parseOption(symbol) : null;
+  const chainUnderlying = kind === "stock" ? symbol : opt?.underlying ?? null;
   const ext = useQuery({ queryKey: ["qfzview", "extent"], queryFn: loadExtent, staleTime: 5 * 60_000 });
 
   const levels = LEVELS[kind];
@@ -116,7 +122,10 @@ export function QFZView() {
   const offered = INTERVALS.filter((x) => (x.id === 1440 ? hasDaily : hasMinute));
   const daily = interval === 1440;
   const sessionsOn = kind === "stock" && !daily;
-  const lastDay = (daily ? stores[levels.daily ?? ""] : stores[levels.minute ?? ""])?.end ?? isoDay(new Date());
+  const storeEnd = (daily ? stores[levels.daily ?? ""] : stores[levels.minute ?? ""])?.end ?? isoDay(new Date());
+  // a contract stops trading at its expiry: start there when the store reaches further
+  const optExpiry = kind === "option" ? parseOption(symbol)?.expiry : undefined;
+  const lastDay = optExpiry && optExpiry < storeEnd ? optExpiry : storeEnd;
 
   const set = React.useCallback((next: { s?: string; i?: number }) => {
     const p = new URLSearchParams(params.toString());
@@ -213,6 +222,12 @@ export function QFZView() {
 
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
+  // the chain opens on the chart's last day, or the latest day with option minutes when that is earlier
+  const optRange = stores[LEVELS.option.minute ?? ""] ?? null;
+  const chainDay = (() => {
+    const d = shownBars.length ? shownBars[shownBars.length - 1].day || isoDay(new Date(shownBars[shownBars.length - 1].ns / 1e6)) : lastDay;
+    return optRange && d > optRange.end ? optRange.end : d;
+  })();
   const chg = last && prev ? last.close - prev.close : null;
   const toggleMa = (n: number, list: "ma" | "ema") =>
     setInd({ ...ind, [list]: ind[list].includes(n) ? ind[list].filter((x) => x !== n) : [...ind[list], n].sort((a, b) => a - b) });
@@ -226,8 +241,19 @@ export function QFZView() {
         <span className="mr-1 flex items-center gap-1.5 text-[13px] font-semibold"><CandlestickChart className="h-4 w-4 text-primary" />QFZView</span>
         <SymbolSearch onPick={(s) => set({ s })} />
         <div className="flex items-center gap-2 px-2">
+          {opt && (
+            <button onClick={() => set({ s: opt.underlying })} title={t(`Back to ${opt.underlying}`, `回到 ${opt.underlying}`)}
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-primary hover:bg-primary/10">
+              <ArrowLeft className="h-3.5 w-3.5" />{opt.underlying}
+            </button>
+          )}
           <span className="font-mono text-[15px] font-semibold">{symbol}</span>
           <KindBadge kind={kind} />
+          {opt && (
+            <span className="text-[12px] text-muted-foreground">
+              {opt.expiry} · {opt.strike} {opt.right === "C" ? t("call", "看涨") : t("put", "看跌")}
+            </span>
+          )}
           {last && (
             <span className="font-mono text-[13px]">
               <b>{last.close.toLocaleString(intl, { maximumFractionDigits: 6 })}</b>
@@ -281,6 +307,12 @@ export function QFZView() {
             </button>
           )}
         </div>
+        {chainUnderlying && (
+          <button onClick={() => setChainOpen(!chainOpen)}
+                  className={cn("flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px]", chainOpen ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}>
+            <Layers className="h-3.5 w-3.5" />{t("Option chain", "期权链")}
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           {loading.current && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {shownBars.length > 0 && <span>{t(`${bars.length.toLocaleString()} bars · ${zone === "et" ? "ET" : "UTC"}`, `${bars.length.toLocaleString()} 根 · ${zone === "et" ? "美东时间" : "UTC"}`)}</span>}
@@ -297,8 +329,17 @@ export function QFZView() {
                             : t(`No ${daily ? "daily" : "minute"} data for ${symbol}.`, `${symbol} 没有${daily ? "日线" : "分钟"}数据。`)} />
         </div>
 
+        {/* option chain (replaces the watchlist while open) */}
+        {chainOpen && chainUnderlying && (
+          <aside className="flex w-full max-w-[640px] shrink-0 flex-col border-l bg-card sm:w-[52%]">
+            <OptionChainPanel underlying={chainUnderlying} highlight={kind === "option" ? symbol : undefined}
+                              defaultDay={chainDay} range={optRange} onClose={() => setChainOpen(false)}
+                              onPick={(c) => set({ s: c, i: interval === 1440 ? 1440 : Math.min(interval, 15) })} />
+          </aside>
+        )}
+
         {/* side panel */}
-        <aside className="hidden w-72 shrink-0 flex-col border-l bg-card lg:flex">
+        <aside className={cn("hidden w-72 shrink-0 flex-col border-l bg-card lg:flex", chainOpen && chainUnderlying && "lg:hidden")}>
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground"><Star className="h-3.5 w-3.5" />{t("Watchlist", "自选")}</span>
             {!watch.includes(symbol) && (

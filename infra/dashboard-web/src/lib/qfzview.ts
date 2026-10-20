@@ -4,7 +4,7 @@
 // Symbols follow the coverage map: SPY (stock), /CL (future), X:BTC-USD
 // (crypto), C:EUR-USD (FX), O:SPY250117C00500000 (option contract).
 
-import { dayTime, fromDailyRows, fromMinuteRows, type Bar, type Interval, type Zone } from "@/lib/bars";
+import { dayTime, etOffsetSec, fromDailyRows, fromMinuteRows, type Bar, type Interval, type Zone } from "@/lib/bars";
 
 export type Kind = "stock" | "future" | "crypto" | "fx" | "option";
 
@@ -105,4 +105,78 @@ export async function suggest(q: string): Promise<{ ticker: string; dollar_volum
   const r = await fetch(`/api/coverage/suggest?q=${encodeURIComponent(q)}&limit=12`);
   if (!r.ok) return [];
   return ((await r.json()) as { tickers: { ticker: string; dollar_volume?: number }[] }).tickers;
+}
+
+// ── option chains ────────────────────────────────────────────────────────
+
+/** ``O:SPY260821C00766000`` -> its parts, or ``null`` for anything else. */
+export function parseOption(symbol: string): { underlying: string; expiry: string; right: "C" | "P"; strike: number } | null {
+  const m = /^O:([A-Z]+)\d{0,2}(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(symbol.trim().toUpperCase());
+  if (!m) return null;
+  return { underlying: m[1], expiry: `20${m[2]}-${m[3]}-${m[4]}`, right: m[5] as "C" | "P", strike: Number(m[6]) / 1000 };
+}
+
+/** UTC ISO time (``YYYY-MM-DDTHH:MM:SSZ``) of an ET wall-clock time. */
+export function etToUtcIso(day: string, hm: string): string {
+  const wall = Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10), +hm.slice(0, 2), +hm.slice(3, 5));
+  let ms = wall - etOffsetSec(wall) * 1000;
+  ms = wall - etOffsetSec(ms) * 1000;          // settle the offset on the real instant (DST edges)
+  return new Date(ms).toISOString().slice(0, 19) + "Z";
+}
+
+export interface ChainLeg {
+  ticker: string;
+  last: number | null;
+  volume: number | null;
+  bid: number | null;
+  ask: number | null;
+  iv: number | null;
+  delta: number | null;
+}
+export interface ChainRow { strike: number; call?: ChainLeg; put?: ChainLeg }
+
+const numOrNull = (v: unknown) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+
+/** Days in ``[start, end]`` with option minute bars for ``underlying`` (coverage map), newest first. */
+export async function loadOptionDays(underlying: string, start: string, end: string): Promise<string[]> {
+  const r = await fetch(`/api/coverage/matrix?tickers=${encodeURIComponent(underlying)}&start=${start}&end=${end}&events=false`);
+  if (!r.ok) return [];
+  const m = (await r.json()) as { cells?: Record<string, Record<string, Record<string, number>>> };
+  const days = m.cells?.[underlying] ?? {};
+  return Object.keys(days).filter((d) => days[d]?.options_minute).sort().reverse();
+}
+
+/** The underlying's daily close on (or the last day before) ``day``. */
+export async function loadSpot(underlying: string, day: string): Promise<number | null> {
+  const rows = await upq<Row[]>("/stock/daily", { tickers: underlying, start: addDays(day, -7), end: day });
+  const last = rows.filter((r) => r.close != null).pop();
+  return last ? Number(last.close) : null;
+}
+
+/** Expiries that traded on ``day``, from the end-of-day chain (calls near the money keep it small). */
+export async function loadExpiries(underlying: string, day: string, spot: number | null): Promise<string[]> {
+  const rows = await upq<Row[]>("/option/chain_query", {
+    underlying, date: day, type: "C",
+    strike_min: spot ? Math.floor(spot * 0.85) : undefined, strike_max: spot ? Math.ceil(spot * 1.15) : undefined,
+  });
+  return [...new Set(rows.map((r) => String(r.expiry)).filter((e) => e >= day))].sort();
+}
+
+/** The chain of one expiry as it stood at ``atIso``: last trade, volume, bid/ask, IV and delta, by strike. */
+export async function loadChain(underlying: string, atIso: string, expiry: string): Promise<ChainRow[]> {
+  const rows = await upq<Row[]>("/option/chain_snapshot", {
+    underlying, at: atIso, expiry_min: expiry, expiry_max: expiry, include_greeks: "true",
+  });
+  const by = new Map<number, ChainRow>();
+  for (const r of rows) {
+    const strike = Number(r.strike);
+    const row = by.get(strike) ?? { strike };
+    const leg: ChainLeg = {
+      ticker: String(r.ticker), last: numOrNull(r.last), volume: numOrNull(r.volume), bid: numOrNull(r.bid),
+      ask: numOrNull(r.ask), iv: numOrNull(r.iv), delta: numOrNull(r.delta),
+    };
+    if (r.type === "C") row.call = leg; else row.put = leg;
+    by.set(strike, row);
+  }
+  return [...by.values()].sort((a, b) => a.strike - b.strike);
 }

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregate, chartTime, etOffsetSec, filterSessions, fromDailyRows, mergeBars, sessionOf, sessionRuns, sma, vwap, type Bar,
 } from "./bars";
-import { kindOf } from "./qfzview";
+import { etToUtcIso, kindOf, parseOption } from "./qfzview";
 
 const MIN = 60e9;
 // 2026-08-21 13:30 UTC = 09:30 EDT
@@ -50,6 +50,14 @@ describe("bars", () => {
     expect(sessionRuns(day, 1)).toEqual([
       { from: 0, to: 0, session: "overnight" }, { from: 1, to: 1, session: "pre" }, { from: 2, to: 3, session: "regular" },
       { from: 4, to: 4, session: "post" }, { from: 5, to: 5, session: "overnight" }]);
+  });
+
+  it("reads option tickers and ET times for the chain", () => {
+    expect(parseOption("O:SPY260821C00766000")).toEqual({ underlying: "SPY", expiry: "2026-08-21", right: "C", strike: 766 });
+    expect(parseOption("O:BRKB260821P00480500")?.strike).toBe(480.5);
+    expect(parseOption("SPY")).toBeNull();
+    expect(etToUtcIso("2026-08-20", "15:59")).toBe("2026-08-20T19:59:00Z");     // EDT
+    expect(etToUtcIso("2026-01-07", "09:30")).toBe("2026-01-07T14:30:00Z");     // EST
   });
 
   it("knows the kind of a symbol", () => {
