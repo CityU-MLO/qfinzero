@@ -44,7 +44,7 @@ QFINZERO_MCP_TRANSPORT=streamable-http QFINZERO_MCP_PORT=19360 python mcp/server
 
 ### 资源与提示词
 
-除了 37 个工具之外，服务器还暴露了 MCP **资源**和一个**提示词**：
+除了这些工具之外，服务器还暴露了 MCP **资源**和一个**提示词**：
 
 | 类型 | 名称 | 说明 |
 |------|------|-------------|
@@ -88,8 +88,11 @@ claude mcp add qfinzero python /path/to/qfinzero/mcp/server.py
 | `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19350` | 市场数据服务 |
 | `QFINZERO_ESP_URL`   | `http://127.0.0.1:19330` | 新闻/事件服务 |
 | `QFINZERO_PMB_URL`   | `http://127.0.0.1:19380` | 交易经纪商      |
+| `QFINZERO_DATA_ADMIN_URL` | `http://127.0.0.1:19340` | 覆盖率地图和原始数据索引（`data_*`、`admin_*`） |
 
 ## 可用工具
+
+完整、最新的列表（69 个工具及全部参数）见自动生成的 [MCP 工具参考](../../en/mcp-tools.md)；下面的表格介绍主要工具。
 
 ### UPQ — 市场数据（7 个工具）
 

@@ -28,6 +28,7 @@ from qfinzero.config import (
     PMB_URL as DEFAULT_PMB_URL,
     ESP_URL as DEFAULT_ESP_URL,
     UPQ_URL as DEFAULT_UPQ_URL,
+    DATA_ADMIN_URL as DEFAULT_DATA_ADMIN_URL,
     DASHBOARD_PORT,
     PMB_PORT,
     ESP_PORT,
@@ -40,6 +41,7 @@ from qfinzero.config import (
 UPQ_URL = os.environ.get("QFINZERO_UPQ_URL", DEFAULT_UPQ_URL)
 ESP_URL = os.environ.get("QFINZERO_ESP_URL", DEFAULT_ESP_URL)
 PMB_URL = os.environ.get("QFINZERO_PMB_URL", DEFAULT_PMB_URL)
+DATA_ADMIN_URL = os.environ.get("QFINZERO_DATA_ADMIN_URL", DEFAULT_DATA_ADMIN_URL)
 
 # ── MCP transport (modern: stdio default; streamable-http for remote/HTTP) ────
 MCP_TRANSPORT = os.environ.get("QFINZERO_MCP_TRANSPORT", "stdio")
@@ -76,7 +78,11 @@ mcp = FastMCP(
         "leverage via pmb_get_config. "
         "Bar-stepped backtests (advanced): pmb_create_session over a universe, "
         "loop pmb_step_session, place orders with pmb_buy_stock / pmb_sell_stock, "
-        "then pmb_get_summary."
+        "then pmb_get_summary. "
+        "Before querying, data_extent / data_coverage say which dates and data "
+        "levels the store has, upq_option_expiries lists an underlying's expiries, "
+        "and market_calendar gives trading days and the ET session hours "
+        "(overnight 20:00-04:00 on Blue Ocean, pre-market, regular, after-hours)."
     ),
 )
 
@@ -1530,8 +1536,11 @@ def pmb_create_session(
     Args:
         account_id: The account to trade in (from pmb_create_account)
         frequency: Time step size — "1m" (minute bars) or "1d" (daily bars)
-        start_ts: Session start "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD"
-                  e.g. "2024-01-02T09:30:00" for minute, "2024-01-02" for daily
+        start_ts: Session start "YYYY-MM-DDTHH:MM:SS" (UTC) or "YYYY-MM-DD"
+                  e.g. "2024-01-02T09:30:00" for minute, "2024-01-02" for daily.
+                  A minute session from "YYYY-MM-DDT00:00:00" (20:00 ET the evening
+                  before) starts with that day's overnight session where the store
+                  has Blue Ocean bars; see market_calendar for the session hours
         end_ts: Session end datetime, same format as start_ts
         stock_universe: Stock symbols to include, e.g. ["AAPL", "NVDA", "SPY"]
         option_universe: Option contracts to include, e.g. ["O:SPY250117C00500000"]
@@ -1650,7 +1659,8 @@ def pmb_session_state(session_id: str,
 ) -> str:
     """Get the full consolidated state of a session in one call.
 
-    Returns clock (current bar, index, total bars, status), the account snapshot
+    Returns clock (current bar, index, total bars, status, segment OVERNIGHT /
+    PRE / REGULAR / POST and the trading date), the account snapshot
     (cash, equity, buying power, margin), open positions, working orders, recent
     trades, and the current market quotes — everything an agent needs each step.
 
@@ -2040,6 +2050,209 @@ def pmb_cancel_order(
                 account_id=account_id,
             )
         )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# DATA COVERAGE & CALENDAR — what the store holds, and when markets trade
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _data_admin(path: str, params: Optional[dict] = None) -> dict:
+    """GET from the data-admin service (coverage map, raw-data index); no proxy."""
+    import requests
+    with requests.Session() as s:
+        s.trust_env = False
+        r = s.get(f"{DATA_ADMIN_URL}{path}", params=params, timeout=120)
+        if r.status_code >= 400:
+            raise ValueError(f"data-admin {path}: {r.status_code} {r.text[:300]}")
+        return r.json()
+
+
+def _spans(days: list[str]) -> list[list[str]]:
+    """Sorted trading days -> runs of consecutive trading days ``[[first, last], ...]``."""
+    from datetime import date as _date
+    from qfinzero.market_calendar import next_trading_day
+    out: list[list[str]] = []
+    for d in sorted(days):
+        if out and next_trading_day(_date.fromisoformat(out[-1][1])).isoformat() >= d:
+            out[-1][1] = d
+        else:
+            out.append([d, d])
+    return out
+
+
+@mcp.tool()
+def data_extent() -> str:
+    """Which data the store holds: first and last date (and number of days) of each level.
+
+    Levels: daily, minute, quotes, overnight_daily (Blue Ocean sessions) for US
+    stocks; options_eod, options_minute, options_quotes; futures_daily,
+    futures_minute, futures_quotes; crypto_daily, crypto_minute; fx_daily,
+    fx_minute, fx_quotes. Ranges are per store: a symbol may cover less (use
+    data_coverage for one symbol). Also lists frequently traded symbols.
+
+    Returns:
+        JSON with stores {level: {start, end, days} | null} and suggested symbols.
+    """
+    d = _data_admin("/coverage/extent")
+    return json.dumps({"stores": d.get("stores"), "default_range": d.get("default"),
+                       "suggested": [x.get("ticker") for x in d.get("suggested") or []],
+                       "suggested_futures": d.get("suggested_futures"), "suggested_crypto": d.get("suggested_crypto"),
+                       "suggested_fx": d.get("suggested_fx")})
+
+
+@mcp.tool()
+def data_coverage(tickers: list[str], start: str, end: str) -> str:
+    """Which data levels each symbol has, as runs of consecutive trading days.
+
+    Use it before a query or a session to pick dates that have data: e.g. the
+    days SPY has option minutes, or whether NVDA has overnight bars.
+
+    Args:
+        tickers: Symbols in coverage form: stocks "SPY", futures "/CL",
+                 crypto "X:BTC-USD", FX "C:EUR-USD" (up to 50)
+        start: First date "YYYY-MM-DD"
+        end: Last date "YYYY-MM-DD"
+
+    Returns:
+        JSON {ticker: {"kind": ..., "levels": {level: [[first, last], ...]}}}
+        with levels as in data_extent (stock minute bars also by session:
+        minute:overnight, minute:pre, minute:regular, minute:post).
+    """
+    m = _data_admin("/coverage/matrix", {"tickers": ",".join(tickers), "start": start, "end": end,
+                                         "events": "false"})
+    out: dict = {}
+    for tk, days in (m.get("cells") or {}).items():
+        levels: dict[str, list[str]] = {}
+        for d, cell in days.items():
+            for k, v in (cell or {}).items():
+                if isinstance(v, dict):
+                    for seg, n in v.items():
+                        if n:
+                            levels.setdefault(f"minute:{seg}", []).append(d)
+                elif v:
+                    levels.setdefault(k, []).append(d)
+        out[tk] = {"kind": (m.get("kinds") or {}).get(tk), "levels": {k: _spans(v) for k, v in sorted(levels.items())}}
+    return json.dumps(out)
+
+
+@mcp.tool()
+def data_day(ticker: str, date: str) -> str:
+    """What the store has for one symbol on one day.
+
+    Rows per level and session, the first and last quote, the option expiries
+    that traded, corporate actions and the day's news/earnings events.
+
+    Args:
+        ticker: Coverage-form symbol, e.g. "SPY", "/CL", "X:BTC-USD"
+        date: "YYYY-MM-DD"
+    """
+    return json.dumps(_data_admin("/coverage/cell", {"ticker": ticker, "date": date}))
+
+
+@mcp.tool()
+def upq_option_expiries(
+    underlying: str,
+    date: str,
+    session_id: Optional[str] = None,
+    ctx: Context = None,
+) -> str:
+    """Expiries of an underlying's options that traded on a day, with their strike range.
+
+    Use it to pick an expiry before upq_chain_snapshot / upq_option_chain.
+
+    Args:
+        underlying: e.g. "SPY"
+        date: Trade date "YYYY-MM-DD"
+        session_id: Optional PMB session to time-lock this query to.
+
+    Returns:
+        JSON list [{expiry, days_to_expiry, contracts, strike_min, strike_max, volume}],
+        nearest expiry first.
+    """
+    from datetime import date as _date
+    as_of = _lock(ctx, session_id)
+    with UPQClient(UPQ_URL) as client:
+        rows = client.option_chain(underlying=underlying, date=date, fields="expiry,strike,volume", as_of=as_of)
+    by: dict[str, dict] = {}
+    for r in rows:
+        e = str(r.get("expiry"))
+        g = by.setdefault(e, {"expiry": e, "contracts": 0, "strike_min": None, "strike_max": None, "volume": 0})
+        k = r.get("strike")
+        g["contracts"] += 1
+        g["volume"] += int(r.get("volume") or 0)
+        if k is not None:
+            g["strike_min"] = k if g["strike_min"] is None else min(g["strike_min"], k)
+            g["strike_max"] = k if g["strike_max"] is None else max(g["strike_max"], k)
+    d0 = _date.fromisoformat(date)
+    out = sorted(by.values(), key=lambda g: g["expiry"])
+    for g in out:
+        g["days_to_expiry"] = (_date.fromisoformat(g["expiry"]) - d0).days
+    return json.dumps(out)
+
+
+@mcp.tool()
+def market_calendar(start: str, end: str) -> str:
+    """US trading days in a range with each day's session hours (ET and UTC).
+
+    A trading day's sessions, in order: overnight (Blue Ocean, 20:00 ET the
+    evening before to 04:00), pre-market (04:00-09:30), regular (09:30-16:00,
+    13:00 on early-close days) and after-hours (to 20:00, 17:00 on early-close
+    days). The overnight session belongs to the trading day it precedes
+    (Sunday night is Monday's). PMB orders use these: trading_hours REGULAR,
+    EXTENDED (pre + regular + after-hours) or OVERNIGHT (all four).
+
+    Args:
+        start: First date "YYYY-MM-DD"
+        end: Last date "YYYY-MM-DD" (at most 400 days after start)
+
+    Returns:
+        JSON {trading_days: [{date, early_close, sessions: {overnight|pre|regular|post:
+        {start_et, end_et, start_utc, end_utc}}}], holidays: [...]}
+    """
+    from datetime import date as _date, datetime as _dt, timedelta as _td, timezone as _tz
+    from zoneinfo import ZoneInfo
+    from qfinzero import market_calendar as cal
+    a, b = _date.fromisoformat(start), _date.fromisoformat(end)
+    if b < a or (b - a).days > 400:
+        raise ValueError("end must be on or after start and at most 400 days later")
+    et = ZoneInfo("America/New_York")
+
+    def at(d: _date, minutes: int) -> dict:
+        t = _dt(d.year, d.month, d.day, tzinfo=et) + _td(minutes=minutes)
+        return {"et": t.strftime("%Y-%m-%d %H:%M"), "utc": t.astimezone(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    def span(d0: _date, m0: int, d1: _date, m1: int) -> dict:
+        x, y = at(d0, m0), at(d1, m1)
+        return {"start_et": x["et"], "end_et": y["et"], "start_utc": x["utc"], "end_utc": y["utc"]}
+
+    days = []
+    for d in cal.trading_days(a, b):
+        close, post = cal.regular_close(d), cal.post_close(d)
+        days.append({"date": d.isoformat(), "early_close": cal.is_early_close(d), "sessions": {
+            "overnight": span(d - _td(days=1), 20 * 60, d, 4 * 60),
+            "pre": span(d, 4 * 60, d, 9 * 60 + 30),
+            "regular": span(d, 9 * 60 + 30, d, close),
+            "post": span(d, close, d, post)}})
+    hol = sorted(h.isoformat() for y in range(a.year, b.year + 1) for h in cal.holidays(y) if a <= h <= b)
+    return json.dumps({"trading_days": days, "holidays": hol})
+
+
+@mcp.tool()
+def admin_data_catalog() -> str:
+    """The raw-data index: every market-data dataset found in the raw libraries.
+
+    One row per (vendor, dataset, schema): kind, asset class, resolution, file
+    count, size, first and last date, index levels (L0 read whole, L1 indexed,
+    L2 fast) and scope (in, or out for data QFinZero does not use such as MBO).
+    From the last scan (Data setup -> Scan & index, or `qfz-data index`).
+    Needs the admin scope.
+    """
+    rep = (_data_admin("/setup/index") or {}).get("report") or {}
+    groups = [{k: g.get(k) for k in ("vendor", "dataset", "schema", "kind", "asset_class", "resolution", "files",
+                                     "bytes", "first", "last", "levels", "scope")} for g in rep.get("groups") or []]
+    return json.dumps({"last_scanned": rep.get("scanned"), "roots": rep.get("roots"), "files": rep.get("files"),
+                       "groups": groups, "unknown": rep.get("unknown")})
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -79,13 +79,18 @@ step 的返回结果会带上 `clock.segment` 和 `clock.trading_date`。
 
 ## 3. 报价与期权成交
 
-两个报价存储保存每分钟结束时的最优买卖价：`stock_quote_minute` 和 `option_quote_minute`，来自 Databento 的 `cmbp-1`、`cbbo-1s/1m` 和 `bbo-1s/1m`。没有变化的分钟不存储，读取时沿用上一条报价。
+两个报价存储保存每分钟结束时的最优买卖价：`stock_quote_minute` 和 `option_quote_minute`，来自 Databento 的 `cbbo-1s/1m` 和 `bbo-1s/1m`（包括 Blue Ocean 的夜盘盘口）以及 massive 的报价。没有变化的分钟不存储，读取时沿用上一条报价。
 
 | 接口 | MCP 工具 | 内容 |
 |------|----------|------|
 | `/stock/quote` | `upq_stock_quote` | 股票分钟 NBBO |
 | `/option/quote` | `upq_option_quote` | 单个合约的分钟 NBBO |
 | `/option/chain_snapshot` | `upq_chain_snapshot` | 某一时刻的期权链：最近成交、当日累计成交量、买卖价和中间价、按中间价计算的 Greeks |
+
+**存储里有什么。** 选日期之前，agent 可以先查：`data_extent` 给出每个数据层的日期范围，`data_coverage` 给出某个代码每个数据层覆盖的连续交易日
+（股票分钟线还按夜盘、盘前、盘中、盘后分开），`data_day` 给出某个代码某一天的详情，`upq_option_expiries` 列出某天成交过的到期日和行权价范围。
+`market_calendar` 列出交易日、提前收盘日，以及每天各时段的美东和 UTC 时间，也就是 PMB `trading_hours` 所指的时段。管理员还可以用
+`admin_data_catalog` 查看原始数据索引（数据集、等级、范围）。
 
 分钟级 session 会加载每个期权的报价。`execution_config.option_fill_model = "quote"`（默认）时：
 
@@ -208,7 +213,7 @@ key 的权限可以比所有者更窄。在账号页创建 key，或由管理员
 | `market-data` | UPQ（`/svc/upq`、`/api/upq`、`/api/coverage`） | viewer |
 | `events` | ESP（`/svc/esp`、`/api/esp`） | viewer |
 | `trading` | PMB（`/svc/pmb`、`/api/pmb`） | researcher |
-| `mcp` | `/mcp`；其中的工具取决于其他 scope（`upq_*`/`research_*` 需要 `market-data`，`esp_*` 需要 `events`，`pmb_*` 需要 `trading`） | researcher |
+| `mcp` | `/mcp`；其中的工具取决于其他 scope（`upq_*`/`research_*`/`data_*` 需要 `market-data`，`esp_*` 需要 `events`，`pmb_*` 需要 `trading`，`admin_*` 需要 `admin`；`market_calendar` 不需要） | researcher |
 | `chat` | 对话助手 | researcher |
 | `admin` | 数据管理、用户和 key | admin |
 

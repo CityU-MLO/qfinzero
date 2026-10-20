@@ -66,7 +66,8 @@ def key_allows(scopes: Optional[list[str]], read_only: bool, method: str, path: 
 
 
 # MCP tool name prefix -> the scope it needs; read-only keys get only these pmb tools
-MCP_TOOL_SCOPES = {"upq_": "market-data", "research_": "market-data", "esp_": "events", "pmb_": "trading"}
+MCP_TOOL_SCOPES = {"upq_": "market-data", "research_": "market-data", "data_": "market-data", "esp_": "events",
+                   "pmb_": "trading", "admin_": "admin"}
 MCP_READ_TOOLS = ("pmb_health", "pmb_get_", "pmb_quote", "pmb_session_state", "pmb_export_session")
 
 

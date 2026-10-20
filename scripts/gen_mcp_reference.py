@@ -21,9 +21,12 @@ OUT = REPO / "docs" / "en" / "mcp-tools.md"
 
 GROUPS = [
     ("upq_", "Market data (UPQ)"),
+    ("data_", "Data coverage"),
+    ("market_", "Calendar"),
     ("esp_", "News and events (ESP)"),
     ("research_", "Research"),
     ("pmb_", "Paper broker (PMB)"),
+    ("admin_", "Data administration"),
 ]
 # Parameters the hub fills in; documented once in the header instead.
 HIDDEN = {"ctx"}

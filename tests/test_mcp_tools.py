@@ -39,6 +39,10 @@ def _patch_urls(monkeypatch):
     monkeypatch.setattr(_srv_mod, "UPQ_URL", MOCK_UPQ_URL)
     monkeypatch.setattr(_srv_mod, "ESP_URL", MOCK_ESP_URL)
     monkeypatch.setattr(_srv_mod, "PMB_URL", MOCK_PMB_URL)
+    monkeypatch.setattr(_srv_mod, "DATA_ADMIN_URL", MOCK_DATA_ADMIN_URL)
+
+
+MOCK_DATA_ADMIN_URL = "http://mock-data-admin:19340"
 
 
 def _srv():
@@ -353,3 +357,74 @@ class TestPMBTools:
         responses.get(f"{MOCK_PMB_URL}/v1/sessions/s1/export", body="date,pnl\n")
         result = _srv().pmb_export_session("s1", fmt="csv")
         assert "date,pnl" in result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Data coverage, option expiries, calendar, raw-data index
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestDataTools:
+    @responses.activate
+    def test_data_extent(self):
+        responses.get(f"{MOCK_DATA_ADMIN_URL}/coverage/extent", json={
+            "stores": {"minute": {"start": "2025-08-24", "end": "2026-10-16", "days": 352}},
+            "suggested": [{"ticker": "SPY"}], "suggested_futures": ["/CL"]})
+        out = json.loads(_srv().data_extent())
+        assert out["stores"]["minute"]["end"] == "2026-10-16" and out["suggested"] == ["SPY"]
+
+    @responses.activate
+    def test_data_coverage_gives_runs_of_trading_days(self):
+        cell = {"minute": 900, "sessions": {"overnight": 400, "regular": 390, "pre": 0}, "options_minute": 0}
+        responses.get(f"{MOCK_DATA_ADMIN_URL}/coverage/matrix", json={
+            "kinds": {"SPY": "stock"},
+            "cells": {"SPY": {"2026-08-20": cell, "2026-08-21": cell, "2026-08-24": cell,     # Thu, Fri, Mon
+                              "2026-08-26": {"minute": 10, "options_minute": 5}}}})
+        out = json.loads(_srv().data_coverage(["SPY"], "2026-08-20", "2026-08-26"))["SPY"]
+        assert out["kind"] == "stock"
+        assert out["levels"]["minute"] == [["2026-08-20", "2026-08-24"], ["2026-08-26", "2026-08-26"]]
+        assert out["levels"]["minute:overnight"] == [["2026-08-20", "2026-08-24"]]
+        assert "minute:pre" not in out["levels"] and out["levels"]["options_minute"] == [["2026-08-26", "2026-08-26"]]
+        assert "events=false" in responses.calls[0].request.url
+
+    @responses.activate
+    def test_upq_option_expiries(self):
+        responses.get(f"{MOCK_UPQ_URL}/option/chain_query", json=[
+            {"expiry": "2026-08-28", "strike": 700.0, "volume": 5}, {"expiry": "2026-08-21", "strike": 760.0, "volume": 10},
+            {"expiry": "2026-08-21", "strike": 770.0, "volume": None}])
+        out = json.loads(_srv().upq_option_expiries("SPY", "2026-08-20"))
+        assert out[0] == {"expiry": "2026-08-21", "contracts": 2, "strike_min": 760.0, "strike_max": 770.0,
+                          "volume": 10, "days_to_expiry": 1}
+        assert out[1]["expiry"] == "2026-08-28" and out[1]["days_to_expiry"] == 8
+
+    def test_market_calendar_sessions_and_early_close(self):
+        out = json.loads(_srv().market_calendar("2026-11-25", "2026-11-30"))
+        days = {d["date"]: d for d in out["trading_days"]}
+        assert "2026-11-26" in out["holidays"] and "2026-11-26" not in days             # Thanksgiving
+        fri = days["2026-11-27"]
+        assert fri["early_close"] and fri["sessions"]["regular"]["end_et"] == "2026-11-27 13:00"
+        assert fri["sessions"]["post"]["end_et"] == "2026-11-27 17:00"
+        assert fri["sessions"]["overnight"]["start_et"] == "2026-11-26 20:00"
+        assert fri["sessions"]["overnight"]["start_utc"] == "2026-11-27T01:00:00Z"        # EST
+        mon = days["2026-11-30"]
+        assert mon["sessions"]["overnight"]["start_et"] == "2026-11-29 20:00"              # Sunday night
+        assert mon["sessions"]["regular"]["start_utc"] == "2026-11-30T14:30:00Z"
+        with pytest.raises(ValueError):
+            _srv().market_calendar("2026-01-01", "2027-06-01")
+
+    @responses.activate
+    def test_admin_data_catalog(self):
+        responses.get(f"{MOCK_DATA_ADMIN_URL}/setup/index", json={"report": {
+            "scanned": ["/data/massive_data"], "files": 3,
+            "groups": [{"vendor": "massive", "dataset": "global_forex", "schema": "quotes_v1", "kind": "quote",
+                        "levels": {"L2": 3}, "scope": "in", "notes": {}}], "unknown": {"files": 0}}})
+        out = json.loads(_srv().admin_data_catalog())
+        assert out["groups"][0]["levels"] == {"L2": 3} and out["last_scanned"] == ["/data/massive_data"]
+
+    def test_new_tools_need_their_scopes(self):
+        from qfinzero.auth.store import mcp_tool_allows
+        assert mcp_tool_allows(["events"], False, "data_coverage")
+        assert mcp_tool_allows(["market-data"], False, "data_coverage") is None
+        assert mcp_tool_allows(["market-data"], False, "admin_data_catalog")
+        assert mcp_tool_allows(["admin"], False, "admin_data_catalog") is None
+        assert mcp_tool_allows(["events"], False, "market_calendar") is None             # computed, no data

@@ -93,8 +93,8 @@ trade events, the last market tick and the account.
 ## 3. Quotes and option fills
 
 Two quote stores hold the top of book at the end of each minute:
-`stock_quote_minute` and `option_quote_minute` (from Databento `cmbp-1`,
-`cbbo-1s/1m`, `bbo-1s/1m`). Minutes without a change are not stored; readers
+`stock_quote_minute` and `option_quote_minute` (from Databento
+`cbbo-1s/1m` and `bbo-1s/1m`, Blue Ocean's overnight book included, and massive quotes). Minutes without a change are not stored; readers
 carry the last quote forward.
 
 | Endpoint | MCP tool | What |
@@ -102,6 +102,16 @@ carry the last quote forward.
 | `/stock/quote` | `upq_stock_quote` | minute NBBO for stocks |
 | `/option/quote` | `upq_option_quote` | minute NBBO for one contract |
 | `/option/chain_snapshot` | `upq_chain_snapshot` | the chain at a moment: last trade, volume so far, bid/ask/mid, Greeks off the mid |
+
+**What the store holds.** Before choosing dates, an agent can ask:
+`data_extent` gives the date range of every data level, `data_coverage` the
+runs of trading days a symbol has each level (stock minutes also by session:
+overnight, pre-market, regular, after-hours), `data_day` one symbol-day in
+detail, and `upq_option_expiries` the expiries traded on a day with their
+strike range. `market_calendar` lists trading days, early closes and each
+day's session hours in ET and UTC, the hours PMB's `trading_hours` refer to.
+Admins also get `admin_data_catalog`, the raw-data index (datasets, levels,
+scope).
 
 Minute sessions load each option's quotes. With
 `execution_config.option_fill_model = "quote"` (the default):
@@ -261,7 +271,7 @@ issue one to someone else (admins, *Users* page), choose:
 | `market-data` | UPQ (`/svc/upq`, `/api/upq`, `/api/coverage`) | viewer |
 | `events` | ESP (`/svc/esp`, `/api/esp`) | viewer |
 | `trading` | PMB (`/svc/pmb`, `/api/pmb`) | researcher |
-| `mcp` | `/mcp`; its tools follow the other scopes (`upq_*`/`research_*` need `market-data`, `esp_*` need `events`, `pmb_*` need `trading`) | researcher |
+| `mcp` | `/mcp`; its tools follow the other scopes (`upq_*`/`research_*`/`data_*` need `market-data`, `esp_*` need `events`, `pmb_*` need `trading`, `admin_*` need `admin`; `market_calendar` needs none) | researcher |
 | `chat` | the chat assistant | researcher |
 | `admin` | data administration, users and keys | admin |
 

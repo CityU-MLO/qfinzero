@@ -58,8 +58,9 @@ SERVICES: dict[str, dict[str, Any]] = {
     },
 }
 
-MCP_GROUPS = [("upq_crypto", "Crypto"), ("upq_fx", "FX"), ("upq_", "Market data"), ("research_", "Research"), ("esp_", "Events and news"),
-              ("pmb_", "Paper broker")]
+MCP_GROUPS = [("upq_crypto", "Crypto"), ("upq_fx", "FX"), ("upq_", "Market data"), ("data_", "Data coverage"),
+              ("market_", "Calendar"), ("research_", "Research"), ("esp_", "Events and news"), ("pmb_", "Paper broker"),
+              ("admin_", "Data administration")]
 
 METHODS = ("get", "post", "put", "patch", "delete")
 

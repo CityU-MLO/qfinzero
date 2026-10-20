@@ -5010,6 +5010,38 @@
    }
   },
   {
+   "name": "upq_option_expiries",
+   "group": "Market data",
+   "summary": "Expiries of an underlying's options that traded on a day, with their strike range.",
+   "description": "Use it to pick an expiry before upq_chain_snapshot / upq_option_chain.",
+   "params": [
+    {
+     "name": "underlying",
+     "type": "string",
+     "required": true,
+     "description": "e.g. \"SPY\""
+    },
+    {
+     "name": "date",
+     "type": "string",
+     "required": true,
+     "description": "Trade date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "session_id",
+     "type": "string",
+     "required": false,
+     "description": "Optional PMB session to time-lock this query to.",
+     "nullable": true
+    }
+   ],
+   "returns": "JSON list [{expiry, days_to_expiry, contracts, strike_min, strike_max, volume}], nearest expiry first.",
+   "example": {
+    "underlying": "AAPL",
+    "date": "2025-01-02"
+   }
+  },
+  {
    "name": "upq_option_quote",
    "group": "Market data",
    "summary": "Minute NBBO for one option contract (rows as in upq_stock_quote).",
@@ -5283,6 +5315,99 @@
     "tickers": [
      "AAPL,MSFT"
     ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "data_coverage",
+   "group": "Data coverage",
+   "summary": "Which data levels each symbol has, as runs of consecutive trading days.",
+   "description": "Use it before a query or a session to pick dates that have data: e.g. the\n    days SPY has option minutes, or whether NVDA has overnight bars.",
+   "params": [
+    {
+     "name": "tickers",
+     "type": "string[]",
+     "required": true,
+     "description": "Symbols in coverage form: stocks \"SPY\", futures \"/CL\", crypto \"X:BTC-USD\", FX \"C:EUR-USD\" (up to 50)"
+    },
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "First date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "Last date \"YYYY-MM-DD\""
+    }
+   ],
+   "returns": "JSON {ticker: {\"kind\": ..., \"levels\": {level: [[first, last], ...]}}} with levels as in data_extent (stock minute bars also by session: minute:overnight, minute:pre, minute:regular, minute:post).",
+   "example": {
+    "tickers": [
+     "AAPL,MSFT"
+    ],
+    "start": "2025-01-02",
+    "end": "2025-01-10"
+   }
+  },
+  {
+   "name": "data_day",
+   "group": "Data coverage",
+   "summary": "What the store has for one symbol on one day.",
+   "description": "Rows per level and session, the first and last quote, the option expiries\n    that traded, corporate actions and the day's news/earnings events.",
+   "params": [
+    {
+     "name": "ticker",
+     "type": "string",
+     "required": true,
+     "description": "Coverage-form symbol, e.g. \"SPY\", \"/CL\", \"X:BTC-USD\""
+    },
+    {
+     "name": "date",
+     "type": "string",
+     "required": true,
+     "description": "\"YYYY-MM-DD\""
+    }
+   ],
+   "returns": "",
+   "example": {
+    "ticker": "AAPL",
+    "date": "2025-01-02"
+   }
+  },
+  {
+   "name": "data_extent",
+   "group": "Data coverage",
+   "summary": "Which data the store holds: first and last date (and number of days) of each level.",
+   "description": "Levels: daily, minute, quotes, overnight_daily (Blue Ocean sessions) for US\n    stocks; options_eod, options_minute, options_quotes; futures_daily,\n    futures_minute, futures_quotes; crypto_daily, crypto_minute; fx_daily,\n    fx_minute, fx_quotes. Ranges are per store: a symbol may cover less (use\n    data_coverage for one symbol). Also lists frequently traded symbols.",
+   "params": [],
+   "returns": "JSON with stores {level: {start, end, days} | null} and suggested symbols.",
+   "example": {}
+  },
+  {
+   "name": "market_calendar",
+   "group": "Calendar",
+   "summary": "US trading days in a range with each day's session hours (ET and UTC).",
+   "description": "A trading day's sessions, in order: overnight (Blue Ocean, 20:00 ET the\n    evening before to 04:00), pre-market (04:00-09:30), regular (09:30-16:00,\n    13:00 on early-close days) and after-hours (to 20:00, 17:00 on early-close\n    days). The overnight session belongs to the trading day it precedes\n    (Sunday night is Monday's). PMB orders use these: trading_hours REGULAR,\n    EXTENDED (pre + regular + after-hours) or OVERNIGHT (all four).",
+   "params": [
+    {
+     "name": "start",
+     "type": "string",
+     "required": true,
+     "description": "First date \"YYYY-MM-DD\""
+    },
+    {
+     "name": "end",
+     "type": "string",
+     "required": true,
+     "description": "Last date \"YYYY-MM-DD\" (at most 400 days after start)"
+    }
+   ],
+   "returns": "JSON {trading_days: [{date, early_close, sessions: {overnight|pre|regular|post: {start_et, end_et, start_utc, end_utc}}}], holidays: [...]}",
+   "example": {
     "start": "2025-01-02",
     "end": "2025-01-10"
    }
@@ -6349,7 +6474,7 @@
      "name": "start_ts",
      "type": "string",
      "required": true,
-     "description": "Session start \"YYYY-MM-DDTHH:MM:SS\" or \"YYYY-MM-DD\" e.g. \"2024-01-02T09:30:00\" for minute, \"2024-01-02\" for daily"
+     "description": "Session start \"YYYY-MM-DDTHH:MM:SS\" (UTC) or \"YYYY-MM-DD\" e.g. \"2024-01-02T09:30:00\" for minute, \"2024-01-02\" for daily. A minute session from \"YYYY-MM-DDT00:00:00\" (20:00 ET the evening before) starts with that day's overnight session where the store has Blue Ocean bars; see market_calendar for the session hours"
     },
     {
      "name": "end_ts",
@@ -6871,7 +6996,7 @@
    "name": "pmb_session_state",
    "group": "Paper broker",
    "summary": "Get the full consolidated state of a session in one call.",
-   "description": "Returns clock (current bar, index, total bars, status), the account snapshot\n    (cash, equity, buying power, margin), open positions, working orders, recent\n    trades, and the current market quotes — everything an agent needs each step.",
+   "description": "Returns clock (current bar, index, total bars, status, segment OVERNIGHT /\n    PRE / REGULAR / POST and the trading date), the account snapshot\n    (cash, equity, buying power, margin), open positions, working orders, recent\n    trades, and the current market quotes — everything an agent needs each step.",
    "params": [
     {
      "name": "session_id",
@@ -7138,6 +7263,15 @@
     "side": "BUY",
     "qty": 10
    }
+  },
+  {
+   "name": "admin_data_catalog",
+   "group": "Data administration",
+   "summary": "The raw-data index: every market-data dataset found in the raw libraries.",
+   "description": "One row per (vendor, dataset, schema): kind, asset class, resolution, file\n    count, size, first and last date, index levels (L0 read whole, L1 indexed,\n    L2 fast) and scope (in, or out for data QFinZero does not use such as MBO).\n    From the last scan (Data setup -> Scan & index, or `qfz-data index`).\n    Needs the admin scope.",
+   "params": [],
+   "returns": "",
+   "example": {}
   }
  ]
 }

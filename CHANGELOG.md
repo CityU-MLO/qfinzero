@@ -15,6 +15,11 @@ Added:
   regular session; the broker's chart shades them too. The option chain of a
   stock (or of an option's underlying) opens beside the chart at a chosen ET
   minute, and clicking a contract charts it.
+- MCP: `data_extent`, `data_coverage` and `data_day` say what the store
+  holds (by data level, as runs of trading days, stock minutes by session),
+  `upq_option_expiries` lists an underlying's expiries on a day,
+  `market_calendar` gives trading days and the ET/UTC session hours, and
+  `admin_data_catalog` (admin scope) returns the raw-data index. 69 tools.
 - Broker: orders choose their trading hours (regular, extended, 24/5 with the
   Blue Ocean overnight session), the clock can start from the overnight
   session or pre-market and shows the current segment, and the session state

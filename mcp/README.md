@@ -45,7 +45,7 @@ QFINZERO_MCP_TRANSPORT=streamable-http QFINZERO_MCP_PORT=19360 python mcp/server
 
 ### Resources & Prompts
 
-Beyond the 37 tools, the server exposes MCP **resources** and a **prompt**:
+Beyond the tools, the server exposes MCP **resources** and a **prompt**:
 
 | Kind | Name | Description |
 |------|------|-------------|
@@ -89,8 +89,12 @@ Service URLs can be set via environment variables:
 | `QFINZERO_UPQ_URL`   | `http://127.0.0.1:19350` | Market data service |
 | `QFINZERO_ESP_URL`   | `http://127.0.0.1:19330` | News/events service |
 | `QFINZERO_PMB_URL`   | `http://127.0.0.1:19380` | Trading broker      |
+| `QFINZERO_DATA_ADMIN_URL` | `http://127.0.0.1:19340` | Coverage map and raw-data index (`data_*`, `admin_*`) |
 
 ## Available Tools
+
+The complete, current list (69 tools with every parameter) is the generated
+[MCP tool reference](../docs/en/mcp-tools.md); the tables below introduce the main ones.
 
 ### UPQ — Market Data (7 tools)
 

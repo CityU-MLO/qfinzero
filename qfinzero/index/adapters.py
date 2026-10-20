@@ -263,7 +263,7 @@ def databento(path: Path, symbols: bool = True) -> Optional[Described]:
         access="whole" if whole else "scan", level="L1",
         scope="out" if info.out_of_scope else ("error" if info.error else "in"),
         note="; ".join(x for x in (
-            "out of scope (QFinZero stops at consolidated BBO)" if info.out_of_scope else "",
+            "out of scope (QFinZero stops at minute bars and BBO)" if info.out_of_scope else "",
             "single zstd frame: decoded whole (materialised)" if whole else "", info.error or "") if x),
         symbols={s: 0 for s in info.symbols})
 
