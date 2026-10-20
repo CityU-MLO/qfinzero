@@ -88,6 +88,17 @@ QFZ 不会修改它：**设置 → 新闻存储** 把各数据商的数据从中
 
 所有时间都以 UTC 存储。只有日期的 Tushare 公告存为北京时间午夜（前一天 16:00 UTC）。
 
+**文章有多少内容。** 每篇新闻都带 `content_level`：`full`（有正文 `body_text`，来自 Benzinga 归档交付包）、
+`summary`（有摘要或快讯正文，在 `description` 里）或 `headline`（只有标题，例如 massive 的 Benzinga 导出和 Tushare 公告），
+以及 `content_chars`（这段文字的长度）。新闻事件会返回这两个字段；`/esp/news/search` 和 `/esp/events/query` 接受
+`min_content: "summary" | "full"`，只保留至少有这么多内容的文章，MCP 工具 `esp_search_news`、`esp_query_events` 也有这个参数。
+正文用 `/esp/news/{id}/body`（`esp_news_body`）读取。在有内容等级之前导入的文档按其文字字段判断；
+可以用 `python -m qfinzero.update.loaders.news --backfill-content` 给它们补上字段。
+
+**查询性能。** ESP 按（`published_utc`，`_id`）顺序读取新闻。数据商集合带有索引 `(published_utc, _id, content_level, title)`
+和 `(tickers, published_utc, _id, content_level)`：一页读够 `limit` 条就停，不用对整个窗口排序；内容等级和关键词过滤在索引键上完成，
+只从磁盘读取匹配的文档。各集合同时查询，每个最多 `ESP_NEWS_SEARCH_MAX_MS`（20 秒），超时的集合会在 `warnings` 里说明。
+
 ## 快速示例
 
 ```bash

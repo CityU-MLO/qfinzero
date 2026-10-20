@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,9 @@ class Event(BaseModel):
     payload: dict = {}
     source: str
     source_id: str
+    # news: "full" (article text), "summary" (teaser / flash text) or "headline" (title only)
+    content_level: Optional[str] = None
+    content_chars: Optional[int] = None
 
 
 # ── Request Models ───────────────────────────────────────────────
@@ -67,6 +70,8 @@ class EventQueryRequest(BaseModel):
     cursor: Optional[str] = None
     view: ViewMode = ViewMode.COMPACT
     now_utc: Optional[str] = None
+    # news only: keep articles with at least a summary, or with the full text
+    min_content: Optional[Literal["headline", "summary", "full"]] = None
 
 
 class StreamRequest(BaseModel):
@@ -121,6 +126,7 @@ class NewsSearchRequest(BaseModel):
     limit: int = Field(default=50, ge=1, le=500)
     cursor: Optional[str] = None
     now_utc: Optional[str] = None
+    min_content: Optional[Literal["headline", "summary", "full"]] = None
 
 
 # ── Response Models ──────────────────────────────────────────────

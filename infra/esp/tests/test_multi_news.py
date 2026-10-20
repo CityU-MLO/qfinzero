@@ -11,10 +11,10 @@ class _Part:
         self.events, self.docs, self.available, self.asked = events, docs or {}, available, []
         self.slow = False
 
-    async def query_window(self, start, end, tickers, limit, cursor, now):
+    async def query_window(self, start, end, tickers, limit, cursor, now, min_content=None):
         return [e for e in self.events if not cursor or (e.time_utc, e.event_id) > cursor][:limit]
 
-    async def search_news(self, start, end, tickers, kw, pub, limit, cursor, now, warnings=None):
+    async def search_news(self, start, end, tickers, kw, pub, limit, cursor, now, warnings=None, min_content=None):
         if self.slow and warnings is not None:
             warnings.append("news_slow: the search stopped")
             return []

@@ -98,6 +98,7 @@ class ESPClient:
         cursor: str = None,
         view: str = "compact",
         now_utc: str = None,
+        min_content: str = None,
     ) -> dict:
         """Unified event query — upcoming / just_happened / window modes.
 
@@ -113,6 +114,7 @@ class ESPClient:
             cursor: Pagination cursor from previous response
             view: "compact" (no payload) or "full" (with payload)
             now_utc: Override current time for replay mode
+            min_content: news only: "summary" (a teaser or more) or "full" (article text)
 
         Returns:
             dict with server_time_utc, events, next_cursor
@@ -132,6 +134,8 @@ class ESPClient:
             body["cursor"] = cursor
         if now_utc:
             body["now_utc"] = now_utc
+        if min_content:
+            body["min_content"] = min_content
         return self._post("/esp/events/query", body)
 
     def get_event(self, event_id: str, now_utc: str = None) -> dict:
@@ -293,6 +297,7 @@ class ESPClient:
         limit: int = 50,
         cursor: str = None,
         now_utc: str = None,
+        min_content: str = None,
     ) -> dict:
         """Search news with keyword and publisher filtering.
 
@@ -305,9 +310,10 @@ class ESPClient:
             limit: Max events per page (1-500)
             cursor: Pagination cursor from previous response
             now_utc: Replay time; articles published later are hidden
+            min_content: "summary" (a teaser or more) or "full" (article text only)
 
         Returns:
-            dict with server_time_utc, events, next_cursor
+            dict with server_time_utc, events (each with content_level), next_cursor, warnings
         """
         body = {"limit": limit}
         if now_utc:
@@ -322,6 +328,8 @@ class ESPClient:
             body["keyword"] = keyword
         if publisher:
             body["publisher"] = publisher
+        if min_content:
+            body["min_content"] = min_content
         if cursor:
             body["cursor"] = cursor
         return self._post("/esp/news/search", body)

@@ -46,3 +46,11 @@ def test_month_files_include_gzip(tmp_path, monkeypatch):
     (tmp_path / "2026" / "2026-07.jsonl").write_text(json.dumps(DROP) + "\n")
     assert [p.name for p in news._month_files("2026-08", "2026-08")] == ["2026-08.jsonl.gz"]
     assert len(news._month_files(None, None)) == 2
+
+
+def test_every_doc_says_how_much_content_it_has():
+    full = news.to_doc(ARCHIVE)
+    assert (full["content_level"], full["content_chars"]) == ("full", len(full["body_text"]))
+    teaser = news.to_doc({**ARCHIVE, "body": ""})
+    assert (teaser["content_level"], teaser["content_chars"]) == ("summary", len("Short & sweet."))
+    assert news.to_doc(DROP)["content_level"] == "headline" and news.to_doc(DROP)["content_chars"] == 0

@@ -15,6 +15,8 @@ type NewsFilters = {
   keyword: string;
   publisher: string;
   limit: number;
+  /** keep articles with at least this much text ("" = every article) */
+  minContent?: "" | "summary" | "full";
 };
 
 export function NewsSearchPanel({
@@ -31,7 +33,7 @@ export function NewsSearchPanel({
   isLoading: boolean;
 }) {
   const t = useT();
-  const hasFilters = filters.tickers || filters.keyword || filters.publisher || filters.startUtc || filters.endUtc;
+  const hasFilters = filters.tickers || filters.keyword || filters.publisher || filters.startUtc || filters.endUtc || filters.minContent;
 
   return (
     <div className="space-y-6 rounded-lg border bg-card p-5">
@@ -62,6 +64,18 @@ export function NewsSearchPanel({
             placeholder="earnings" 
             className="bg-card"
           />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Content", "内容")}</Label>
+          <select
+            value={filters.minContent ?? ""}
+            onChange={(e) => onChange({ ...filters, minContent: e.target.value as NewsFilters["minContent"] })}
+            className="flex h-9 w-full rounded-md border border-input bg-card px-3 text-sm"
+          >
+            <option value="">{t("Any (headlines too)", "全部（含仅标题）")}</option>
+            <option value="summary">{t("With a summary or full text", "有摘要或全文")}</option>
+            <option value="full">{t("Full text only", "只要全文")}</option>
+          </select>
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs font-semibold uppercase text-muted-foreground/70">{t("Start (UTC)", "开始 (UTC)")}</Label>
@@ -102,6 +116,7 @@ export function NewsSearchPanel({
                 keyword: "",
                 publisher: "",
                 limit: 50,
+                minContent: "",
               })}
             >
               <X className="mr-1 h-3 w-3" /> {t("Clear Filters", "清除筛选")}

@@ -406,6 +406,7 @@ Query unified events from all sources (news, earnings, economic calendar).
 | `cursor` | str |  | `null` | Pagination cursor from a previous response's next_cursor field |
 | `view` | "compact" \| "full" |  | `"full"` | "compact" (no payload, faster) or "full" (includes event payload, default "full") |
 | `now_utc` | str |  | `null` | Override current time for backtesting replay (ISO datetime) |
+| `min_content` | "summary" \| "full" |  | `null` | News only: "summary" keeps articles with a teaser or the full text, "full" only those with the full text (esp_news_body returns it) |
 | `session_id` | str |  | `null` | Optional PMB session to time-lock this query to (data after the session's current bar is hidden, enforced server-side). |
 
 ### esp_search_news
@@ -421,6 +422,7 @@ Search news articles with keyword and publisher filtering.
 | `publisher` | str |  | `null` | Case-insensitive substring search in publisher name |
 | `limit` | int |  | `20` | Max articles per page (1-500, default 50) |
 | `cursor` | str |  | `null` | Pagination cursor from previous response's next_cursor field |
+| `min_content` | "summary" \| "full" |  | `null` | "summary" keeps articles with a teaser or the full text, "full" only those with the full text (read it with esp_news_body) |
 | `session_id` | str |  | `null` | Optional PMB session to time-lock this query to (data after the session's current bar is hidden, enforced server-side). |
 
 ### esp_stream_events

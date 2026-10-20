@@ -4,8 +4,26 @@ import { ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import type { EspEvent } from "@/lib/types";
+import type { ContentLevel, EspEvent } from "@/lib/types";
 import { useT } from "@/components/locale-provider";
+
+const CONTENT: Record<ContentLevel, { label: [string, string]; cls: string }> = {
+  full: { label: ["Full text", "全文"], cls: "bg-up/10 text-up" },
+  summary: { label: ["Summary", "摘要"], cls: "bg-primary/10 text-primary" },
+  headline: { label: ["Headline", "仅标题"], cls: "bg-muted text-muted-foreground" },
+};
+
+export function ContentBadge({ level, chars }: { level?: ContentLevel | null; chars?: number | null }) {
+  const t = useT();
+  if (!level) return null;
+  const c = CONTENT[level];
+  return (
+    <span className={cn("whitespace-nowrap rounded px-1.5 py-px text-[10px] font-semibold", c.cls)}
+          title={chars ? t(`${chars.toLocaleString()} characters`, `${chars.toLocaleString()} 字`) : undefined}>
+      {t(...c.label)}
+    </span>
+  );
+}
 
 function EmptyValue() {
   return <span className="text-muted-foreground/30">—</span>;
@@ -28,6 +46,7 @@ export function NewsTable({
           <TableRow>
             <TableHead className="w-40 text-xs font-semibold">{t("Time (UTC)", "时间 (UTC)")}</TableHead>
             <TableHead className="text-xs font-semibold">{t("Title", "标题")}</TableHead>
+            <TableHead className="w-20 text-xs font-semibold">{t("Content", "内容")}</TableHead>
             <TableHead className="w-32 text-xs font-semibold">{t("Publisher", "发布方")}</TableHead>
             <TableHead className="w-32 text-xs font-semibold">{t("Tickers", "代码")}</TableHead>
             <TableHead className="w-20 text-xs font-semibold">{t("Rating", "评级")}</TableHead>
@@ -37,7 +56,7 @@ export function NewsTable({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="h-32 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={7} className="h-32 text-center text-sm text-muted-foreground">
                 {t("No news entries found matching your query.", "没有符合查询条件的新闻。")}
               </TableCell>
             </TableRow>
@@ -71,6 +90,9 @@ export function NewsTable({
                     >
                       {row.title}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {row.content_level ? <ContentBadge level={row.content_level} chars={row.content_chars} /> : <EmptyValue />}
                   </TableCell>
                   <TableCell className="text-xs">
                     {publisher || <EmptyValue />}

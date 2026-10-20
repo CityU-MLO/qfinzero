@@ -100,6 +100,8 @@ def to_doc(rec: dict) -> dict | None:
     updated = _parse_dt(rec.get("last_updated"))
     if updated:
         doc["updated_utc"] = updated
+    from qfinzero.admin.news_store import content_fields
+    doc.update(content_fields(doc))
     return doc
 
 
@@ -246,8 +248,30 @@ def main(argv=None) -> int:
     ap.add_argument("--until", help="last month YYYY-MM (inclusive)")
     ap.add_argument("--months", type=int, help="load the last N months (overrides --since)")
     ap.add_argument("--status", action="store_true", help="show Mongo collection status only")
+    ap.add_argument("--files", nargs="+", help="month files or Benzinga archive .zip files to load "
+                                               "(archives are checked against their manifest and unpacked into the library)")
+    ap.add_argument("--backfill-content", nargs="*", metavar="COLLECTION",
+                    help="set content_level/content_chars on documents lacking them and ensure the ESP "
+                         "indexes (default: every vendor collection)")
     args = ap.parse_args(argv)
 
+    if args.backfill_content is not None:
+        from qfinzero.admin import news_store
+        s = news_store.settings()
+        client = news_store.client(s["mongo_uri"])
+        db = client[s["mongo_db"]]
+        names = args.backfill_content or [src["collection"] for src in s["sources"]]
+        out = {}
+        for name in names:
+            out[name] = news_store.backfill_content(db, name, on_line=print)
+            news_store.ensure_indexes(db, name)
+        client.close()
+        print(json.dumps({"updated": out}, indent=2))
+        return 0
+    if args.files:
+        result = load(files=unpack(args.files, on_line=print), on_line=print)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
     if args.status:
         print(json.dumps(status(), indent=2))
         return 0

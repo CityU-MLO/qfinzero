@@ -106,6 +106,15 @@ Fixed:
   the index; the collections are searched at once, each for at most
   `ESP_NEWS_SEARCH_MAX_MS` (20 s), and one that runs out answers with a
   `warnings` entry instead of failing the search.
+- News carry how much text they have: `content_level` (`full`, `summary`,
+  `headline`) and `content_chars` on every document and news event, a
+  `min_content` filter on news search, event queries and the MCP news tools,
+  and a content column and filter on the News page. The vendor collections'
+  indexes now give ESP's (time, id) order and carry the content level and
+  title, so a page reads only its rows (a month of `news_tushare` went from
+  15 s to well under a second), and the health page counts by estimate. The
+  loader takes Benzinga `.zip` archives (`--files`) and backfills content
+  levels (`--backfill-content`).
 
 ## Unreleased: data utility
 

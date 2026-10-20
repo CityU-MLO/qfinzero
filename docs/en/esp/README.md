@@ -94,6 +94,27 @@ which is checked against its manifest's SHA-256 before loading.
 All times are stored in UTC. Tushare announcements that carry only a date are
 stored as midnight China time (16:00 UTC the day before).
 
+**How much text an article has.** Every news document carries
+`content_level`: `full` (the article text, `body_text`; Benzinga archive
+deliveries), `summary` (a teaser, or a flash item's text, in `description`)
+or `headline` (the title only, as in massive's Benzinga drop and Tushare
+announcements), and `content_chars`, the length of that text. News events
+return both; `/esp/news/search` and `/esp/events/query` take
+`min_content: "summary" | "full"` to keep only articles with that much, and
+the MCP tools `esp_search_news` and `esp_query_events` pass it through. The
+full text is read with `/esp/news/{id}/body` (`esp_news_body`). Documents
+loaded before content levels existed are judged from their text fields; set
+the fields on them with `python -m qfinzero.update.loaders.news
+--backfill-content`.
+
+**Query performance.** ESP reads news in (`published_utc`, `_id`) order. The
+vendor collections carry the indexes `(published_utc, _id, content_level,
+title)` and `(tickers, published_utc, _id, content_level)`, so a page stops
+after its `limit` rows instead of sorting the whole window, and the content
+and keyword filters are applied to index keys (only matching documents are
+read from disk). Each collection is searched at once, for at most
+`ESP_NEWS_SEARCH_MAX_MS` (20 s); one that runs out leaves a `warnings` entry.
+
 ## Quick Example
 
 ```bash

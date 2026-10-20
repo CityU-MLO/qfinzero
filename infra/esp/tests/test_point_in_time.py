@@ -201,3 +201,26 @@ def test_sources_reconnect_when_they_come_back(tmp_path, esp_dir):
         await ds.close()
 
     asyncio.run(scenario())
+
+
+def test_news_carry_their_content_level_and_filter_on_it(client):
+    hits = search(client, et(ACME.day, 23))
+    assert hits and all(e["content_level"] in ("full", "summary", "headline") for e in hits)
+    assert all(isinstance(e["content_chars"], int) for e in hits)
+    summary = search(client, et(ACME.day, 23), min_content="summary")
+    assert all(e["content_level"] in ("summary", "full") for e in summary)
+    assert len(summary) == sum(1 for e in hits if e["content_level"] != "headline")
+    assert search(client, et(ACME.day, 23), min_content="full") == []     # SQLite news hold no article text
+    r = client.post("/esp/news/search", json={"min_content": "most"})
+    assert r.status_code == 422
+
+
+def test_mongo_content_filter_judges_old_documents_by_their_text():
+    from services.data_sources import _content_of, _mongo_content_filter
+    assert _mongo_content_filter(None) is None and _mongo_content_filter("headline") is None
+    f = _mongo_content_filter("full")
+    assert f["$or"][0] == {"content_level": {"$in": ["full"]}}
+    assert f["$or"][1]["content_level"] == {"$exists": False} and "body_text" in f["$or"][1]
+    assert _content_of({"content_level": "summary", "content_chars": 12}) == ("summary", 12)
+    assert _content_of({"body_text": "abc", "description": "d"}) == ("full", 3)
+    assert _content_of({"title": "t"}) == ("headline", 0)

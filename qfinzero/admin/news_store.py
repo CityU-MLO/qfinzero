@@ -34,12 +34,70 @@ INDEXES = [
     [("market", 1), ("published_utc", -1), ("_id", 1)],
     [("news_kind", 1), ("published_utc", -1)],
 ]
-# Keyword search matches titles inside this index, so only the matching documents are
-# read (without it a month of a large collection is read whole). Vendor collections
-# only: the shared legacy collection is left as it is.
+# ESP reads news in (published_utc, _id) order with optional ticker, content-level and
+# title filters. These indexes give that order (a page stops after `limit` rows instead
+# of sorting the whole window) and carry content_level and title, so those filters are
+# applied to index keys and only matching documents are read. Vendor collections only:
+# the shared legacy collection is left as it is.
 SEARCH_INDEXES = [
-    [("published_utc", -1), ("title", 1)],
+    [("published_utc", 1), ("_id", 1), ("content_level", 1), ("title", 1)],
+    [("tickers", 1), ("published_utc", 1), ("_id", 1), ("content_level", 1)],
 ]
+# superseded by SEARCH_INDEXES (dropped when the indexes are ensured)
+OBSOLETE_INDEXES = ("published_utc_-1_title_1",)
+
+# What an article carries: "full" (the article text, body_text), "summary" (a teaser or
+# a flash item's text, description) or "headline" (the title only).
+CONTENT_LEVELS = ("headline", "summary", "full")
+
+
+def content_fields(doc: dict) -> dict[str, Any]:
+    """``content_level`` and ``content_chars`` (characters of the longest text) of a news doc."""
+    body = str(doc.get("body_text") or "").strip()
+    desc = str(doc.get("description") or "").strip()
+    level = "full" if body else "summary" if desc else "headline"
+    return {"content_level": level, "content_chars": len(body or desc)}
+
+
+def levels_at_least(min_content: Optional[str]) -> Optional[list[str]]:
+    """The content levels a ``min_content`` filter keeps (``None``: every article)."""
+    if not min_content or min_content == "headline":
+        return None
+    if min_content not in CONTENT_LEVELS:
+        raise ValueError(f"min_content must be one of {', '.join(CONTENT_LEVELS)}")
+    return list(CONTENT_LEVELS[CONTENT_LEVELS.index(min_content):])
+
+
+def _text(field: str) -> dict:
+    return {"$trim": {"input": {"$convert": {"input": f"${field}", "to": "string", "onError": "", "onNull": ""}}}}
+
+
+# content_fields as an update pipeline (server side)
+CONTENT_PIPELINE = [{"$set": {
+    "content_level": {"$switch": {"branches": [
+        {"case": {"$gt": [{"$strLenCP": _text("body_text")}, 0]}, "then": "full"},
+        {"case": {"$gt": [{"$strLenCP": _text("description")}, 0]}, "then": "summary"}], "default": "headline"}},
+    "content_chars": {"$max": [{"$strLenCP": _text("body_text")}, {"$strLenCP": _text("description")}]},
+}}]
+
+
+def backfill_content(db, name: str, on_line: Optional[Callable[[str], None]] = None) -> int:
+    """Set content_level / content_chars on documents that lack them, one year at a time."""
+    from datetime import datetime
+    say = on_line or (lambda _l: None)
+    coll = db[name]
+    lo = coll.find_one({"published_utc": {"$type": "date"}}, sort=[("published_utc", 1)], projection={"published_utc": 1})
+    hi = coll.find_one({"published_utc": {"$type": "date"}}, sort=[("published_utc", -1)], projection={"published_utc": 1})
+    done = 0
+    if lo and hi:
+        for year in range(lo["published_utc"].year, hi["published_utc"].year + 1):
+            r = coll.update_many({"published_utc": {"$gte": datetime(year, 1, 1), "$lt": datetime(year + 1, 1, 1)},
+                                  "content_level": {"$exists": False}}, CONTENT_PIPELINE)
+            done += r.modified_count
+            if r.modified_count:
+                say(f"[news] {name} {year}: content level set on {r.modified_count:,}")
+    r = coll.update_many({"content_level": {"$exists": False}}, CONTENT_PIPELINE)   # undated stragglers
+    return done + r.modified_count
 
 
 def settings() -> dict[str, Any]:
@@ -182,8 +240,14 @@ def usage() -> dict[str, Any]:
 
 
 def ensure_indexes(db, name: str) -> list[str]:
-    keys = INDEXES + ([] if name == settings()["legacy_collection"] else SEARCH_INDEXES)
-    return [db[name].create_index(k) for k in keys]
+    vendor = name != settings()["legacy_collection"]
+    out = [db[name].create_index(k) for k in INDEXES + (SEARCH_INDEXES if vendor else [])]
+    if vendor:
+        have = {ix["name"] for ix in db[name].list_indexes()}
+        for old in OBSOLETE_INDEXES:
+            if old in have:
+                db[name].drop_index(old)
+    return out
 
 
 def split(*, on_line: Optional[Callable[[str], None]] = None, on_progress: Optional[Callable[..., None]] = None,

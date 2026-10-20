@@ -202,6 +202,16 @@ class TestESPTools:
         assert json.loads(result)["events"] == []
 
     @responses.activate
+    def test_esp_news_tools_pass_the_content_filter(self):
+        responses.post(f"{MOCK_ESP_URL}/esp/news/search", json={"events": []})
+        responses.post(f"{MOCK_ESP_URL}/esp/events/query", json={"events": []})
+        _srv().esp_search_news(keyword="earnings", min_content="full")
+        _srv().esp_query_events(mode="window", start_utc="2026-01-01T00:00:00Z", end_utc="2026-01-02T00:00:00Z",
+                                min_content="summary")
+        assert json.loads(responses.calls[0].request.body)["min_content"] == "full"
+        assert json.loads(responses.calls[1].request.body)["min_content"] == "summary"
+
+    @responses.activate
     def test_esp_timeline(self):
         responses.post(f"{MOCK_ESP_URL}/esp/timeline", json={"buckets": []})
         result = _srv().esp_timeline(tickers=["AAPL"])

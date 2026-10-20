@@ -108,3 +108,21 @@ def test_unpack_rejects_files_without_a_month(tmp_path):
     p.write_text("")
     with pytest.raises(ValueError):
         news.unpack([str(p)])
+
+
+def test_content_levels_and_filters():
+    from qfinzero.admin import news_store as ns
+    assert ns.content_fields({"body_text": " x ", "description": "teaser"}) == {"content_level": "full", "content_chars": 1}
+    assert ns.content_fields({"description": "flash text"})["content_level"] == "summary"
+    assert ns.content_fields({"title": "only"}) == {"content_level": "headline", "content_chars": 0}
+    assert ns.levels_at_least(None) is None and ns.levels_at_least("headline") is None
+    assert ns.levels_at_least("summary") == ["summary", "full"] and ns.levels_at_least("full") == ["full"]
+    with pytest.raises(ValueError):
+        ns.levels_at_least("most")
+
+
+def test_search_indexes_give_esp_order_and_carry_the_filters():
+    from qfinzero.admin import news_store as ns
+    window, by_ticker = ns.SEARCH_INDEXES
+    assert window[:2] == [("published_utc", 1), ("_id", 1)] and ("title", 1) in window and ("content_level", 1) in window
+    assert by_ticker[:3] == [("tickers", 1), ("published_utc", 1), ("_id", 1)]

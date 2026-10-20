@@ -93,12 +93,19 @@ export type EspEvent = {
   payload: Record<string, unknown>;
   source: string;
   source_id: string;
+  /** news: "full" (article text), "summary" (teaser / flash text) or "headline" (title only) */
+  content_level?: ContentLevel | null;
+  content_chars?: number | null;
 };
+
+export type ContentLevel = "full" | "summary" | "headline";
 
 export type PaginatedEventsResponse = {
   server_time_utc: string;
   events: EspEvent[];
   next_cursor: string | null;
+  /** a news source that could not answer in time (the events are the others') */
+  warnings?: string[];
 };
 
 export type NewsBodyResponse = {

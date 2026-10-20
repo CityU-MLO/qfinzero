@@ -33,6 +33,34 @@ EST = ZoneInfo("America/New_York")
 # A keyword search over a large collection may scan a long window: stop it after this
 # and answer with the other collections' results and a warning (the clients time out at 30 s).
 NEWS_SEARCH_MAX_MS = int(os.environ.get("ESP_NEWS_SEARCH_MAX_MS", "20000"))
+CONTENT_LEVELS = ("headline", "summary", "full")
+
+
+def _levels(min_content: Optional[str]) -> Optional[list[str]]:
+    """Content levels kept by a ``min_content`` filter (``None``: all articles)."""
+    if not min_content or min_content == "headline":
+        return None
+    return list(CONTENT_LEVELS[CONTENT_LEVELS.index(min_content):])
+
+
+def _content_of(doc: dict) -> tuple[str, int]:
+    """(content_level, content_chars): stored by the loader, else worked out from the doc."""
+    if doc.get("content_level") in CONTENT_LEVELS:
+        return doc["content_level"], int(doc.get("content_chars") or 0)
+    body = str(doc.get("body_text") or "").strip()
+    desc = str(doc.get("description") or "").strip()
+    return ("full" if body else "summary" if desc else "headline"), len(body or desc)
+
+
+def _mongo_content_filter(min_content: Optional[str]) -> Optional[dict]:
+    """Mongo filter for ``min_content``; documents loaded before content levels existed
+    are judged from their text fields."""
+    levels = _levels(min_content)
+    if levels is None:
+        return None
+    text = {"$nin": [None, ""]}
+    raw = {"body_text": text} if levels == ["full"] else {"$or": [{"body_text": text}, {"description": text}]}
+    return {"$or": [{"content_level": {"$in": levels}}, {"content_level": {"$exists": False}, **raw}]}
 
 # ── Importance inference for economic events ─────────────────────
 
@@ -244,6 +272,8 @@ def news_doc_to_event(doc: dict, now_utc: datetime) -> Event:
         },
         source=doc.get("source") or "polygon_news",
         source_id=str(doc["_id"]),
+        content_level=_content_of(doc)[0],
+        content_chars=_content_of(doc)[1],
     )
 
 
@@ -299,6 +329,7 @@ class MongoNewsSource:
         limit: int,
         cursor: Optional[tuple[str, str]],
         now_utc: datetime,
+        min_content: Optional[str] = None,
     ) -> list[Event]:
         if not self.available:
             return []
@@ -309,6 +340,8 @@ class MongoNewsSource:
         }
         if tickers:
             query["tickers"] = {"$in": [t.upper() for t in tickers]}
+        if (cf := _mongo_content_filter(min_content)) is not None:
+            query["$and"] = [cf]
         if cursor:
             cursor_time = _parse_utc(cursor[0])
             cursor_id = cursor[1].removeprefix("news_")
@@ -340,6 +373,7 @@ class MongoNewsSource:
         cursor: Optional[tuple[str, str]],
         now_utc: datetime,
         warnings: Optional[list[str]] = None,
+        min_content: Optional[str] = None,
     ) -> list[Event]:
         if not self.available:
             return []
@@ -354,6 +388,8 @@ class MongoNewsSource:
             query["title"] = {"$regex": re.escape(keyword), "$options": "i"}
         if publisher:
             query["publisher.name"] = {"$regex": re.escape(publisher), "$options": "i"}
+        if (cf := _mongo_content_filter(min_content)) is not None:
+            query["$and"] = [cf]
         if cursor:
             cursor_time = _parse_utc(cursor[0])
             cursor_id = cursor[1].removeprefix("news_")
@@ -399,7 +435,7 @@ class MongoNewsSource:
         if latest and latest.get("published_utc"):
             pub = latest["published_utc"]
             out["latest_timestamp"] = pub.isoformat() if hasattr(pub, "isoformat") else str(pub)
-        out["record_count"] = await self._coll.count_documents({})
+        out["record_count"] = await self._coll.estimated_document_count()   # a full count scans every document
         out["unique_keys"] = len(await self._coll.distinct("tickers"))
         return out
 
@@ -501,15 +537,19 @@ class MultiMongoNewsSource:
         vals = [v for p in self._live() if (v := await p.get_freshness())]
         return max(vals) if vals else None
 
-    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc) -> list[Event]:
-        return self._merge([await p.query_window(start_utc, end_utc, tickers, limit, cursor, now_utc)
-                            for p in self._live()], limit)
+    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc,
+                           min_content: Optional[str] = None) -> list[Event]:
+        lists = await asyncio.gather(*(p.query_window(start_utc, end_utc, tickers, limit, cursor, now_utc,
+                                                      min_content=min_content) for p in self._live()))
+        return self._merge(list(lists), limit)
 
     async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                          now_utc, warnings: Optional[list[str]] = None) -> list[Event]:
+                          now_utc, warnings: Optional[list[str]] = None,
+                          min_content: Optional[str] = None) -> list[Event]:
         # the collections are searched at once: a slow one does not hold up the others
         lists = await asyncio.gather(*(p.search_news(start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                                                     now_utc, warnings=warnings) for p in self._live()))
+                                                     now_utc, warnings=warnings, min_content=min_content)
+                                       for p in self._live()))
         return self._merge(list(lists), limit)
 
     async def get_by_id(self, news_id: str) -> Optional[dict]:
@@ -630,7 +670,7 @@ class SQLiteNewsSource:
             "source": r.get("source"),
         }
 
-    def _where(self, start, end, tickers, keyword=None, publisher=None, cursor=None):
+    def _where(self, start, end, tickers, keyword=None, publisher=None, cursor=None, min_content=None):
         sql = " FROM news WHERE published_utc >= ? AND published_utc < ?"
         args: list[Any] = [self._iso(start), self._iso(end)]
         if tickers:
@@ -643,6 +683,9 @@ class SQLiteNewsSource:
         if publisher:
             sql += " AND publisher LIKE ?"
             args.append(f"%{publisher}%")
+        levels = _levels(min_content)
+        if levels is not None:     # no article text in this schema: a summary is the most there is
+            sql += " AND 0" if levels == ["full"] else " AND coalesce(trim(description), '') != ''"
         if cursor:
             ct = self._iso(_parse_utc(cursor[0]))
             cid = cursor[1].removeprefix("news_")
@@ -664,18 +707,22 @@ class SQLiteNewsSource:
             row = await cur.fetchone()
             return row[0] if row else None
 
-    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc) -> list[Event]:
+    async def query_window(self, start_utc, end_utc, tickers, limit, cursor, now_utc,
+                           min_content: Optional[str] = None) -> list[Event]:
         if not self.available:
             return []
-        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, cursor=cursor)
+        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, cursor=cursor,
+                                  min_content=min_content)
         return await self._events("SELECT *" + where + " ORDER BY published_utc, id LIMIT ?",
                                   args + [limit], now_utc)
 
     async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                          now_utc, warnings: Optional[list[str]] = None) -> list[Event]:
+                          now_utc, warnings: Optional[list[str]] = None,
+                          min_content: Optional[str] = None) -> list[Event]:
         if not self.available:
             return []
-        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, keyword, publisher, cursor)
+        where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, keyword, publisher, cursor,
+                                  min_content)
         return await self._events("SELECT *" + where + " ORDER BY published_utc, id LIMIT ?",
                                   args + [limit], now_utc)
 

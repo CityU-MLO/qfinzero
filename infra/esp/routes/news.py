@@ -114,6 +114,7 @@ async def news_search(req: NewsSearchRequest, request: Request):
         cursor=cursor,
         now_utc=now,
         warnings=warnings,
+        min_content=req.min_content,
     )
 
     has_more = len(events) > req.limit

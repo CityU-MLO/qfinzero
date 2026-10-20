@@ -830,6 +830,7 @@ def esp_query_events(
     cursor: Optional[str] = None,
     view: Literal["compact", "full"] = "full",
     now_utc: Optional[str] = None,
+    min_content: Optional[Literal["summary", "full"]] = None,
     session_id: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
@@ -853,12 +854,15 @@ def esp_query_events(
         cursor: Pagination cursor from a previous response's next_cursor field
         view: "compact" (no payload, faster) or "full" (includes event payload, default "full")
         now_utc: Override current time for backtesting replay (ISO datetime)
+        min_content: News only: "summary" keeps articles with a teaser or the full
+            text, "full" only those with the full text (esp_news_body returns it)
         session_id: Optional PMB session to time-lock this query to (data after
             the session's current bar is hidden, enforced server-side).
 
     Returns:
         JSON with: server_time_utc, events[], next_cursor
-        Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet
+        Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet;
+        news also content_level ("full" | "summary" | "headline") and content_chars
     """
     # Convert start_date/end_date to start_utc/end_utc if provided
     if start_date and not start_utc:
@@ -885,6 +889,7 @@ def esp_query_events(
                 cursor=cursor,
                 view=view,
                 now_utc=now_utc,
+                min_content=min_content,
             )
         )
 
@@ -1119,6 +1124,7 @@ def esp_search_news(
     publisher: Optional[str] = None,
     limit: int = 20,
     cursor: Optional[str] = None,
+    min_content: Optional[Literal["summary", "full"]] = None,
     session_id: Optional[str] = None,
     ctx: Context = None,
 ) -> str:
@@ -1132,11 +1138,14 @@ def esp_search_news(
         publisher: Case-insensitive substring search in publisher name
         limit: Max articles per page (1-500, default 50)
         cursor: Pagination cursor from previous response's next_cursor field
+        min_content: "summary" keeps articles with a teaser or the full text, "full"
+            only those with the full text (read it with esp_news_body)
         session_id: Optional PMB session to time-lock this query to (data after
             the session's current bar is hidden, enforced server-side).
 
     Returns:
-        JSON with: server_time_utc, events[], next_cursor
+        JSON with: server_time_utc, events[] (each with content_level "full" |
+        "summary" | "headline" and content_chars), next_cursor, warnings
     """
     as_of = _lock(ctx, session_id)
     now_utc = None
@@ -1154,6 +1163,7 @@ def esp_search_news(
                 limit=limit,
                 cursor=cursor,
                 now_utc=now_utc,
+                min_content=min_content,
             )
         )
 

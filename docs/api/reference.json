@@ -1567,6 +1567,18 @@
         "required": false,
         "description": "",
         "nullable": true
+       },
+       {
+        "name": "min_content",
+        "type": "string",
+        "required": false,
+        "description": "",
+        "enum": [
+         "headline",
+         "summary",
+         "full"
+        ],
+        "nullable": true
        }
       ],
       "required": true,
@@ -1987,6 +1999,18 @@
         "type": "string",
         "required": false,
         "description": "",
+        "nullable": true
+       },
+       {
+        "name": "min_content",
+        "type": "string",
+        "required": false,
+        "description": "",
+        "enum": [
+         "headline",
+         "summary",
+         "full"
+        ],
         "nullable": true
        }
       ],
@@ -5977,6 +6001,17 @@
      "nullable": true
     },
     {
+     "name": "min_content",
+     "type": "string",
+     "required": false,
+     "description": "News only: \"summary\" keeps articles with a teaser or the full text, \"full\" only those with the full text (esp_news_body returns it)",
+     "enum": [
+      "summary",
+      "full"
+     ],
+     "nullable": true
+    },
+    {
      "name": "session_id",
      "type": "string",
      "required": false,
@@ -5984,7 +6019,7 @@
      "nullable": true
     }
    ],
-   "returns": "JSON with: server_time_utc, events[], next_cursor Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet",
+   "returns": "JSON with: server_time_utc, events[], next_cursor Each event has: event_id, event_type, title, time_utc, importance, tickers, snippet; news also content_level (\"full\" | \"summary\" | \"headline\") and content_chars",
    "example": {}
   },
   {
@@ -6043,6 +6078,17 @@
      "nullable": true
     },
     {
+     "name": "min_content",
+     "type": "string",
+     "required": false,
+     "description": "\"summary\" keeps articles with a teaser or the full text, \"full\" only those with the full text (read it with esp_news_body)",
+     "enum": [
+      "summary",
+      "full"
+     ],
+     "nullable": true
+    },
+    {
      "name": "session_id",
      "type": "string",
      "required": false,
@@ -6050,7 +6096,7 @@
      "nullable": true
     }
    ],
-   "returns": "JSON with: server_time_utc, events[], next_cursor",
+   "returns": "JSON with: server_time_utc, events[] (each with content_level \"full\" | \"summary\" | \"headline\" and content_chars), next_cursor, warnings",
    "example": {}
   },
   {

@@ -18,6 +18,8 @@ type NewsFilters = {
   keyword: string;
   publisher: string;
   limit: number;
+  /** keep articles with at least this much text ("" = every article) */
+  minContent?: "" | "summary" | "full";
 };
 
 const DEFAULT_FILTERS: NewsFilters = {
@@ -97,6 +99,7 @@ export function NewsBrowser() {
           end_utc: toIso(filters.endUtc),
           keyword: filters.keyword || undefined,
           publisher: filters.publisher || undefined,
+          min_content: filters.minContent || undefined,
           limit: filters.limit,
           cursor,
         };
@@ -200,6 +203,9 @@ export function NewsBrowser() {
       </div>
 
       {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {result?.warnings?.length ? (
+        <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">{result.warnings.join(" · ")}</p>
+      ) : null}
 
       <NewsStatsCharts stats={stats.data ?? null} />
 

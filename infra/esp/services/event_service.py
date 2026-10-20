@@ -118,7 +118,8 @@ class EventService:
 
         if "news" in sources:
             tasks.append(
-                self._ds.news.query_window(start, end, req.tickers, fetch_limit * 2, cursor, now)
+                self._ds.news.query_window(start, end, req.tickers, fetch_limit * 2, cursor, now,
+                                           min_content=getattr(req, "min_content", None))
             )
             task_names.append("news")
 
@@ -216,7 +217,8 @@ class EventService:
             tasks.append(self._ds.econ.query_window(start, now, fetch_limit * 2, cursor, now))
             task_names.append("econ")
         if "news" in sources:
-            tasks.append(self._ds.news.query_window(start, now, req.tickers, fetch_limit * 2, cursor, now))
+            tasks.append(self._ds.news.query_window(start, now, req.tickers, fetch_limit * 2, cursor, now,
+                                                    min_content=getattr(req, "min_content", None)))
             task_names.append("news")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
