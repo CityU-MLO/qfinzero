@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import argparse
 import json
 import sys
@@ -287,6 +289,44 @@ def _do_scan(args) -> int:
     return _emit(scan.scan(args.provider), args)
 
 
+def default_scan_roots() -> list[str]:
+    """The configured raw libraries plus any extra directories (``index.roots``)."""
+    from ..admin import config_store
+    cfg = config_store.load()
+    d = cfg.get("dirs", {}) or {}
+    roots = [d.get(k) for k in ("raw_massive", "raw_databento", "raw_tiingo")]
+    roots += list((cfg.get("index", {}) or {}).get("roots") or [])
+    return [r for r in dict.fromkeys(roots) if r and Path(r).is_dir()]
+
+
+def _do_scan(args) -> int:
+    from ..index import catalog
+    paths = resolve(args.massive, args.tushare, args.storage, args.databento)
+    roots = args.dirs or default_scan_roots()
+    if not roots:
+        print("no directories to scan (give some, or set the raw directories in Data setup)")
+        return 1
+    rep = catalog.scan(roots, paths.storage, symbols=not args.no_symbols, threads=args.threads,
+                       on_line=None if args.json else print)
+    if args.json:
+        return _emit(rep, args)
+    print(f"\n{'vendor':10} {'dataset':16} {'schema':15} {'kind':6} {'asset':7} {'res':5} {'files':>7} "
+          f"{'GB':>8}  {'range':23} levels / notes")
+    for g in rep["groups"]:
+        lv = " ".join(f"{k}:{v}" for k, v in sorted(g["levels"].items()) if k)
+        notes = "; ".join(f"{n} ({c})" for n, c in sorted(g["notes"].items(), key=lambda kv: -kv[1])[:2])
+        scope = "" if g["scope"] == "in" else f" [{g['scope']}]"
+        print(f"{(g['vendor'] or '')[:10]:10} {(g['dataset'] or '')[:16]:16} {(g['schema'] or '')[:15]:15} "
+              f"{g['kind'][:6]:6} {(g['asset_class'] or '-')[:7]:7} {(g['resolution'] or '-')[:5]:5} "
+              f"{g['files']:7,} {g['bytes'] / 1e9:8.2f}  {(g['first'] or '?')} .. {(g['last'] or '?')}  {lv}{scope}"
+              + (f"  {notes}" if notes else ""))
+    u = rep["unknown"]
+    print(f"\nnot market data we know: {u['files']:,} files ({u['bytes'] / 1e9:.2f} GB)"
+          + (f", e.g. {u['examples'][0]}" if u["examples"] else ""))
+    print(f"{rep['files']:,} files ({rep['read']:,} read, {rep['reused']:,} unchanged) in {rep['elapsed_s']} s -> {rep['index']}")
+    return 0
+
+
 def _do_acquire(args) -> int:
     from ..admin import acquire
     if args.list:
@@ -401,6 +441,13 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=_do_scan)
 
     # ── admin: acquire (trigger download scripts) ──
+    sc = sub.add_parser("index", help="catalogue raw files in place (no conversion) under _state/index")
+    sc.add_argument("dirs", nargs="*", help="directories (default: the configured raw libraries)")
+    sc.add_argument("--no-symbols", action="store_true", help="skip per-file symbol lists (faster)")
+    sc.add_argument("--threads", type=int, default=8)
+    sc.add_argument("--json", action="store_true", help="emit the report as JSON")
+    sc.set_defaults(func=_do_scan)
+
     ac = sub.add_parser("acquire", help="trigger a raw-download script (dry-run by default)")
     ac.add_argument("target", nargs="?", help="us_prices | news | databento | tiingo")
     ac.add_argument("--list", action="store_true", help="list acquire targets + readiness")

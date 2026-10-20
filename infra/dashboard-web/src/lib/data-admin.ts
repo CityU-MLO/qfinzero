@@ -134,6 +134,17 @@ export type Spend = {
   recent: { ts: string; key_id: string; dataset: string; schema: string; cost_usd: number; files: number; job: string }[];
 };
 
+export type IndexGroup = {
+  adapter: string | null; vendor: string | null; dataset: string | null; schema: string | null; kind: string;
+  asset_class: string | null; resolution: string | null; scope: "in" | "out" | "error";
+  files: number; bytes: number; rows: number; first: string | null; last: string | null;
+  levels: Record<string, number>; notes: Record<string, number>;
+};
+export type IndexReport = {
+  ok: boolean; elapsed_s: number; files: number; read: number; reused: number; roots: string[]; missing_roots: string[];
+  index: string; groups: IndexGroup[]; unknown: { files: number; bytes: number; examples: string[] };
+};
+
 /** Vendors with keys in Data setup -> Vendor keys (Tiingo has keys but no import flow). */
 export type KeyVendor = Vendor | "tiingo";
 
@@ -182,6 +193,9 @@ export const dataAdmin = {
   ratesApply: (files: { name: string; content: string }[], replace = false) =>
     j<{ ok: boolean; loaded_dates: number; new_dates: number; status: RatesStatus }>("setup/rates/apply",
       { method: "POST", body: JSON.stringify({ files, replace }) }),
+  indexReport: () => j<{ default_roots: string[]; report: IndexReport | null }>("setup/index"),
+  scanIndex: (paths: string[], symbols = true) =>
+    j<Job>("setup/scan", { method: "POST", body: JSON.stringify({ paths, symbols }) }),
   newsUsage: () => j<NewsUsage>("setup/news"),
   newsTest: (mongo_uri?: string, mongo_db?: string) =>
     j<{ ok: boolean; version?: string; database?: string; collections?: string[]; error?: string }>("setup/news/test",

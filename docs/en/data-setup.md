@@ -62,6 +62,57 @@ Every Databento download records what it cost in
 `$QFZ_DATA_ROOT/_state/databento_spend.jsonl`. The tab shows spend per month
 and key against the budgets, and the latest charges.
 
+## Scanning and indexing (no conversion)
+
+*Data setup* → *Scan & index* (or `qfz-data index [DIR ...]`) catalogues market
+data where it already is. Each file is recognised from its contents by an
+adapter: massive aggregates, quotes and global csv.gz, Databento DBN and
+parquet exports, Tiingo BOATS, and your own parquet with a `qfz.dataset.yaml`.
+Nothing is converted and nothing is written into the scanned directories; the
+index is kept under `$STORAGE_ROOT/_state/index/`:
+
+| file | content |
+|------|---------|
+| `catalog.parquet` | one row per file: size and mtime (the fingerprint), adapter, vendor, dataset, kind, asset class, resolution, trade dates, rows, level, scope, notes |
+| `row_groups.parquet` | the rows and symbol range of each parquet row group |
+| `symbols.parquet` | which symbols each file holds, with row counts |
+| `scan.json` | the last scan's report |
+
+Without arguments the configured raw libraries are scanned (plus the
+directories in `index.roots`). A rescan reads only files whose size or mtime
+changed; files that disappeared leave the index. Files QFinZero does not know
+are listed, not dropped silently.
+
+**Levels.** `L0`: readable, a query reads the whole file (gzip CSV and JSON,
+single-frame DBN). `L1`: indexed, queries pick files and row groups by time
+and symbol. `L2`: fast, sorted by symbol with row groups of at most 131,072
+rows or a page index, as fast as converted data. Scope `out` marks files QFinZero
+does not use (`cmbp-1`, MBO outside Blue Ocean).
+
+**Your own data.** Put a `qfz.dataset.yaml` at the top of a directory of
+parquet files:
+
+```yaml
+qfz_dataset: 1
+name: my_vendor_cn_minute
+vendor: my_vendor
+kind: bar                 # bar | quote | trade
+resolution: 1m
+asset_class: stock
+market: cn
+files: "**/*.parquet"
+time: {column: dt, unit: ns}          # s | ms | us | ns | iso (iso without an offset needs timezone)
+columns: {code: ticker, vol: volume}  # your column -> standard field
+priority: 50
+```
+
+Bars need `ticker, open, high, low, close` and a time column; quotes `ticker,
+bid_price, ask_price`; trades `ticker, price, size`. A-share tickers are
+written `SH600519`, `SZ000001`, `BJ430047`. For `L2`, sort each file by ticker
+and time and write row groups of about 120,000 rows (or a page index).
+
+This step only builds the index; queries still read the converted stores.
+
 ## Importing local files
 
 1. Choose **Databento** or **massive**, then the **Local files** tab.

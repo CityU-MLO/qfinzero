@@ -91,6 +91,38 @@ def _refresh_plan(source: str, market=None) -> list[dict]:
     return refresh.plan(ids, rows)
 
 
+# ── raw-data index (Data setup → Scan & index) ──
+
+@app.get("/setup/index")
+def index_report() -> dict:
+    from qfinzero.index import catalog
+    from qfinzero.pipeline.cli import default_scan_roots
+    return {"default_roots": default_scan_roots(),
+            "report": catalog.last_report(config_store.dirs().get("storage_root") or "")}
+
+
+@app.post("/setup/scan")
+def index_scan(body: dict = Body(default={})) -> dict:
+    from qfinzero.admin import datasetup
+    from qfinzero.index import catalog
+    from qfinzero.pipeline.cli import default_scan_roots
+    roots = list((body or {}).get("paths") or default_scan_roots())
+    if not roots:
+        raise HTTPException(422, "choose directories to scan")
+    try:
+        for p in roots:
+            datasetup._allowed(datasetup.Path(p))
+    except PermissionError as e:
+        _setup_error(e)
+    storage = config_store.dirs().get("storage_root") or ""
+
+    def _task(job):
+        return catalog.scan(roots, storage, symbols=bool((body or {}).get("symbols", True)),
+                            on_line=job.log, on_progress=job.update, should_stop=job.cancelled)
+    return registry.submit("scan", f"scan {len(roots)} director{'y' if len(roots) == 1 else 'ies'}", _task,
+                           meta={"kind": "index-scan"}).snapshot()
+
+
 # ── news storage (Data setup → News) ──
 
 @app.get("/setup/news")

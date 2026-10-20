@@ -35,6 +35,47 @@ Databento 和 massive 的很多产品是分开订阅的，所以一个人可能�
 
 每次 Databento 下载的花费都记录在 `$QFZ_DATA_ROOT/_state/databento_spend.jsonl`。该标签页按月份和 key 显示花费与预算的对比，以及最近的扣费记录。
 
+## 扫描与索引（不转换）
+
+*数据导入* → *扫描与索引*（或 `qfz-data index [目录 ...]`）在数据原来的位置登记行情文件。每个文件按内容由 adapter 识别：
+massive 的 K 线、报价和全球 csv.gz，Databento 的 DBN 和 parquet 导出，Tiingo BOATS，以及附带 `qfz.dataset.yaml` 的自定义 parquet。
+不转换格式，也不会往扫描的目录里写任何东西；索引放在 `$STORAGE_ROOT/_state/index/`：
+
+| 文件 | 内容 |
+|------|------|
+| `catalog.parquet` | 每个文件一行：大小和修改时间（指纹）、adapter、供应商、数据集、类型、资产类别、精度、交易日、行数、等级、范围、备注 |
+| `row_groups.parquet` | 每个 parquet row group 的行数和代码范围 |
+| `symbols.parquet` | 每个文件有哪些代码及其行数 |
+| `scan.json` | 上一次扫描的报告 |
+
+不带参数时扫描已配置的原始库（以及 `index.roots` 里的目录）。重新扫描只读大小或修改时间变化的文件；已删除的文件会从索引移除。
+QFinZero 不认得的文件会列出来，不会静默忽略。
+
+**等级。** `L0` 可读：查询要读整个文件（gzip CSV、JSON、单 frame 的 DBN）。`L1` 已索引：查询按时间和代码挑文件和 row group。
+`L2` 快速：按代码排序，且 row group 不超过 131,072 行或有 page index，和转换后的数据一样快。范围为 `out` 的文件是 QFinZero 不使用的
+（`cmbp-1`、Blue Ocean 以外的 MBO）。
+
+**自定义数据。** 在 parquet 目录的根部放一个 `qfz.dataset.yaml`：
+
+```yaml
+qfz_dataset: 1
+name: my_vendor_cn_minute
+vendor: my_vendor
+kind: bar                 # bar | quote | trade
+resolution: 1m
+asset_class: stock
+market: cn
+files: "**/*.parquet"
+time: {column: dt, unit: ns}          # s | ms | us | ns | iso（没有时区偏移的 iso 需要写 timezone）
+columns: {code: ticker, vol: volume}  # 你的列名 -> 标准字段
+priority: 50
+```
+
+K 线需要 `ticker, open, high, low, close` 和时间列；报价需要 `ticker, bid_price, ask_price`；成交需要 `ticker, price, size`。
+A 股代码写成 `SH600519`、`SZ000001`、`BJ430047`。要达到 `L2`，每个文件按代码和时间排序，row group 约 12 万行（或写 page index）。
+
+这一步只建立索引；查询仍然读转换后的存储。
+
 ## 导入本地文件
 
 1. 选择 **Databento** 或 **massive**，再选 **本地文件** 标签。

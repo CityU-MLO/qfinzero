@@ -4,7 +4,7 @@ import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp, ChevronRight, CloudDownload, File, Folder, FolderInput, FolderTree, HardDrive, KeyRound, Loader2,
-  RefreshCw, Search, Square, X,
+  RefreshCw, ScanSearch, Search, Square, X,
 } from "lucide-react";
 
 import { JobProgressView, KeysPanel, LayoutPanel, ProgressBar, fmtBytes } from "@/components/data/data-utility";
@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Segmented } from "@/components/ui/segmented";
 import {
-  QUOTE_INTERVALS, dataAdmin, type BrowseEntry, type DownloadQuote, type InspectResult, type Job, type QuoteIntervals, type Vendor,
+  QUOTE_INTERVALS, dataAdmin, type BrowseEntry, type DownloadQuote, type IndexGroup, type InspectResult, type Job, type QuoteIntervals,
+  type Vendor,
 } from "@/lib/data-admin";
 import { cn } from "@/lib/utils";
 
@@ -525,7 +526,128 @@ function JobsPanel({ focus, onFocus }: { focus: string | null; onFocus: (id: str
 
 // ── page ──────────────────────────────────────────────────────────────────
 
-type Tab = "layout" | "keys" | "local" | "download" | "status";
+type Tab = "layout" | "keys" | "index" | "local" | "download" | "status";
+
+const LEVEL_TIP: Record<string, [string, string]> = {
+  L0: ["readable: every query reads the whole file", "可读：每次查询读整个文件"],
+  L1: ["indexed: queries pick files and row groups by time and symbol", "已索引：查询按时间和代码挑文件和 row group"],
+  L2: ["fast: sorted with small row groups or a page index, as fast as converted data", "快速：已排序且 row group 小或有 page index，和转换后的数据一样快"],
+};
+
+function IndexPanel({ selected, onRemove, onJob }: { selected: string[]; onRemove: (p: string) => void; onJob: (j: Job) => void }) {
+  const t = useT();
+  const { locale } = useLocale();
+  const q = useQuery({ queryKey: ["setup", "index"], queryFn: dataAdmin.indexReport, refetchInterval: 15_000 });
+  const [skip, setSkip] = React.useState<string[]>([]);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const defaults = q.data?.default_roots ?? [];
+  const roots = [...defaults.filter((r) => !skip.includes(r)), ...selected.filter((p) => !defaults.includes(p))];
+  const rep = q.data?.report;
+  const scan = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      onJob(await dataAdmin.scanIndex(roots));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const name = (g: IndexGroup) => [g.vendor, g.dataset, g.schema].filter(Boolean).join(" · ");
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><ScanSearch className="h-4 w-4" />{t("Scan & index", "扫描与索引")}</CardTitle>
+        <CardDescription>
+          {t("QFinZero reads market data in place: a scan recognises each file (massive, Databento, Tiingo, or your own parquet with a qfz.dataset.yaml) and catalogues it. Nothing is converted or written into your directories; the index lives under the storage root.",
+            "QFinZero 直接读取原始行情文件：扫描会识别每个文件（massive、Databento、Tiingo，或附带 qfz.dataset.yaml 的自定义 parquet）并登记到索引。不转换格式，也不会写入你的目录；索引放在存储根目录下。")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">{t("Directories to scan", "要扫描的目录")}</div>
+          {defaults.map((r) => (
+            <label key={r} className="flex items-center gap-2 font-mono text-[13px]">
+              <input type="checkbox" checked={!skip.includes(r)} onChange={() => setSkip((s) => s.includes(r) ? s.filter((x) => x !== r) : [...s, r])} />
+              {r} <span className="font-sans text-xs text-muted-foreground">{t("configured library", "已配置的原始库")}</span>
+            </label>
+          ))}
+          {selected.filter((p) => !defaults.includes(p)).map((p) => (
+            <div key={p} className="flex items-center gap-2 font-mono text-[13px]">
+              <Folder className="h-3.5 w-3.5" /> {p}
+              <button onClick={() => onRemove(p)} className="text-muted-foreground hover:text-foreground" aria-label="remove"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">{t("Add more from the browser on the left.", "可在左侧浏览器中添加更多目录。")}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={scan} disabled={busy || roots.length === 0}><ScanSearch /> {t("Scan", "扫描")}</Button>
+          <span className="text-xs text-muted-foreground">{t("Unchanged files are not read again.", "没有变化的文件不会重读。")}</span>
+        </div>
+        {err && <Alert variant="error">{err}</Alert>}
+        {q.isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {rep && (
+          <div className="space-y-2">
+            <div className="text-[13px] text-muted-foreground">
+              {t(`${rep.files.toLocaleString()} files catalogued (${rep.read.toLocaleString()} read, ${rep.reused.toLocaleString()} unchanged) in ${rep.elapsed_s} s.`,
+                `已登记 ${rep.files.toLocaleString()} 个文件（读取 ${rep.read.toLocaleString()} 个，未变化 ${rep.reused.toLocaleString()} 个），用时 ${rep.elapsed_s} 秒。`)}
+            </div>
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-[12.5px]">
+                <thead className="bg-secondary/50 text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-2.5 py-2">{t("Source", "来源")}</th><th className="px-2.5 py-2">{t("Data", "数据")}</th>
+                    <th className="px-2.5 py-2 text-right">{t("Files", "文件")}</th><th className="px-2.5 py-2 text-right">{t("Size", "大小")}</th>
+                    <th className="px-2.5 py-2">{t("Dates", "日期")}</th><th className="px-2.5 py-2">{t("Level", "等级")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rep.groups.map((g, i) => (
+                    <tr key={i} className={cn("border-t align-top", g.scope !== "in" && "text-muted-foreground")}>
+                      <td className="px-2.5 py-1.5 font-mono text-xs">{name(g) || g.adapter}</td>
+                      <td className="px-2.5 py-1.5">{[g.asset_class, g.kind, g.resolution].filter(Boolean).join(" · ")}
+                        {g.scope === "out" && <Badge variant="outline" className="ml-1.5">{t("out of scope", "不在范围")}</Badge>}
+                        {g.scope === "error" && <Badge variant="danger" className="ml-1.5">{t("error", "错误")}</Badge>}
+                        {Object.keys(g.notes).length > 0 && (
+                          <div className="mt-0.5 text-[11px] text-muted-foreground">
+                            {Object.entries(g.notes).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([n, c]) => `${n} (${c})`).join("; ")}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right font-mono text-xs">{g.files.toLocaleString()}</td>
+                      <td className="px-2.5 py-1.5 text-right font-mono text-xs">{fmtBytes(g.bytes)}</td>
+                      <td className="px-2.5 py-1.5 font-mono text-xs">{g.first ?? "?"} → {g.last ?? "?"}</td>
+                      <td className="px-2.5 py-1.5">
+                        <div className="flex flex-wrap gap-1">
+                          {Object.entries(g.levels).filter(([k]) => k && k !== "null").sort().map(([lv, n]) => (
+                            <span key={lv} title={LEVEL_TIP[lv]?.[locale === "zh" ? 1 : 0]}
+                              className={cn("rounded px-1.5 py-0.5 font-mono text-[11px]",
+                                lv === "L2" ? "bg-success/10 text-success" : lv === "L1" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                              {lv}{Object.keys(g.levels).length > 1 ? ` ${n.toLocaleString()}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {rep.unknown.files > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t(`${rep.unknown.files.toLocaleString()} other files (${fmtBytes(rep.unknown.bytes)}) are not market data QFinZero knows, e.g. `,
+                  `另有 ${rep.unknown.files.toLocaleString()} 个文件（${fmtBytes(rep.unknown.bytes)}）不是 QFinZero 认得的行情数据，例如 `)}
+                <span className="font-mono">{rep.unknown.examples[0]}</span>
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function DataSetup() {
   const t = useT();
@@ -536,7 +658,7 @@ export function DataSetup() {
   const [focus, setFocus] = React.useState<string | null>(null);
   React.useEffect(() => {
     const h = window.location.hash.slice(1);
-    if (["layout", "keys", "local", "download", "status"].includes(h)) setTab(h as Tab);
+    if (["layout", "keys", "index", "local", "download", "status"].includes(h)) setTab(h as Tab);
   }, []);
   const pick = (id: Tab) => { setTab(id); window.history.replaceState(null, "", `#${id}`); };
   React.useEffect(() => setSelected([]), [vendor]);
@@ -566,7 +688,8 @@ export function DataSetup() {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 border-b">
-          {([["layout", t("Directories", "目录"), FolderTree], ["keys", t("Keys", "密钥"), KeyRound], ["local", t("Local files", "本地文件"), FolderInput],
+          {([["layout", t("Directories", "目录"), FolderTree], ["keys", t("Keys", "密钥"), KeyRound], ["index", t("Scan & index", "扫描与索引"), ScanSearch],
+             ["local", t("Local files", "本地文件"), FolderInput],
              ["download", t("Download", "下载"), CloudDownload], ["status", t("Storage status", "存储状态"), HardDrive]] as const).map(([id, label, Icon]) => (
             <button key={id} onClick={() => pick(id)} role="tab" aria-selected={tab === id}
               className={cn("-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium", tab === id ? "border-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
@@ -581,6 +704,12 @@ export function DataSetup() {
 
       {tab === "layout" && <LayoutPanel />}
       {tab === "keys" && <KeysPanel />}
+      {tab === "index" && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_1.4fr]">
+          <FileBrowser selected={selected} onToggle={toggle} />
+          <IndexPanel selected={selected} onRemove={toggle} onJob={(j) => setFocus(j.id)} />
+        </div>
+      )}
       {tab === "local" && (
         <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
           <FileBrowser selected={selected} onToggle={toggle} />
@@ -596,7 +725,7 @@ export function DataSetup() {
         </div>
       )}
       {tab === "status" && <StorageStatus onGoTo={pick} />}
-      {(tab === "local" || tab === "download") && <JobsPanel focus={focus} onFocus={setFocus} />}
+      {(tab === "local" || tab === "download" || tab === "index") && <JobsPanel focus={focus} onFocus={setFocus} />}
     </div>
   );
 }

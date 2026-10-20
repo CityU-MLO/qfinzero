@@ -21,6 +21,10 @@ Added:
 - Benzinga monthly news archives (`YYYY-MM.jsonl.gz`) load into ESP with the
   teaser, image and full article text; `/esp/news/{id}/body` returns `body` and
   accepts the `news_…` event id of a search result. Titles are HTML-unescaped.
+- Raw-data index: *Data setup* → *Scan & index* and `qfz-data index` recognise
+  massive, Databento, Tiingo and custom parquet (`qfz.dataset.yaml`) files in
+  place and catalogue them under `_state/index/` (files, row groups, symbols,
+  levels L0-L2), rescanning only changed files. Nothing is converted.
 - Blue Ocean overnight session: the `OCEA.MEMOIR` order book is replayed into
   minute quotes (`stock_quote_minute`), and each 20:00-04:00 ET session becomes
   one bar in the new `stock_overnight_daily` store, dated by the trading day it
