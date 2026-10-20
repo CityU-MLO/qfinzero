@@ -100,6 +100,12 @@ Fixed:
   describe today's store are refused, day-based PMB accounts stay on days
   closed before it and sessions end by it.
 - `qfz-data scan <provider>` ran the index scan instead of the reachability check.
+- News keyword search read every article of the window from disk (a month of
+  `news_tushare` took 455 s, so `esp_search_news` timed out). Vendor
+  collections get a `(published_utc, title)` index that matches titles inside
+  the index; the collections are searched at once, each for at most
+  `ESP_NEWS_SEARCH_MAX_MS` (20 s), and one that runs out answers with a
+  `warnings` entry instead of failing the search.
 
 ## Unreleased: data utility
 

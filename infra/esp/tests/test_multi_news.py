@@ -9,11 +9,15 @@ from services.data_sources import MultiMongoNewsSource
 class _Part:
     def __init__(self, events, docs=None, available=True):
         self.events, self.docs, self.available, self.asked = events, docs or {}, available, []
+        self.slow = False
 
     async def query_window(self, start, end, tickers, limit, cursor, now):
         return [e for e in self.events if not cursor or (e.time_utc, e.event_id) > cursor][:limit]
 
-    async def search_news(self, start, end, tickers, kw, pub, limit, cursor, now):
+    async def search_news(self, start, end, tickers, kw, pub, limit, cursor, now, warnings=None):
+        if self.slow and warnings is not None:
+            warnings.append("news_slow: the search stopped")
+            return []
         return await self.query_window(start, end, tickers, limit, cursor, now)
 
     async def get_by_id(self, news_id):
@@ -57,3 +61,13 @@ def test_get_by_id_asks_the_vendor_with_the_prefix_first():
     assert ts.asked == []
     assert asyncio.run(m.get_by_id("zz_1")) is None
     assert ts.asked == ["zz_1"] and bz.asked == ["bz_7", "zz_1"]
+
+
+def test_a_collection_that_times_out_leaves_a_warning_and_the_others_results():
+    fast = _Part([_ev("13:00", "bz_1")])
+    slow = _Part([_ev("12:00", "ts_1")])
+    slow.slow = True
+    m = _multi([("benzinga", fast), ("tushare", slow)])
+    warnings: list[str] = []
+    got = asyncio.run(m.search_news(None, None, None, "storage", None, 10, None, None, warnings=warnings))
+    assert [e.event_id for e in got] == ["news_bz_1"] and warnings == ["news_slow: the search stopped"]

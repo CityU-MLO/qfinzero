@@ -129,6 +129,8 @@ class PaginatedResponse(BaseModel):
     server_time_utc: str
     events: list[Event]
     next_cursor: Optional[str] = None
+    # a source that could not answer in time (the events are the others')
+    warnings: list[str] = []
 
 
 class TriggerItem(BaseModel):

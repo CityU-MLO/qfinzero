@@ -13,6 +13,7 @@ returned only when the event's time is not after the query's ``now_utc``;
 before that the event is SCHEDULED with its actuals blanked.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -29,6 +30,9 @@ from qfinzero.esp_schema import NEWS_SCHEMA  # noqa: F401  (documented on SQLite
 logger = logging.getLogger("esp.data_sources")
 
 EST = ZoneInfo("America/New_York")
+# A keyword search over a large collection may scan a long window: stop it after this
+# and answer with the other collections' results and a warning (the clients time out at 30 s).
+NEWS_SEARCH_MAX_MS = int(os.environ.get("ESP_NEWS_SEARCH_MAX_MS", "20000"))
 
 # ── Importance inference for economic events ─────────────────────
 
@@ -335,6 +339,7 @@ class MongoNewsSource:
         limit: int,
         cursor: Optional[tuple[str, str]],
         now_utc: datetime,
+        warnings: Optional[list[str]] = None,
     ) -> list[Event]:
         if not self.available:
             return []
@@ -362,10 +367,19 @@ class MongoNewsSource:
             self._coll.find(query)
             .sort([("published_utc", 1), ("_id", 1)])
             .limit(limit)
+            .max_time_ms(NEWS_SEARCH_MAX_MS)
         )
         events = []
-        async for doc in docs:
-            events.append(self._to_event(doc, now_utc))
+        try:
+            async for doc in docs:
+                events.append(self._to_event(doc, now_utc))
+        except Exception as e:  # noqa: BLE001 - pymongo ExecutionTimeout (code 50); others re-raised
+            if getattr(e, "code", None) != 50:
+                raise
+            logger.warning("news search on %s stopped after %d ms", self._coll_name, NEWS_SEARCH_MAX_MS)
+            if warnings is not None:
+                warnings.append(f"{self._coll_name}: the search stopped after {NEWS_SEARCH_MAX_MS // 1000} s "
+                                "without finishing; narrow the time window or add tickers")
         return events
 
     async def get_by_id(self, news_id: str) -> Optional[dict]:
@@ -492,9 +506,11 @@ class MultiMongoNewsSource:
                             for p in self._live()], limit)
 
     async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                          now_utc) -> list[Event]:
-        return self._merge([await p.search_news(start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                                                now_utc) for p in self._live()], limit)
+                          now_utc, warnings: Optional[list[str]] = None) -> list[Event]:
+        # the collections are searched at once: a slow one does not hold up the others
+        lists = await asyncio.gather(*(p.search_news(start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
+                                                     now_utc, warnings=warnings) for p in self._live()))
+        return self._merge(list(lists), limit)
 
     async def get_by_id(self, news_id: str) -> Optional[dict]:
         first = [p for sid, p in self._parts if self._prefixes.get(sid) and news_id.startswith(self._prefixes[sid])]
@@ -656,7 +672,7 @@ class SQLiteNewsSource:
                                   args + [limit], now_utc)
 
     async def search_news(self, start_utc, end_utc, tickers, keyword, publisher, limit, cursor,
-                          now_utc) -> list[Event]:
+                          now_utc, warnings: Optional[list[str]] = None) -> list[Event]:
         if not self.available:
             return []
         where, args = self._where(start_utc, _news_end(end_utc, now_utc), tickers, keyword, publisher, cursor)

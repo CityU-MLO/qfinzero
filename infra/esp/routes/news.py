@@ -102,6 +102,7 @@ async def news_search(req: NewsSearchRequest, request: Request):
 
     cursor = _decode_cursor(req.cursor)
     fetch_limit = req.limit + 1
+    warnings: list[str] = []
 
     events = await ds.news.search_news(
         start_utc=start,
@@ -112,6 +113,7 @@ async def news_search(req: NewsSearchRequest, request: Request):
         limit=fetch_limit,
         cursor=cursor,
         now_utc=now,
+        warnings=warnings,
     )
 
     has_more = len(events) > req.limit
@@ -126,4 +128,5 @@ async def news_search(req: NewsSearchRequest, request: Request):
         server_time_utc=datetime.now(timezone.utc).isoformat(),
         events=page,
         next_cursor=next_cursor,
+        warnings=warnings,
     ).model_dump()

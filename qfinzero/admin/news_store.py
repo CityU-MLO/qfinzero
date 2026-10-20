@@ -34,6 +34,12 @@ INDEXES = [
     [("market", 1), ("published_utc", -1), ("_id", 1)],
     [("news_kind", 1), ("published_utc", -1)],
 ]
+# Keyword search matches titles inside this index, so only the matching documents are
+# read (without it a month of a large collection is read whole). Vendor collections
+# only: the shared legacy collection is left as it is.
+SEARCH_INDEXES = [
+    [("published_utc", -1), ("title", 1)],
+]
 
 
 def settings() -> dict[str, Any]:
@@ -176,7 +182,8 @@ def usage() -> dict[str, Any]:
 
 
 def ensure_indexes(db, name: str) -> list[str]:
-    return [db[name].create_index(keys) for keys in INDEXES]
+    keys = INDEXES + ([] if name == settings()["legacy_collection"] else SEARCH_INDEXES)
+    return [db[name].create_index(k) for k in keys]
 
 
 def split(*, on_line: Optional[Callable[[str], None]] = None, on_progress: Optional[Callable[..., None]] = None,
