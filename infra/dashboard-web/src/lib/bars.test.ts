@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregate, chartTime, etOffsetSec, fromDailyRows, mergeBars, sma, vwap, type Bar } from "./bars";
+import {
+  aggregate, chartTime, etOffsetSec, filterSessions, fromDailyRows, mergeBars, sessionOf, sessionRuns, sma, vwap, type Bar,
+} from "./bars";
 import { kindOf } from "./qfzview";
 
 const MIN = 60e9;
@@ -31,6 +33,23 @@ describe("bars", () => {
     expect(sma([bar(0, 1), bar(1, 2), bar(2, 3)], 2, (x) => x.ns).map((p) => p.value)).toEqual([1.5, 2.5]);
     expect(vwap([bar(0, 10, 1), bar(1, 20, 3)], (x) => x.ns)[1].value).toBeCloseTo(17.5);
     expect(fromDailyRows([{ date: "2026-02-24", close: 64061.9, volume: 20134.07 }])[0].volume).toBeCloseTo(20134.07);
+  });
+
+  it("splits the ET day into overnight, pre-market, regular and after-hours", () => {
+    const at = (h: number, m: number) => Date.UTC(2026, 7, 21, h + 4, m) * 1e6;     // EDT wall clock -> UTC
+    expect([at(3, 59), at(4, 0), at(9, 29), at(9, 30), at(15, 59), at(16, 0), at(19, 59), at(20, 0)].map((x) => sessionOf(x)))
+      .toEqual(["overnight", "pre", "pre", "regular", "regular", "post", "post", "overnight"]);
+    expect(sessionOf(at(9, 0), 60)).toBe("regular");                  // the 09:00 hour holds the open
+    expect(sessionOf(at(16, 0), 240)).toBe("post");
+    expect(sessionOf(at(0, 0), 240)).toBe("overnight");
+    expect(sessionOf(Date.UTC(2026, 0, 5, 14, 30) * 1e6)).toBe("regular");     // 09:30 EST in winter
+    const day = [at(3, 0), at(8, 0), at(10, 0), at(11, 0), at(17, 0), at(21, 0)].map((ns) => ({ ...bar(0, 1), ns }));
+    expect(filterSessions(day, "regular")).toHaveLength(2);
+    expect(filterSessions(day, "extended")).toHaveLength(4);
+    expect(filterSessions(day, "all")).toHaveLength(6);
+    expect(sessionRuns(day, 1)).toEqual([
+      { from: 0, to: 0, session: "overnight" }, { from: 1, to: 1, session: "pre" }, { from: 2, to: 3, session: "regular" },
+      { from: 4, to: 4, session: "post" }, { from: 5, to: 5, session: "overnight" }]);
   });
 
   it("knows the kind of a symbol", () => {

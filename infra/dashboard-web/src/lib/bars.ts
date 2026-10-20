@@ -113,6 +113,59 @@ export function aggregate(bars: Bar[], minutes: number, zone: Zone): Bar[] {
   return out;
 }
 
+// ── US trading sessions (Eastern time) ───────────────────────────────────
+
+/** overnight 20:00-04:00 ET (Blue Ocean), pre-market 04:00-09:30, regular 09:30-16:00, after-hours 16:00-20:00. */
+export type Session = "overnight" | "pre" | "regular" | "post";
+export const SESSIONS: Session[] = ["overnight", "pre", "regular", "post"];
+/** Which sessions a filter keeps: everything, the extended day (no overnight), or the regular session. */
+export type SessionFilter = "all" | "extended" | "regular";
+const KEEP: Record<SessionFilter, Session[]> = {
+  all: SESSIONS, extended: ["pre", "regular", "post"], regular: ["regular"],
+};
+
+/** Session of the ET minute of the day (0-1439). */
+export function sessionOfMinute(m: number): Session {
+  if (m < 240 || m >= 1200) return "overnight";
+  if (m < 570) return "pre";
+  if (m < 960) return "regular";
+  return "post";
+}
+
+const SESSION_RANK: Record<Session, number> = { regular: 3, pre: 2, post: 2, overnight: 1 };
+
+/** Session of a bar of ``minutes`` starting at ``ns``: the busiest session it touches (an 09:00 hourly
+ * bar holds the open, so it is regular). Session edges are on the half hour. */
+export function sessionOf(ns: number, minutes = 1): Session {
+  const wall = chartTime(ns, "et");
+  const m0 = Math.floor((((wall % 86400) + 86400) % 86400) / 60);
+  let best = sessionOfMinute(m0);
+  for (let k = 30 - (m0 % 30); k < minutes; k += 30) {
+    const s = sessionOfMinute((m0 + k) % 1440);
+    if (SESSION_RANK[s] > SESSION_RANK[best]) best = s;
+  }
+  return best;
+}
+
+/** Minute bars of the sessions ``f`` keeps (filter before aggregating). */
+export function filterSessions(bars: Bar[], f: SessionFilter): Bar[] {
+  if (f === "all") return bars;
+  const keep = new Set(KEEP[f]);
+  return bars.filter((b) => keep.has(sessionOf(b.ns)));
+}
+
+/** Runs of consecutive bars in one session, as index ranges ``[from, to]`` (inclusive). */
+export function sessionRuns(bars: Bar[], minutes: number): { from: number; to: number; session: Session }[] {
+  const out: { from: number; to: number; session: Session }[] = [];
+  bars.forEach((b, i) => {
+    const s = sessionOf(b.ns, minutes);
+    const last = out[out.length - 1];
+    if (last && last.session === s && last.to === i - 1) last.to = i;
+    else out.push({ from: i, to: i, session: s });
+  });
+  return out;
+}
+
 // ── indicators ───────────────────────────────────────────────────────────
 
 export interface Point { time: number; value: number }

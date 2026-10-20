@@ -2,17 +2,22 @@
 
 // The trading chart shared by QFZView and the broker: candles and volume,
 // zoom (wheel, pinch) and pan, crosshair legend, moving averages, Bollinger
-// bands, VWAP, trade markers, price lines (orders, average price) and extra
-// line overlays (bid/ask). Built on TradingView's lightweight-charts.
+// bands, VWAP, trade markers, price lines (orders, average price), extra
+// line overlays (bid/ask) and, for US stocks, the trading sessions shaded
+// behind the candles. Built on TradingView's lightweight-charts.
 
 import * as React from "react";
 import {
   CandlestickSeries, createChart, createSeriesMarkers, HistogramSeries, LineSeries, LineStyle,
-  type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange,
-  type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp,
+  type IChartApi, type IPrimitivePaneRenderer, type IPrimitivePaneView, type IPriceLine, type ISeriesApi,
+  type ISeriesMarkersPluginApi, type ISeriesPrimitive, type Logical, type LogicalRange, type MouseEventParams, type SeriesAttachedParameter,
+  type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 
-import { bollinger, chartTime, dayTime, ema, sma, vwap, type Bar, type Zone } from "@/lib/bars";
+import { useT } from "@/components/locale-provider";
+import {
+  bollinger, chartTime, dayTime, ema, sessionOf, sessionRuns, sma, vwap, type Bar, type Session, type Zone,
+} from "@/lib/bars";
 import { cn } from "@/lib/utils";
 
 export interface Indicators { ma: number[]; ema: number[]; bb: boolean; vwap: boolean }
@@ -42,6 +47,87 @@ function palette() {
   };
 }
 
+export const SESSION_LABEL: Record<Session, [string, string]> = {
+  overnight: ["Overnight", "夜盘"], pre: ["Pre-market", "盘前"], regular: ["Regular", "盘中"], post: ["After-hours", "盘后"],
+};
+/** Shade of each session behind the candles (foreground tint, so it works in both themes); regular is unshaded. */
+export const SESSION_SHADE: Record<Session, number> = { overnight: 0.1, pre: 0.06, regular: 0, post: 0.04 };
+
+type Band = { from: number; to: number; session: Session };
+type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
+
+/** Session bands drawn under the series: one rectangle per run of bars, labelled when wide enough. */
+class SessionBands implements ISeriesPrimitive<Time> {
+  private chart: SeriesAttachedParameter<Time>["chart"] | null = null;
+  private request: (() => void) | null = null;
+  private bands: Band[] = [];
+  private fills: Partial<Record<Session, string>> = {};
+  private labels: Partial<Record<Session, string>> = {};
+  private text = "#888";
+  private readonly view: IPrimitivePaneView;
+
+  constructor() {
+    const draw = (target: Target) => this.draw(target);
+    this.view = { zOrder: () => "bottom", renderer: () => ({ draw: () => {}, drawBackground: draw }) };
+  }
+
+  attached({ chart, requestUpdate }: SeriesAttachedParameter<Time>) {
+    this.chart = chart;
+    this.request = requestUpdate;
+  }
+
+  detached() {
+    this.chart = null;
+    this.request = null;
+  }
+
+  paneViews() {
+    return [this.view];
+  }
+
+  set(bands: Band[], fills: Partial<Record<Session, string>>, labels: Partial<Record<Session, string>>, text: string) {
+    this.bands = bands;
+    this.fills = fills;
+    this.labels = labels;
+    this.text = text;
+    this.request?.();
+  }
+
+  private draw(target: Target) {
+    const ts = this.chart?.timeScale();
+    if (!ts || !this.bands.length) return;
+    // the time scale maps whole bar indices only (fractions give 0): edges are centres -/+ half a bar
+    const at = (i: number) => ts.logicalToCoordinate(i as Logical);
+    const c0 = at(0);
+    const c1 = at(1);
+    if (c0 == null || c1 == null) return;
+    const half = (c1 - c0) / 2;
+    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+      ctx.save();
+      ctx.font = `${10 * vr}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textBaseline = "top";
+      for (const b of this.bands) {
+        const fill = this.fills[b.session];
+        if (!fill) continue;
+        const x1 = at(b.from);
+        const x2 = at(b.to);
+        if (x1 == null || x2 == null) continue;
+        const l = Math.max(0, Math.round((x1 - half) * hr));
+        const r = Math.min(bitmapSize.width, Math.round((x2 + half) * hr));
+        if (r <= l) continue;
+        ctx.fillStyle = fill;
+        ctx.fillRect(l, 0, r - l, bitmapSize.height);
+        const label = this.labels[b.session];
+        if (label && r - l > 44 * hr) {
+          ctx.fillStyle = this.text;
+          ctx.fillText(label, l + 4 * hr, 20 * vr);
+        }
+      }
+      ctx.restore();
+    });
+  }
+}
+
 /** Price decimals from the typical price: FX needs 5, BTC needs 2. */
 function precisionFor(bars: Bar[]): number {
   const p = bars.length ? Math.abs(bars[bars.length - 1].close) : 100;
@@ -68,18 +154,22 @@ export interface TradingChartProps {
   empty?: React.ReactNode;
   /** changes when the symbol or interval changes: the view is reset */
   viewKey?: string;
+  /** shade the US sessions (overnight, pre-market, after-hours) behind bars of this many minutes */
+  sessions?: { minutes: number };
 }
 
 export function TradingChart({
   bars, daily = false, zone = "et", indicators = DEFAULT_INDICATORS, marks = [], priceLines = [], overlays = [],
-  onNeedOlder, follow = false, className, empty, viewKey = "",
+  onNeedOlder, follow = false, className, empty, viewKey = "", sessions,
 }: TradingChartProps) {
+  const tr = useT();
   const host = React.useRef<HTMLDivElement>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
   const candles = React.useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volume = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   const lines = React.useRef<ISeriesApi<"Line">[]>([]);
   const markers = React.useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const bands = React.useRef<SessionBands | null>(null);
   const pls = React.useRef<IPriceLine[]>([]);
   const colors = React.useRef<ReturnType<typeof palette> | null>(null);
   const older = React.useRef(onNeedOlder);
@@ -111,6 +201,8 @@ export function TradingChart({
     volume.current = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
     chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     markers.current = createSeriesMarkers(candles.current, []);
+    bands.current = new SessionBands();
+    candles.current.attachPrimitive(bands.current);
     chartRef.current = chart;
 
     const onRange = (r: LogicalRange | null) => {
@@ -125,8 +217,26 @@ export function TradingChart({
       volume.current = null;
       lines.current = [];
       pls.current = [];
+      bands.current = null;
     };
   }, []);
+
+  // session shading (minute bars of US stocks): bar indices are the chart's logical indices
+  const sessionMinutes = !daily && sessions ? sessions.minutes : 0;
+  React.useEffect(() => {
+    if (!bands.current) return;
+    if (!sessionMinutes) {
+      bands.current.set([], {}, {}, "");
+      return;
+    }
+    const fills: Partial<Record<Session, string>> = {};
+    const labels: Partial<Record<Session, string>> = {};
+    for (const [k, a] of Object.entries(SESSION_SHADE) as [Session, number][]) {
+      if (a > 0) fills[k] = tokenColor("foreground", a);
+      if (k !== "regular") labels[k] = tr(...SESSION_LABEL[k]);
+    }
+    bands.current.set(sessionRuns(bars, sessionMinutes), fills, labels, tokenColor("muted-foreground", 0.9));
+  }, [bars, sessionMinutes, tr]);
 
   // legend follows the crosshair (or shows the last bar)
   const byTime = React.useMemo(() => new Map(bars.map((b) => [t(b) as number, b])), [bars, t]);
@@ -257,6 +367,7 @@ export function TradingChart({
           <span>L <b className="font-medium text-foreground">{fmt(shown.low)}</b></span>
           <span>C <b className={cn("font-medium", shown.close >= shown.open ? "text-up" : "text-down")}>{fmt(shown.close)}</b></span>
           <span>V <b className="font-medium text-foreground">{shown.volume.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></span>
+          {sessionMinutes > 0 && <span>{tr(...SESSION_LABEL[sessionOf(shown.ns, sessionMinutes)])}</span>}
         </div>
       )}
       {!bars.length && empty && <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">{empty}</div>}

@@ -3,7 +3,9 @@
 // QFZView: a TradingView-style market viewer over whatever the store holds.
 // Pick a stock, future (/CL), crypto pair (X:BTC-USD), FX pair (C:EUR-USD) or
 // option contract (O:...); the intervals, quote overlay and ranges offered are
-// those the store has data for. Scroll left to load older history.
+// those the store has data for. Scroll left to load older history. US stock
+// minute charts shade the overnight (Blue Ocean), pre-market and after-hours
+// sessions and can show all of them, the extended day or the regular session.
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,8 +13,12 @@ import { useQuery } from "@tanstack/react-query";
 import { CandlestickChart, Info, Loader2, Plus, Search, Star, X } from "lucide-react";
 
 import { useLocale, useT } from "@/components/locale-provider";
-import { TradingChart, type Indicators, type Overlay } from "@/components/charts/trading-chart";
-import { aggregate, INTERVALS, mergeBars, type Bar, type Interval } from "@/lib/bars";
+import {
+  SESSION_LABEL, SESSION_SHADE, TradingChart, type Indicators, type Overlay,
+} from "@/components/charts/trading-chart";
+import {
+  aggregate, filterSessions, INTERVALS, mergeBars, SESSIONS, type Bar, type Interval, type SessionFilter,
+} from "@/lib/bars";
 import {
   addDays, extent as loadExtent, isoDay, kindOf, LEVELS, loadBars, loadQuotes, suggest, zoneOf, type Kind,
 } from "@/lib/qfzview";
@@ -22,6 +28,11 @@ const DEFAULT_WATCH = ["SPY", "QQQ", "AAPL", "NVDA", "/CL", "/ZN", "X:BTC-USD", 
 const KIND_LABEL: Record<Kind, [string, string]> = {
   stock: ["Stock", "股票"], future: ["Future", "期货"], crypto: ["Crypto", "加密货币"], fx: ["FX", "外汇"], option: ["Option", "期权"],
 };
+const SESSION_FILTERS: { id: SessionFilter; label: [string, string]; hint: [string, string] }[] = [
+  { id: "all", label: ["All", "全部"], hint: ["Overnight, pre-market, regular and after-hours", "夜盘、盘前、盘中和盘后"] },
+  { id: "extended", label: ["Extended", "盘前盘后"], hint: ["04:00-20:00 ET, without the overnight session", "美东 04:00-20:00，不含夜盘"] },
+  { id: "regular", label: ["Regular", "仅盘中"], hint: ["09:30-16:00 ET only", "只看美东 09:30-16:00"] },
+];
 const KIND_TONE: Record<Kind, string> = {
   stock: "bg-primary/10 text-primary", future: "bg-amber-500/10 text-amber-700", crypto: "bg-violet-500/10 text-violet-700",
   fx: "bg-emerald-500/10 text-emerald-700", option: "bg-sky-500/10 text-sky-700",
@@ -94,6 +105,7 @@ export function QFZView() {
   const [watch, setWatch] = useStored<string[]>("qfzview.watch", DEFAULT_WATCH);
   const [ind, setInd] = useStored<Indicators>("qfzview.indicators", { ma: [20], ema: [], bb: false, vwap: false });
   const [showQuotes, setShowQuotes] = React.useState(false);
+  const [sessFilter, setSessFilter] = useStored<SessionFilter>("qfzview.sessions", "all");
   const ext = useQuery({ queryKey: ["qfzview", "extent"], queryFn: loadExtent, staleTime: 5 * 60_000 });
 
   const levels = LEVELS[kind];
@@ -103,6 +115,7 @@ export function QFZView() {
   const hasQuotes = !!(levels.quotes && stores[levels.quotes]);
   const offered = INTERVALS.filter((x) => (x.id === 1440 ? hasDaily : hasMinute));
   const daily = interval === 1440;
+  const sessionsOn = kind === "stock" && !daily;
   const lastDay = (daily ? stores[levels.daily ?? ""] : stores[levels.minute ?? ""])?.end ?? isoDay(new Date());
 
   const set = React.useCallback((next: { s?: string; i?: number }) => {
@@ -165,7 +178,9 @@ export function QFZView() {
   }, [series, older, key]);
 
   const shownBars = React.useMemo(() => (series.key === key ? series.bars : []), [series, key]);
-  const bars = React.useMemo(() => (daily ? shownBars : aggregate(shownBars, interval, zone)), [shownBars, interval, zone, daily]);
+  const bars = React.useMemo(() => (daily ? shownBars
+    : aggregate(sessionsOn ? filterSessions(shownBars, sessFilter) : shownBars, interval, zone)),
+  [shownBars, interval, zone, daily, sessionsOn, sessFilter]);
 
   // bid/ask overlay, bucketed onto the bars so both share the time axis
   const quotesOn = showQuotes && hasQuotes && !daily && interval <= 15;
@@ -232,6 +247,26 @@ export function QFZView() {
             );
           })}
         </div>
+        {sessionsOn && (
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-md border bg-background p-0.5">
+              {SESSION_FILTERS.map((f) => (
+                <button key={f.id} onClick={() => setSessFilter(f.id)} title={t(...f.hint)}
+                        className={cn("rounded px-2 py-0.5 text-[12px] font-medium", sessFilter === f.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+                  {t(...f.label)}
+                </button>
+              ))}
+            </div>
+            <div className="hidden items-center gap-2 text-[11px] text-muted-foreground xl:flex">
+              {SESSIONS.filter((x) => sessFilter === "all" || (x !== "overnight" && (sessFilter === "extended" || x === "regular"))).map((x) => (
+                <span key={x} className="flex items-center gap-1">
+                  <span className="h-2.5 w-3.5 rounded-sm border" style={{ backgroundColor: `hsl(var(--foreground) / ${SESSION_SHADE[x]})` }} />
+                  {t(...SESSION_LABEL[x])}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1 text-[12px]">
           {[["ma", 20], ["ma", 50], ["ema", 9], ["ema", 21]].map(([l, n]) => {
             const on = ind[l as "ma" | "ema"].includes(n as number);
@@ -256,7 +291,7 @@ export function QFZView() {
         {/* chart */}
         <div className="relative min-w-0 flex-1">
           <TradingChart bars={bars} daily={daily} zone={zone} indicators={ind} overlays={overlays} onNeedOlder={older}
-                        viewKey={key}
+                        viewKey={key} sessions={sessionsOn ? { minutes: interval } : undefined}
                         empty={ext.isLoading || (!series.done && !series.error) ? <Loader2 className="h-5 w-5 animate-spin" />
                           : series.error ? <span className="text-destructive">{series.error}</span>
                             : t(`No ${daily ? "daily" : "minute"} data for ${symbol}.`, `${symbol} 没有${daily ? "日线" : "分钟"}数据。`)} />

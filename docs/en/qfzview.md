@@ -29,6 +29,15 @@ popular crypto and FX pairs. The watchlist on the right is kept in the browser.
   as far as the store does.
 - Indicators: MA20, MA50, EMA9, EMA21, Bollinger bands (20, 2), VWAP (restarts
   each trading day).
+- **Sessions** (US stocks, intraday intervals): the chart shades the overnight
+  session (20:00–04:00 ET, Blue Ocean) darkest, pre-market (04:00–09:30)
+  lighter and after-hours (16:00–20:00) lightest; the regular session
+  (09:30–16:00) is not shaded. Wide bands carry their name and the legend shows
+  the session of the bar under the cursor. A bar of an hour or more takes the
+  busiest session it touches (the 09:00 hour holds the open, so it is regular).
+  *All* shows every session, *Extended* drops the overnight session, *Regular*
+  keeps 09:30–16:00 only; the choice is kept in the browser. The broker's chart
+  shades the sessions too.
 - **Bid/Ask** draws the last quote of each bar (up to 15-minute bars) for
   stocks, futures, FX and option contracts when the store has quotes.
 - The panel under the watchlist lists the date range of each data level of the

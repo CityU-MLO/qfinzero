@@ -10,6 +10,9 @@ Added:
 - QFZView (`/view`): a TradingView-style viewer over the store for stocks,
   futures, crypto, FX and option contracts, with 1-minute to daily intervals,
   zoom and pan, paged history, MA/EMA/Bollinger/VWAP and a bid/ask overlay.
+  US stock charts shade the overnight, pre-market and after-hours sessions
+  (deepest to lightest) and filter to all sessions, the extended day or the
+  regular session; the broker's chart shades them too.
 - The broker's chart uses the same component: history from before the session
   (time-locked), zoom, intervals, fill markers, working-order and average-price
   lines. Orders report their outcome, including fills on later bars.

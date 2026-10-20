@@ -111,7 +111,7 @@ export function BrokerChart({ symbol, isFuture, candles, startTs, trades, orders
       </div>
       <div className="min-h-0 flex-1">
         <TradingChart bars={bars} zone="et" indicators={ind} marks={marks} priceLines={lines} onNeedOlder={older}
-                      follow viewKey={`${key}|${interval}`}
+                      follow viewKey={`${key}|${interval}`} sessions={isFuture ? undefined : { minutes: interval }}
                       empty={t("Press Start to play the session.", "点击“开始”播放会话。")} />
       </div>
     </div>
