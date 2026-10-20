@@ -115,18 +115,15 @@ UPQ 的接口是 `/crypto`、`/crypto/daily`、`/fx`、`/fx/daily` 和 `/fx/quot
 | `ohlcv-1s` | 分钟线 + 日线 | 重新聚合为分钟线 |
 | `ohlcv-1h`、`ohlcv-1d`、`ohlcv-eod` | 日线 | `ohlcv-1d` 用 Databento 给出的 UTC 日 |
 | `trades`、`tbbo`、`tcbbo` | 分钟线 + 日线 | 每条记录都是成交 |
-| `mbp-1`、`mbp-10`、`mbo`（仅 Blue Ocean） | 分钟线 + 日线 | 只取 `action == 'T'` 的记录 |
+| `mbp-1`、`mbp-10` | 分钟线 + 日线 | 只取 `action == 'T'` 的记录 |
 | `cbbo-1s`、`cbbo-1m`、`bbo-1s`、`bbo-1m` | `option_quote_minute`、`stock_quote_minute`、`future_quote_minute` | 每分钟最后的最优买卖价（见下文） |
-| Blue Ocean（`OCEA.MEMOIR`）的 `mbo` | `stock_quote_minute`、`stock_overnight_daily` | 重放订单簿，见[夜盘](#夜盘) |
 | 期货交易所的 `mbp-1`、`mbp-10` | `future_quote_minute` | 交易所自身的盘口就是最优买卖价 |
 | 期货交易所的 `statistics` | `future_daily.settle` | 交易所结算价 |
 | definition、statistics（其他交易所）、status、imbalance | 无 | 参考数据 |
-| `cmbp-1`、其他交易所的 `mbo` | 无 | 不在范围内（见下） |
+| `cmbp-1`、`mbo`（所有交易所，包括 Blue Ocean） | 无 | 不在范围内（见下） |
 
-**范围。** QFinZero 最细只到全市场合并的最优买卖价。`cmbp-1` 和逐笔委托（MBO）数据只建索引、不转换，下载表单也会拒绝，
-唯一的例外是 Blue Ocean 的 `mbo`，它是夜盘唯一的数据来源。其他交易所的 MBO 提供的内容，合并后的成交和报价都已经有了。
-
-MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者都算会让成交量翻倍。隐藏单的成交也以 `T` 出现。
+**范围。** QFinZero 最细只到分钟线和最优买卖价。`cmbp-1` 和逐笔委托（MBO）数据只建索引、不转换，下载表单也会拒绝。
+夜盘用 Blue Ocean 的 `ohlcv-1m` 和 `bbo-1m`（见[夜盘](#夜盘)）。
 
 ### 资产类别和代码
 
@@ -174,11 +171,13 @@ MBO 里 `T` 是成交本身，`F` 是同一笔成交的被动方回报，两者�
 
 ### 夜盘
 
-`OCEA.MEMOIR`（Blue Ocean ATS）在美东 20:00–04:00 交易。它的逐笔委托文件产出三样东西：
+`OCEA.MEMOIR`（Blue Ocean ATS）在美东 20:00–04:00 交易。下载 `ohlcv-1m` 和 `bbo-1m`
+（`equity/OCEA.MEMOIR/<schema>/<代码>/<夜盘日期>.dbn.zst`），产出三样东西：
 
-- **分钟线**（`stock_minute`）：来自 `T` 记录。即使其他供应商已经写了该代码的日盘 bar 也会加入；夜盘时段只跳过完全相同的（代码，分钟）。
-- **分钟报价**（`stock_quote_minute`）：逐笔重放订单簿（`A` 新增、`M` 修改、`C` 撤单、`F` 被动成交、`R` 清空），
-  在盘口有变化的每一分钟结束时写入最优买卖价。这是 Blue Ocean 自己的盘口，不是 NBBO；夜盘时它通常是唯一的显示报价场所。
+- **分钟线**（`stock_minute`）：来自 `ohlcv-1m`。即使其他供应商已经写了该代码的日盘 bar 也会加入；夜盘时段只跳过完全相同的（代码，分钟）。
+- **分钟报价**（`stock_quote_minute`）：来自 `bbo-1m`，每分钟结束时 Blue Ocean 的最优买卖价（按 `ts_recv`；部分样本的
+  `ts_event` 是空值）。这是 Blue Ocean 自己的盘口，不是 NBBO；夜盘时它通常是唯一的显示报价场所。报价和分钟线一样按（代码，时段）
+  选源，所以夜盘报价会和其他来源或供应商的日盘报价并存，而不是互相替代。
 - **夜盘日线**（`stock_overnight_daily`）：每个代码每个夜盘一条（开高低收、成交量、成交笔数、第一和最后一分钟）。
   一个夜盘归属于它之后的那个交易日：晚上的 bar（美东 20:00–24:00）归到下一个交易日，凌晨的 bar（00:00–04:00）归到当天，
   当天不是交易日则归到下一个交易日。周日晚上和周一凌晨属于周一的夜盘；遇到休市，两段都顺延到下一个开市日。

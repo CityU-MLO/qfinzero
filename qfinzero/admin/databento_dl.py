@@ -160,8 +160,8 @@ def _request(params: dict[str, Any]) -> tuple[str, str, str, dict[str, list[str]
         raise ValueError("dataset and schema are required")
     from qfinzero.pipeline.sources.databento import out_of_scope
     if out_of_scope(schema, dataset):
-        raise ValueError(f"{schema} from {dataset} is not used by QFinZero (it stops at consolidated BBO; "
-                         "market-by-order data only from Blue Ocean, OCEA.MEMOIR)")
+        raise ValueError(f"{schema} is not used by QFinZero (it stops at minute bars and BBO; "
+                         "for Blue Ocean's overnight session download ohlcv-1m and bbo-1m)")
     asset = asset_dir(dataset)
     syms = params.get("symbols") or []
     if isinstance(syms, str):

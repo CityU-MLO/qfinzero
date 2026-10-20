@@ -30,8 +30,9 @@ Added:
   massive, Databento and custom parquet (`qfz.dataset.yaml`) files in
   place and catalogue them under `_state/index/` (files, row groups, symbols,
   levels L0-L2), rescanning only changed files. Nothing is converted.
-- Blue Ocean overnight session: the `OCEA.MEMOIR` order book is replayed into
-  minute quotes (`stock_quote_minute`), and each 20:00-04:00 ET session becomes
+- Blue Ocean overnight session: `OCEA.MEMOIR` `ohlcv-1m` and `bbo-1m` fill the
+  night of `stock_minute` and `stock_quote_minute` (quotes, like bars, are
+  ranked per ticker and day/night segment), and each 20:00-04:00 ET session becomes
   one bar in the new `stock_overnight_daily` store, dated by the trading day it
   precedes (trading calendar aware). UPQ `/stock/daily?session=overnight`, MCP
   `upq_stock_daily(trading_session="overnight")`, and an overnight level in
@@ -63,10 +64,9 @@ Changed:
   `us_prices` acquire target and the store-conversion design documents: the
   data pipeline (`qfz-data`) builds every store, and the raw-data index design
   (`docs/plans/2026-10-20-raw-index-design.md`) replaces them.
-- QFinZero stops at consolidated BBO: Databento `cmbp-1` and market-by-order
-  data outside Blue Ocean are indexed but no longer converted, and the
-  download form refuses them (they only duplicated consolidated trades and
-  quotes).
+- QFinZero stops at minute bars and BBO: Databento `cmbp-1` and market-by-order
+  data (Blue Ocean's included) are indexed but no longer converted, and the
+  download form refuses them.
 - UPQ shares one DuckDB database through a connection pool; a full queue
   answers 503 instead of failing with 500 (`UPQ_POOL_SIZE`,
   `UPQ_DUCKDB_THREADS`, `UPQ_QUEUE_TIMEOUT_S`).

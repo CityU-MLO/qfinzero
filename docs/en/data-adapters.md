@@ -156,23 +156,17 @@ takes about two minutes, and later scans take about one second.
 | `ohlcv-1s` | minute + daily | re-aggregated to minutes |
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily | `ohlcv-1d` uses the UTC day Databento reports |
 | `trades`, `tbbo`, `tcbbo` | minute + daily | every record is a trade |
-| `mbp-1`, `mbp-10`, `mbo` (Blue Ocean only) | minute + daily | only records with `action == 'T'` |
+| `mbp-1`, `mbp-10` | minute + daily | only records with `action == 'T'` |
 | `cbbo-1s`, `cbbo-1m`, `bbo-1s`, `bbo-1m` | `option_quote_minute`, `stock_quote_minute`, `future_quote_minute` | last top of book in each minute (see below) |
-| `mbo` of Blue Ocean (`OCEA.MEMOIR`) | `stock_quote_minute`, `stock_overnight_daily` | book replayed; see [Overnight](#overnight) |
 | `mbp-1`, `mbp-10` of a futures venue | `future_quote_minute` | the exchange's own book is the BBO |
 | `statistics` of a futures venue | `future_daily.settle` | exchange settlement prices |
 | definition, statistics (other venues), status, imbalance | none | reference data |
-| `cmbp-1`, `mbo` of other venues | none | out of scope (below) |
+| `cmbp-1`, `mbo` (every venue, Blue Ocean included) | none | out of scope (below) |
 
-**Scope.** QFinZero stops at consolidated top of book. `cmbp-1` and
+**Scope.** QFinZero stops at minute bars and top of book. `cmbp-1` and
 market-by-order data are indexed but never converted, and the download form
-refuses them, with one exception: Blue Ocean `mbo`, the only source of the
-overnight session. Other venues' MBO adds nothing the consolidated trades and
-quotes do not already give.
-
-In MBO, a `T` record is the execution and an `F` record is the passive side of
-the same execution, so counting both would double the volume. Hidden-order
-executions also arrive as `T`.
+refuses them. The overnight session comes from Blue Ocean's `ohlcv-1m` and
+`bbo-1m` (see [Overnight](#overnight)).
 
 ### Asset classes and symbols
 
@@ -242,17 +236,19 @@ rebuilds the affected partitions.
 
 ### Overnight
 
-`OCEA.MEMOIR` (Blue Ocean ATS) trades 20:00–04:00 ET. Its market-by-order
-files give three things:
+`OCEA.MEMOIR` (Blue Ocean ATS) trades 20:00–04:00 ET. Download `ohlcv-1m` and
+`bbo-1m` (`equity/OCEA.MEMOIR/<schema>/<SYMBOL>/<session date>.dbn.zst`); they
+give three things:
 
-- **Minute bars** in `stock_minute`, from the `T` records. They are added even
+- **Minute bars** in `stock_minute`, from `ohlcv-1m`. They are added even
   when another vendor already wrote the daytime bars of that ticker; in the
   overnight window only an identical (ticker, minute) is skipped.
-- **Minute quotes** in `stock_quote_minute`: the book is replayed order by
-  order (`A` add, `M` modify, `C` cancel, `F` passive fill, `R` clear) and the
-  best bid and offer at the end of each minute in which the book changed is
-  written. It is Blue Ocean's own book, not an NBBO; overnight it is usually
-  the only lit venue.
+- **Minute quotes** in `stock_quote_minute`, from `bbo-1m`: Blue Ocean's best
+  bid and offer at the end of each minute (by `ts_recv`; Blue Ocean leaves
+  `ts_event` undefined on some samples). It is the venue's own book, not an
+  NBBO; overnight it is usually the only lit venue. Quotes, like bars, are
+  ranked per ticker and segment (day, night), so the night quotes join the
+  daytime quotes of another source or vendor instead of competing with them.
 - **Session bars** in `stock_overnight_daily`: one bar per ticker and session
   (O/H/L/C, volume, transactions, first and last bar minute). A session belongs
   to the trading day it precedes: evening bars (20:00–24:00 ET) go to the next

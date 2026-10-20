@@ -53,7 +53,7 @@ QFinZero 不认得的文件会列出来，不会静默忽略。
 
 **等级。** `L0` 可读：查询要读整个文件（gzip CSV、JSON、单 frame 的 DBN）。`L1` 已索引：查询按时间和代码挑文件和 row group。
 `L2` 快速：按代码排序，且 row group 不超过 131,072 行或有 page index，和转换后的数据一样快。范围为 `out` 的文件是 QFinZero 不使用的
-（`cmbp-1`、Blue Ocean 以外的 MBO）。
+（`cmbp-1`、MBO）。
 
 **自定义数据。** 在 parquet 目录的根部放一个 `qfz.dataset.yaml`：
 
@@ -100,7 +100,7 @@ A 股代码写成 `SH600519`、`SZ000001`、`BJ430047`。要达到 `L2`，每个
 
 两家供应商都可以写入分钟报价存储。PMB 按它成交，期权链快照也从中读取买卖价：
 
-- Databento：`cbbo-1m`、`cbbo-1s`、`bbo-*`（股票和 OPRA），Blue Ocean 的 `mbo`（夜盘股票报价），以及期货交易所的 `mbp-1` / `mbp-10`。
+- Databento：`cbbo-1m`、`cbbo-1s`、`bbo-*`（股票和 OPRA），Blue Ocean 的 `bbo-1m`（夜盘股票报价），以及期货交易所的 `mbp-1` / `mbp-10`。
 - massive：`us_options_opra/quotes_v1` 和 `us_stocks_sip/quotes_v1` flat files（逐笔，数据量很大）、
   REST 报价样本（`*.jsonl.gz`）和 30 分钟快照 parquet。检查时会显示每类文件各有多少。
 
@@ -111,7 +111,7 @@ A 股代码写成 `SH600519`、`SZ000001`、`BJ430047`。要达到 `L2`，每个
 ## 期货
 
 CME Globex（`GLBX.MDP3`）以及 ICE、Nodal 交易所的 Databento 文件会转换为 `future_minute`、`future_daily` 和
-`future_quote_minute`。`mbo`、`trades`、`ohlcv-1m` 或 `mbp-1` 目录和其他 Databento 数据一样导入即可。
+`future_quote_minute`。`trades`、`ohlcv-1m` 或 `mbp-1` 目录和其他 Databento 数据一样导入即可。
 连续代码（`CL.v.0`）改为品种代码（`CL`），单一合约保留原代码。交易日按 CME 时段划分（前一天美东 18:00 到当天 17:00）。
 *数据可用性* 中有三个期货数据层，券商按交易所方式计算保证金进行期货交易（见 PMB 指南）。
 

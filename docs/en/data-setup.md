@@ -87,7 +87,7 @@ are listed, not dropped silently.
 single-frame DBN). `L1`: indexed, queries pick files and row groups by time
 and symbol. `L2`: fast, sorted by symbol with row groups of at most 131,072
 rows or a page index, as fast as converted data. Scope `out` marks files QFinZero
-does not use (`cmbp-1`, MBO outside Blue Ocean).
+does not use (`cmbp-1`, MBO).
 
 **Your own data.** Put a `qfz.dataset.yaml` at the top of a directory of
 parquet files:
@@ -148,8 +148,8 @@ What import does:
 Both vendors can fill the minute quote stores that PMB fills orders against
 and that option-chain snapshots read their bid and ask from:
 
-- Databento: `cbbo-1m`, `cbbo-1s`, `bbo-*` (stocks and OPRA), Blue Ocean
-  `mbo` (overnight stock quotes), and `mbp-1` / `mbp-10` from a futures venue.
+- Databento: `cbbo-1m`, `cbbo-1s`, `bbo-*` (stocks and OPRA; Blue Ocean
+  `bbo-1m` for the overnight session), and `mbp-1` / `mbp-10` from a futures venue.
 - massive: `us_options_opra/quotes_v1` and `us_stocks_sip/quotes_v1` flat
   files (tick by tick, very large), the REST quotes samples (`*.jsonl.gz`) and
   30-minute snapshot parquet files. Inspect shows how many files of each kind
@@ -166,7 +166,7 @@ the quote partitions that are converted next.
 
 Databento files from CME Globex (`GLBX.MDP3`) and the ICE and Nodal venues
 convert into `future_minute`, `future_daily` and `future_quote_minute`. Import
-an `mbo`, `trades`, `ohlcv-1m` or `mbp-1` folder like any other Databento
+a `trades`, `ohlcv-1m` or `mbp-1` folder like any other Databento
 data. Continuous symbols (`CL.v.0`) become the product root (`CL`); outright
 contracts keep their symbol. Trade dates follow the CME session (18:00 ET the
 evening before to 17:00 ET). *Data availability* has the three futures levels,

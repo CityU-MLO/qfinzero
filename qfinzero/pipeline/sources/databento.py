@@ -16,20 +16,21 @@ schema                                 becomes
 ``ohlcv-1d`` / ``ohlcv-eod``           daily only
 ``trades`` ``tbbo`` ``tcbbo``          trade records -> minute bars + daily
 ``mbp-1`` ``mbp-10``                   trade records (``action == 'T'``) ->
-``mbo`` (Blue Ocean only)              minute bars + daily
+                                       minute bars + daily
 =====================================  =======================================
 
 Quote schemas (``bbo-*``, ``cbbo-*``, and ``mbp-1`` / ``mbp-10`` of a futures
 venue) fill the minute quote stores; reference schemas (definition, statistics,
 status, imbalance) are indexed but not converted.
 
-QFZ stops at consolidated BBO: ``cmbp-1`` and market-by-order data are out of
-scope (indexed, never converted) with one exception, Blue Ocean ATS
-(``OCEA.MEMOIR``) ``mbo``, the only source of the 20:00-04:00 ET overnight
-session. Its book is replayed into the minute quote store (the venue's own
-best bid/offer at the end of each minute, not an NBBO), its ``T`` records make
-the overnight minute bars (``F`` fills are the passive side of the same
-execution and would double count), and each overnight session becomes one
+QFZ stops at minute bars and BBO: ``cmbp-1`` and market-by-order (``mbo``)
+data are out of scope (indexed, never converted), Blue Ocean's included.
+
+The 20:00-04:00 ET overnight session comes from Blue Ocean ATS
+(``OCEA.MEMOIR``) ``ohlcv-1m`` and ``bbo-1m`` (the venue's own best bid/offer,
+not an NBBO). Minute bars and quotes are ranked per ticker and *segment*
+(day / night), so the overnight venue adds the night without displacing the
+daytime source, and each overnight session becomes one
 ``stock_overnight_daily`` bar dated by the trading day it precedes.
 
 Asset class: ``OPRA.*`` datasets (or OSI-style symbols in parquet) become
@@ -78,7 +79,7 @@ INDEX_VERSION = 3   # 2: OCEA recognised as a US equity venue; 3: cmbp-1 out of 
 # Bump when extraction output changes so cached staging bars are rebuilt.
 EXTRACT_VERSION = 5   # 3: quote staging (<key>.q.parquet); 4: futures; 5: instrument ids, settlements
 # Per-schema bumps rebuild only the files of that schema.
-EXTRACT_VERSION_BY_SCHEMA = {"mbo": 6}   # 6: Blue Ocean book replay -> minute quotes
+EXTRACT_VERSION_BY_SCHEMA: dict[str, int] = {}
 
 
 def extract_version(schema: str | None) -> int:
@@ -93,7 +94,7 @@ NS_PER_MIN = 60_000_000_000
 NS_PER_DAY = 86_400_000_000_000
 
 # schema -> how it converts
-TRADE_SCHEMAS = {"trades", "tbbo", "tcbbo", "mbp-1", "mbp-10", "mbo"}
+TRADE_SCHEMAS = {"trades", "tbbo", "tcbbo", "mbp-1", "mbp-10"}
 OHLCV_KIND = {          # staging "kind" per OHLCV schema
     "ohlcv-1s": "s",    # re-aggregated to minutes
     "ohlcv-1m": "m",
@@ -104,18 +105,13 @@ OHLCV_KIND = {          # staging "kind" per OHLCV schema
 QUOTE_SCHEMAS = {"bbo-1s", "bbo-1m", "cbbo-1s", "cbbo-1m"}
 # Schemas whose records carry a top-of-book (bid/ask) -> quote stores, with a
 # preference rank: full-resolution consolidated updates beat sampled quotes.
-QUOTE_CAPABLE = {"mbo": 4, "cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
-# QFZ stops at consolidated BBO: these never convert. Market-by-order data is
-# used only from these datasets (Blue Ocean: the overnight session has no other
-# source); other venues' MBO duplicates consolidated trades and quotes.
-OUT_OF_SCOPE_SCHEMAS = {"cmbp-1"}
-MBO_DATASETS = ("OCEA",)
+QUOTE_CAPABLE = {"cbbo-1s": 3, "bbo-1s": 3, "cbbo-1m": 2, "bbo-1m": 2}
+# QFZ stops at minute bars and BBO: these never convert (from any venue).
+OUT_OF_SCOPE_SCHEMAS = {"cmbp-1", "mbo"}
 
 
-def out_of_scope(schema: str | None, dataset: str | None) -> bool:
-    if schema in OUT_OF_SCOPE_SCHEMAS:
-        return True
-    return schema == "mbo" and not (dataset or "").startswith(MBO_DATASETS)
+def out_of_scope(schema: str | None, dataset: str | None = None) -> bool:
+    return schema in OUT_OF_SCOPE_SCHEMAS
 # A futures exchange is the only venue, so its own top of book is the BBO.
 FUTURE_BOOK_SCHEMAS = {"mbp-1", "mbp-10"}
 # Sampled schemas stamp ts_recv at the *end* of their interval.
@@ -865,120 +861,6 @@ def _extract_dbn_quotes(info: FileInfo, out: Path, con, chunk: int) -> tuple[int
     return result
 
 
-def replay_mbo_book(batches) -> dict[str, list]:
-    """Replay market-by-order records into one book per instrument and return the
-    book at the end of every minute in which it changed (by ``ts_recv``):
-    ``key, ws, last_ts, bid, ask, bsz, asz`` (prices fixed-point, ``None`` when a
-    side is empty). Actions: ``R`` clears the instrument's book, ``A`` adds an
-    order, ``M`` moves it to a new price/size, ``C`` and ``F`` take size off it
-    (cancel / passive fill), ``T`` and ``N`` leave the book alone."""
-    orders: dict[int, dict[int, list]] = {}           # iid -> order id -> [side, px, size]
-    books: dict[int, tuple[dict, dict]] = {}          # iid -> (bid levels, ask levels)
-    pending: dict[int, list] = {}                     # iid -> [ws, last_ts] changed, not yet emitted
-    out: dict[str, list] = {k: [] for k in ("key", "ws", "last_ts", "bid", "ask", "bsz", "asz")}
-
-    def emit(iid: int, ws: int, ts: int) -> None:
-        bids, asks = books[iid]
-        b = max(bids) if bids else None
-        a = min(asks) if asks else None
-        for k, v in (("key", iid), ("ws", ws), ("last_ts", ts), ("bid", b), ("ask", a),
-                     ("bsz", bids.get(b, 0) if b is not None else 0),
-                     ("asz", asks.get(a, 0) if a is not None else 0)):
-            out[k].append(v)
-
-    def take(lv: dict, px: int, n: int) -> None:
-        left = lv.get(px, 0) - n
-        if left > 0:
-            lv[px] = left
-        else:
-            lv.pop(px, None)
-
-    for arr in batches:
-        if len(arr) == 0:
-            continue
-        cols = [arr[c].tolist() for c in ("ts_recv", "instrument_id", "order_id", "price", "size")]
-        acts = arr["action"].tolist()
-        sides = arr["side"].tolist()
-        for ts, iid, oid, px, sz, act, side in zip(*cols, acts, sides):
-            if ts >= UNDEF_TS:
-                continue
-            if act in (b"T", b"N"):
-                continue
-            ws = ts // NS_PER_MIN * NS_PER_MIN
-            pend = pending.get(iid)
-            if pend is not None and pend[0] != ws:
-                emit(iid, pend[0], pend[1])
-                del pending[iid]
-            book = books.get(iid)
-            if book is None:
-                book = books[iid] = ({}, {})
-                orders[iid] = {}
-            own = orders[iid]
-            if act == b"R":
-                book[0].clear(); book[1].clear(); own.clear()
-            elif act == b"A":
-                if side in (b"B", b"A") and px != UNDEF_PRICE and sz > 0:
-                    own[oid] = [side, px, sz]
-                    lv = book[0] if side == b"B" else book[1]
-                    lv[px] = lv.get(px, 0) + sz
-            elif act == b"M":
-                o = own.get(oid)
-                if o is not None:
-                    take(book[0] if o[0] == b"B" else book[1], o[1], o[2])
-                    del own[oid]
-                s_ = o[0] if o is not None else side
-                if s_ in (b"B", b"A") and px != UNDEF_PRICE and sz > 0:
-                    own[oid] = [s_, px, sz]
-                    lv = book[0] if s_ == b"B" else book[1]
-                    lv[px] = lv.get(px, 0) + sz
-            elif act in (b"C", b"F"):
-                o = own.get(oid)
-                if o is None:
-                    continue
-                n = min(sz, o[2]) if sz > 0 else o[2]
-                take(book[0] if o[0] == b"B" else book[1], o[1], n)
-                o[2] -= n
-                if o[2] <= 0:
-                    del own[oid]
-            else:
-                continue
-            pending[iid] = [ws, ts]
-    for iid, (ws, ts) in pending.items():
-        emit(iid, ws, ts)
-    return out
-
-
-def _extract_dbn_mbo_quotes(info: FileInfo, out: Path, con, chunk: int) -> tuple[int, list[str], list[str]]:
-    """Blue Ocean MBO -> the venue's best bid/offer at the end of each minute."""
-    import databento as db
-    import pyarrow as pa
-
-    store = db.DBNStore.from_file(info.path)
-    rows = replay_mbo_book(store.to_ndarray(count=chunk))
-    if not rows["key"]:
-        return 0, [], []
-
-    def px(vals):
-        return pa.array([None if v is None else v / PRICE_DIVISOR for v in vals], pa.float64())
-
-    con.register("_mbo_q", pa.table({
-        "key": pa.array(rows["key"], pa.int64()), "ws": pa.array(rows["ws"], pa.int64()),
-        "last_ts": pa.array(rows["last_ts"], pa.int64()), "bid": px(rows["bid"]), "ask": px(rows["ask"]),
-        "bsz": pa.array(rows["bsz"], pa.int64()), "asz": pa.array(rows["asz"], pa.int64()),
-    }))
-    con.execute("CREATE OR REPLACE TEMP TABLE _quotes AS SELECT * FROM _mbo_q")
-    con.unregister("_mbo_q")
-    _register_symbols(con, "_quotes", store.metadata)
-    con.execute(f"""CREATE OR REPLACE TEMP VIEW _qnamed AS
-        SELECT '{info.asset}' AS asset, s.sym, q.ws, q.last_ts, q.bid, q.ask, q.bsz, q.asz
-        FROM _quotes q JOIN _sym s ON s.key = q.key AND s.day = q.ws // {NS_PER_DAY}""")
-    result = _write_quote_staging(con, "_qnamed", info, out)
-    con.execute("DROP VIEW _qnamed")
-    con.unregister("_sym")
-    con.execute("DROP TABLE _quotes")
-    return result
-
-
 def _extract_parquet_quotes(info: FileInfo, out: Path, con) -> tuple[int, list[str], list[str]]:
     path = Path(info.path)
     cols = _parquet_columns(con, path)
@@ -1011,6 +893,9 @@ def _extract_parquet_quotes(info: FileInfo, out: Path, con) -> tuple[int, list[s
 
 
 QUOTE_INTERVALS = (1, 5, 15, 30, 60)
+# NIGHT_SQL for quote staging, which has no ``et_min``: 20:00-04:00 ET by the minute's start
+QUOTE_NIGHT_SQL = (f"(hour(timezone('{_ET}', to_timestamp({{ws}} // 1000000000))) >= 20 "
+                   f"OR hour(timezone('{_ET}', to_timestamp({{ws}} // 1000000000))) < 4)")
 
 
 def check_interval(minutes: int) -> int:
@@ -1034,21 +919,29 @@ def quote_sql(store: str, staging: list[Path], trade_date: str, siblings: list[P
               interval: int = 1) -> str:
     """Quote store: one source per ticker (consolidated, then finer sampling,
     then more samples), one row per (ticker, minute) keeping the latest book;
-    ``interval`` > 1 keeps only the last book of each N-minute bucket."""
+    ``interval`` > 1 keeps only the last book of each N-minute bucket. Stock
+    quotes are ranked per ticker and segment like the minute bars, so the
+    overnight venue's book fills the night beside the daytime source."""
     asset = STORE_ASSET[store]
+    if asset == "stock":
+        night = QUOTE_NIGHT_SQL.format(ws="z.window_start")
+        seg = f"CASE WHEN {night} THEN 'night' ELSE 'day' END"
+        excluded = _excluded_by_segment(siblings, night)
+    else:
+        seg, excluded = "'day'", _excluded(siblings)
     base = f"""
         WITH src AS (
-            SELECT * FROM read_parquet({_staging_list(staging)})
+            SELECT z.*, {seg} AS seg FROM read_parquet({_staging_list(staging)}) z
             WHERE asset = '{asset}' AND trade_date = DATE '{trade_date}'
-              {_excluded(siblings)}
+              {excluded}
         ),
         rank AS (
-            SELECT ticker, src, row_number() OVER (
-                PARTITION BY ticker ORDER BY max(drank) DESC, max(srank) DESC, count(*) DESC, src) AS rn
-            FROM src GROUP BY ticker, src
+            SELECT ticker, seg, src, row_number() OVER (
+                PARTITION BY ticker, seg ORDER BY max(drank) DESC, max(srank) DESC, count(*) DESC, src) AS rn
+            FROM src GROUP BY ticker, seg, src
         ),
         q1 AS (
-            SELECT s.* FROM src s JOIN rank r USING (ticker, src) WHERE r.rn = 1
+            SELECT s.* EXCLUDE (seg) FROM src s JOIN rank r USING (ticker, seg, src) WHERE r.rn = 1
             QUALIFY row_number() OVER (PARTITION BY ticker, window_start ORDER BY last_ts DESC) = 1
         ),
         q AS ({sample_sql("q1", check_interval(interval))})"""
@@ -1159,7 +1052,6 @@ def extract_file(info: FileInfo | dict, out: Path | str, threads: int | None = N
         qout = quote_staging_path(out)
         if info.has_quotes:
             q = (_extract_parquet_quotes(info, qout, con) if info.fmt == "parquet"
-                 else _extract_dbn_mbo_quotes(info, qout, con, chunk) if info.schema == "mbo"
                  else _extract_dbn_quotes(info, qout, con, chunk))
             res.q_rows, res.q_dates, res.q_assets = q
         if res.q_rows == 0:

@@ -61,11 +61,11 @@ def test_plan_paths_groups_and_windows(tmp_path):
                      "end": "2026-09-20"}, tmp_path)
     assert [len(r["jobs"]) for r in dl.runs(ticks, "XNAS.ITCH", "trades")] == [7, 7, 6]
     # Blue Ocean: a file is the 20:00-04:00 ET session opening on its date
-    ocea = dl.plan({"dataset": "OCEA.MEMOIR", "schema": "mbo", "symbols": "AAPL", "start": "2026-10-18",
+    ocea = dl.plan({"dataset": "OCEA.MEMOIR", "schema": "bbo-1m", "symbols": "AAPL", "start": "2026-10-18",
                     "end": "2026-10-19"}, tmp_path)
-    r = dl.runs(ocea, "OCEA.MEMOIR", "mbo")[0]
+    r = dl.runs(ocea, "OCEA.MEMOIR", "bbo-1m")[0]
     assert r["start"] == "2026-10-19T00:00:00+00:00" and r["end"] == "2026-10-20T08:00:00+00:00"   # EDT
-    assert ocea[0]["path"].endswith("equity/OCEA.MEMOIR/mbo/AAPL/2026-10-18.dbn.zst")
+    assert ocea[0]["path"].endswith("equity/OCEA.MEMOIR/bbo-1m/AAPL/2026-10-18.dbn.zst")
 
 
 # ── a fake Databento that writes real DBN ───────────────────────────────────
@@ -102,8 +102,6 @@ class FakeDatabento:
             for i, _ in enumerate(symbols):
                 if schema.startswith("ohlcv"):
                     recs.append(d.OHLCVMsg(int(d.RType.OHLCV_1M), 1, 100 + i, t, PX, 2 * PX, PX, PX, 5))
-                elif schema == "mbo":
-                    recs.append(d.MBOMsg(1, 100 + i, t, 7, PX, 1, d.Action.TRADE, d.Side.NONE, t))
                 else:
                     recs.append(d.TradeMsg(1, 100 + i, t, PX, 1, d.Action.TRADE, d.Side.NONE, 0, t))
         _dbn(Path(path), dataset, schema, list(symbols), lo, hi, recs)
@@ -162,11 +160,11 @@ def test_blue_ocean_sessions_split_by_the_et_date_they_open(tmp_path):
     def et(day, hm):
         return int(datetime.fromisoformat(f"{day} {hm}").replace(tzinfo=ET).timestamp()) * S
     c = FakeDatabento([et("2026-10-18", "21:00"), et("2026-10-19", "01:00"), et("2026-10-19", "22:00")])
-    r = dl.download({"dataset": "OCEA.MEMOIR", "schema": "mbo", "symbols": "AAPL", "start": "2026-10-18",
+    r = dl.download({"dataset": "OCEA.MEMOIR", "schema": "ohlcv-1m", "symbols": "AAPL", "start": "2026-10-18",
                      "end": "2026-10-19"}, api_key="k", root=tmp_path, dry_run=False, client_factory=lambda _k: c)
     assert r["ok"] and r["written"] == 2
     from qfinzero.admin import dbn_split
-    d = tmp_path / "equity/OCEA.MEMOIR/mbo/AAPL"
+    d = tmp_path / "equity/OCEA.MEMOIR/ohlcv-1m/AAPL"
     assert len(dbn_split.read(d / "2026-10-18.dbn.zst")[1]) == 2 * len(dbn_split.read(d / "2026-10-19.dbn.zst")[1])
 
 

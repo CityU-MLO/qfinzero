@@ -130,35 +130,20 @@ def test_dbn_trades_to_minute_and_daily(tmp_path):
 
 
 @needs_dbn
-def test_dbn_mbo_counts_only_trade_actions(tmp_path):
-    paths = _paths(tmp_path)
-    recs = [
-        _mbo(9, T0930, 50.0, 100, "A"),
-        _mbo(9, T0930 + S, 50.0, 40, "T"),
-        _mbo(9, T0930 + S, 50.0, 40, "F"),     # passive side of the same execution
-        _mbo(9, T0930 + 2 * S, 50.0, 60, "C"),
-    ]
-    _write_dbn(paths.databento / "mbo" / "BAR" / "2025-01-02.dbn", "OCEA.MEMOIR", "mbo",
-               {"BAR": 9}, recs)
-    _convert(paths)
-    con = duckdb.connect()
-    assert _q(con, f"SELECT ticker, volume, transactions FROM read_parquet('{_store(paths, 'stock_minute')}')") \
-        == [("BAR", 40, 1)]
-
-
-@needs_dbn
-def test_mbo_outside_blue_ocean_and_cmbp1_are_out_of_scope(tmp_path):
-    """QFZ stops at consolidated BBO: other venues' MBO and cmbp-1 are indexed, not converted."""
+def test_mbo_and_cmbp1_are_out_of_scope(tmp_path):
+    """QFZ stops at minute bars and BBO: MBO (Blue Ocean's too) and cmbp-1 are indexed, not converted."""
     import databento_dbn as d
     paths = _paths(tmp_path)
     _write_dbn(paths.databento / "mbo" / "BAR" / "2025-01-02.dbn", "XNAS.ITCH", "mbo",
+               {"BAR": 9}, [_mbo(9, T0930 + S, 50.0, 40, "T")])
+    _write_dbn(paths.databento / "equity" / "OCEA.MEMOIR" / "mbo" / "BAR" / "2025-01-02.dbn", "OCEA.MEMOIR", "mbo",
                {"BAR": 9}, [_mbo(9, T0930 + S, 50.0, 40, "T")])
     lv = d.ConsolidatedBidAskPair(bid_px=int(2.0 * PX), ask_px=int(2.2 * PX), bid_sz=3, ask_sz=4)
     _write_dbn(paths.databento / "cmbp" / "FOO.dbn", "OPRA.PILLAR", "cmbp-1", {"FOO   250117P00090000": 11},
                [d.CMBP1Msg(int(d.RType.CMBP_1), 30, 11, T0930, int(2.1 * PX), 6, d.Action.TRADE,
                            d.Side.NONE, T0930, levels=lv)])
     res = _convert(paths)
-    assert any("out of scope=2" in n for n in res.notes), res.notes
+    assert any("out of scope=3" in n for n in res.notes), res.notes
     assert res.rows == 0
     infos = {i.schema: i for i in dbsrc.index(paths.databento)}
     assert infos["mbo"].out_of_scope and infos["cmbp-1"].out_of_scope
@@ -167,8 +152,9 @@ def test_mbo_outside_blue_ocean_and_cmbp1_are_out_of_scope(tmp_path):
     with pytest.raises(ValueError, match="not used by QFinZero"):
         databento_dl.plan({"dataset": "XNAS.ITCH", "schema": "mbo", "symbols": "AAPL", "start": "2025-01-02"},
                           tmp_path)
-    assert databento_dl.plan({"dataset": "OCEA.MEMOIR", "schema": "mbo", "symbols": "AAPL",
-                              "start": "2025-01-02"}, tmp_path)
+    with pytest.raises(ValueError, match="ohlcv-1m and bbo-1m"):
+        databento_dl.plan({"dataset": "OCEA.MEMOIR", "schema": "mbo", "symbols": "AAPL", "start": "2025-01-02"},
+                          tmp_path)
 
 
 @needs_dbn
@@ -273,7 +259,7 @@ def test_fill_precedence_and_refilter(tmp_path):
 
 # ── parquet exports (no databento package needed) ────────────────────────
 
-def test_parquet_export_mbo(tmp_path):
+def test_parquet_export_mbo_is_out_of_scope(tmp_path):
     paths = _paths(tmp_path)
     src = paths.databento / "OCEA.MEMOIR" / "mbo" / "SPY" / "2025-01-02.parquet"
     src.parent.mkdir(parents=True)
@@ -288,10 +274,9 @@ def test_parquet_export_mbo(tmp_path):
         AS t(ts_event, rtype, action, price, size, symbol))
         TO '{src}' (FORMAT PARQUET)""")
     info = dbsrc.describe(src)
-    assert (info.schema, info.asset, info.start) == ("mbo", "stock", "2025-01-02")
+    assert (info.schema, info.asset, info.start, info.out_of_scope) == ("mbo", "stock", "2025-01-02", True)
     _convert(paths)
-    assert _q(con, f"SELECT ticker, open, close, volume, transactions FROM read_parquet('{_store(paths, 'stock_minute')}')") \
-        == [("SPY", 590.5, 589.5, 15, 2)]
+    assert not _store(paths, "stock_minute").exists()
 
 
 def test_reference_and_foreign_files_are_skipped(tmp_path):
@@ -458,8 +443,10 @@ def test_cleanup_skipped_when_a_file_is_unreadable(tmp_path):
 def test_overnight_venue_fills_night_without_displacing_day(tmp_path):
     paths = _paths(tmp_path)
     night = T0930 + int(11.5 * 3600) * S        # 21:00 ET on 2025-01-02
-    _write_dbn(paths.databento / "ocea" / "FOO.dbn", "OCEA.MEMOIR", "mbo", {"FOO": 7},
-               [_mbo(7, night, 99.0, 25, "T")], map_days=2)
+    _write_dbn(paths.databento / "ocea" / "FOO.dbn", "OCEA.MEMOIR", "ohlcv-1m", {"FOO": 7},
+               [_bar(7, night, 99.0, 25)], map_days=2)
+    _write_dbn(paths.databento / "ocea" / "FOO.bbo.dbn", "OCEA.MEMOIR", "bbo-1m", {"FOO": 7},
+               [_bbo(7, night + 60 * S, 98.9, 99.1)], map_days=2)
     _write_dbn(paths.databento / "xnas" / "FOO.dbn", "XNAS.ITCH", "trades", {"FOO": 7},
                [_trade(7, T0930, 100.0, 10)])
     # massive already has FOO's regular session on this date
@@ -478,6 +465,15 @@ def test_overnight_venue_fills_night_without_displacing_day(tmp_path):
 
     # massive re-converting the partition keeps our night bar
     assert dbsrc.refilter_part(con, part) == 1
+    # likewise the night quote beside massive's daytime quotes of the same ticker
+    qpart = paths.partition("stock_quote_minute", "2025-01-02")
+    qpart.mkdir(parents=True, exist_ok=True)
+    con.execute(f"""COPY (SELECT 'FOO' AS ticker, {T0930}::BIGINT AS window_start, 1.0 AS bid_price,
+                    1.1 AS ask_price, 1::BIGINT AS bid_size, 1::BIGINT AS ask_size, DATE '2025-01-02' AS trade_date)
+                    TO '{qpart / 'part-0000.parquet'}' (FORMAT PARQUET)""")
+    _convert(paths)
+    assert _q(con, f"SELECT window_start, bid_price FROM read_parquet('{_store(paths, 'stock_quote_minute')}')") \
+        == [(night, 98.9)]
     # Thursday 21:00 ET is Friday's overnight session
     night_part = paths.partition(dbsrc.OVERNIGHT_STORE, "2025-01-03") / dbsrc.PART_NAME
     assert _q(con, f"SELECT ticker, trade_date, close, volume FROM read_parquet('{night_part}')") \
@@ -490,13 +486,20 @@ def _et_ns(day: str, hm: str) -> int:
     return int(datetime.fromisoformat(f"{day} {hm}").replace(tzinfo=ZoneInfo("America/New_York")).timestamp()) * S
 
 
-def _book(iid, ts, oid, price, size, action, side="B"):
+def _bar(iid, ts, close, volume, open_=None, high=None, low=None):
     import databento_dbn as d
-    act = {"T": d.Action.TRADE, "F": d.Action.FILL, "A": d.Action.ADD, "C": d.Action.CANCEL,
-           "M": d.Action.MODIFY, "R": d.Action.CLEAR}[action]
-    sd = {"B": d.Side.BID, "A": d.Side.ASK, "N": d.Side.NONE}[side]
-    px = dbsrc.UNDEF_PRICE if price is None else int(round(price * PX))
-    return d.MBOMsg(2, iid, ts, oid, px, size, act, sd, ts)
+    o = close if open_ is None else open_
+    return d.OHLCVMsg(int(d.RType.OHLCV_1M), 2, iid, ts, int(round(o * PX)),
+                      int(round((high or max(o, close)) * PX)), int(round((low or min(o, close)) * PX)),
+                      int(round(close * PX)), volume)
+
+
+def _bbo(iid, ts_recv, bid, ask, bsz=5, asz=7, ts_event=None):
+    """A bbo-1m sample: ts_recv is the END of its minute; Blue Ocean leaves some ts_event undefined."""
+    import databento_dbn as d
+    lv = d.BidAskPair(bid_px=int(round(bid * PX)), ask_px=int(round(ask * PX)), bid_sz=bsz, ask_sz=asz)
+    return d.BBOMsg(int(d.RType.BBO_1M), 2, iid, dbsrc.UNDEF_TS if ts_event is None else ts_event,
+                    dbsrc.UNDEF_PRICE, 0, d.Side.NONE, ts_recv, levels=lv)
 
 
 @needs_dbn
@@ -520,60 +523,35 @@ def test_overnight_sessions_follow_the_trading_calendar():
     assert "2025-01-09" not in s
 
 
-def test_replay_mbo_book_keeps_the_last_book_per_minute():
-    import numpy as np
-    m = dbsrc.NS_PER_MIN
-    t0 = 1_735_869_600 * S                 # 21:00 ET 2025-01-02
-    dt = np.dtype([("ts_recv", "u8"), ("instrument_id", "u4"), ("order_id", "u8"), ("price", "i8"),
-                   ("size", "u4"), ("action", "S1"), ("side", "S1")])
-    P = PX
-    recs = np.array([
-        (t0, 7, 1, 99 * P, 100, b"A", b"B"),
-        (t0 + 10 * S, 7, 2, int(99.5 * P), 50, b"A", b"A"),
-        (t0 + 20 * S, 7, 3, int(99.1 * P), 30, b"A", b"B"),
-        (t0 + m + 5 * S, 7, 3, int(99.1 * P), 10, b"F", b"B"),     # passive fill: 20 left
-        (t0 + m + 30 * S, 7, 3, int(99.1 * P), 20, b"C", b"B"),    # cancel the rest
-        (t0 + m + 40 * S, 7, 0, int(99.2 * P), 5, b"T", b"N"),     # trades leave the book alone
-        (t0 + 2 * m, 7, 2, int(99.4 * P), 60, b"M", b"A"),         # ask moves
-        (t0 + 3 * m, 7, 0, dbsrc.UNDEF_PRICE, 0, b"R", b"N"),      # clear
-    ], dtype=dt)
-    out = dbsrc.replay_mbo_book([recs[:4], recs[4:]])
-    rows = list(zip(out["ws"], out["bid"], out["ask"], out["bsz"], out["asz"]))
-    assert rows == [(t0, int(99.1 * P), int(99.5 * P), 30, 50),
-                    (t0 + m, 99 * P, int(99.5 * P), 100, 50),
-                    (t0 + 2 * m, 99 * P, int(99.4 * P), 100, 60),
-                    (t0 + 3 * m, None, None, 0, 0)]
-
-
 @needs_dbn
-def test_blue_ocean_book_becomes_overnight_quotes_and_sessions(tmp_path):
+def test_blue_ocean_bars_and_bbo_become_the_overnight_session(tmp_path):
     paths = _paths(tmp_path)
     sun, mon = "2025-01-05", "2025-01-06"
-    a = _et_ns(sun, "21:00:00")
-    recs = [
-        _book(7, a, 1, 99.00, 100, "A", "B"),
-        _book(7, a + 10 * S, 2, 99.50, 50, "A", "A"),
-        _book(7, a + 20 * S, 0, 99.20, 10, "T", "N"),
-        _book(7, _et_ns(mon, "01:00:00"), 0, 99.40, 15, "T", "N"),
-        _book(7, _et_ns(mon, "01:00:30"), 2, 99.30, 50, "M", "A"),
-        _book(7, _et_ns(mon, "21:30:00"), 0, 98.00, 5, "T", "N"),     # Tuesday's session
-    ]
-    _write_dbn(paths.databento / "ocea" / "FOO" / f"{sun}.dbn", "OCEA.MEMOIR", "mbo", {"FOO": 7}, recs,
+    a, b, c = _et_ns(sun, "21:00:00"), _et_ns(mon, "01:00:00"), _et_ns(mon, "21:30:00")
+    m = 60 * S
+    _write_dbn(paths.databento / "equity" / "OCEA.MEMOIR" / "ohlcv-1m" / "FOO" / f"{sun}.dbn", "OCEA.MEMOIR",
+               "ohlcv-1m", {"FOO": 7}, [_bar(7, a, 99.2, 10, open_=99.0, high=99.3), _bar(7, b, 99.4, 15),
+                                        _bar(7, c, 98.0, 5)], map_days=10)   # c: Tuesday's session
+    _write_dbn(paths.databento / "equity" / "OCEA.MEMOIR" / "bbo-1m" / "FOO" / f"{sun}.dbn", "OCEA.MEMOIR",
+               "bbo-1m", {"FOO": 7}, [_bbo(7, a + m, 99.0, 99.5, 100, 50), _bbo(7, b + m, 99.1, 99.3)],
                map_days=10)
+    # a daytime venue quotes FOO on Monday too: both segments are kept
+    day = _et_ns(mon, "10:00:00")
+    _write_dbn(paths.databento / "equity" / "XNAS.ITCH" / "bbo-1m" / "FOO" / f"{mon}.dbn", "XNAS.ITCH",
+               "bbo-1m", {"FOO": 7}, [_bbo(7, day + m, 100.0, 100.1, ts_event=day + 30 * S)], map_days=10)
     res = _convert(paths)
     assert res.rows > 0, res.notes
     con = duckdb.connect()
-    q = paths.partition("stock_quote_minute", sun) / dbsrc.PART_NAME
-    assert _q(con, f"SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size FROM read_parquet('{q}')") \
+    q = lambda d: paths.partition("stock_quote_minute", d) / dbsrc.PART_NAME  # noqa: E731
+    assert _q(con, f"SELECT ticker, window_start, bid_price, ask_price, bid_size, ask_size FROM read_parquet('{q(sun)}')") \
         == [("FOO", a, 99.0, 99.5, 100, 50)]
-    q2 = paths.partition("stock_quote_minute", mon) / dbsrc.PART_NAME
-    assert _q(con, f"SELECT window_start, ask_price FROM read_parquet('{q2}')") \
-        == [(_et_ns(mon, "01:00:00"), 99.3)]
+    assert _q(con, f"SELECT window_start, bid_price FROM read_parquet('{q(mon)}') ORDER BY 1") \
+        == [(b, 99.1), (day, 100.0)]
     night = lambda d: paths.partition(dbsrc.OVERNIGHT_STORE, d) / dbsrc.PART_NAME  # noqa: E731
     # Sunday 21:00 and Monday 01:00 are one session, dated Monday
-    assert _q(con, f"SELECT trade_date, open, high, low, close, volume, transactions, first_window_start, "
+    assert _q(con, f"SELECT trade_date, open, high, low, close, volume, first_window_start, "
                    f"last_window_start FROM read_parquet('{night(mon)}')") \
-        == [(date(2025, 1, 6), 99.2, 99.4, 99.2, 99.4, 25, 2, a, _et_ns(mon, "01:00:00"))]
+        == [(date(2025, 1, 6), 99.0, 99.4, 99.0, 99.4, 25, a, b)]
     assert _q(con, f"SELECT trade_date, close FROM read_parquet('{night('2025-01-07')}')") \
         == [(date(2025, 1, 7), 98.0)]
     # overnight bars stay out of the regular daily store

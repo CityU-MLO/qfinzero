@@ -34,7 +34,7 @@ const HINT: Record<string, [string, string]> = {
 };
 
 const DATABENTO_DATASETS = ["EQUS.MINI", "EQUS.SUMMARY", "XNAS.ITCH", "DBEQ.BASIC", "XNYS.PILLAR", "ARCX.PILLAR", "OPRA.PILLAR", "OCEA.MEMOIR", "GLBX.MDP3"];
-const DATABENTO_SCHEMAS = ["ohlcv-1m", "ohlcv-1s", "ohlcv-1h", "ohlcv-1d", "ohlcv-eod", "trades", "tbbo", "tcbbo", "cmbp-1", "cbbo-1s", "cbbo-1m", "bbo-1s", "bbo-1m", "mbp-1", "mbo", "statistics"];
+const DATABENTO_SCHEMAS = ["ohlcv-1m", "ohlcv-1s", "ohlcv-1h", "ohlcv-1d", "ohlcv-eod", "trades", "tbbo", "tcbbo", "cbbo-1s", "cbbo-1m", "bbo-1s", "bbo-1m", "mbp-1", "statistics"];
 
 function bytes(n?: number | null): string {
   if (n == null) return "";
