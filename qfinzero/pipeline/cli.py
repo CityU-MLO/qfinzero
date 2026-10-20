@@ -449,7 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=_do_scan)
 
     ac = sub.add_parser("acquire", help="trigger a raw-download script (dry-run by default)")
-    ac.add_argument("target", nargs="?", help="us_prices | news | databento | tiingo")
+    ac.add_argument("target", nargs="?", help="news | databento | tiingo")
     ac.add_argument("--list", action="store_true", help="list acquire targets + readiness")
     ac.add_argument("--run", action="store_true", help="actually run (default is --dry-run)")
     ac.add_argument("--prod", action="store_true", help="use the script's production paths")

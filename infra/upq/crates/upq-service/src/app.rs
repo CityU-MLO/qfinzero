@@ -32,6 +32,7 @@ use upq_core::validation::{
 
 use crate::as_of;
 use crate::dividends::DividendCalendar;
+use crate::in_place;
 use crate::greeks::{compute_greeks, IvStatus};
 use crate::corporate_actions::{AdjustMode, CorporateActions};
 use crate::rates_curve::RatesCurve;
@@ -426,16 +427,9 @@ async fn stock_daily(
         params.start.clone()
     };
 
-    let dataset_dir = state.storage_root.join(store);
-    if !has_any_parquet_file(&dataset_dir) {
+    let Some(src) = in_place::source(&state.storage_root, store, &query_start, &end) else {
         return (StatusCode::OK, Json(json!([]))).into_response();
-    }
-
-    let path_pattern = dataset_dir
-        .join("trade_date=*")
-        .join("*.parquet")
-        .to_string_lossy()
-        .to_string();
+    };
 
     let ticker_sql = tickers
         .iter()
@@ -444,11 +438,10 @@ async fn stock_daily(
         .join(", ");
 
     let sql = format!(
-        "SELECT {projection} FROM read_parquet('{path}') \
+        "SELECT {projection} FROM {src} \
          WHERE ticker IN ({tickers}) AND trade_date >= DATE '{start}' AND trade_date <= DATE '{end}' \
          ORDER BY ticker, trade_date",
         projection = sql_projection,
-        path = sql_escape_literal(&path_pattern),
         tickers = ticker_sql,
         start = sql_escape_literal(&query_start),
         end = sql_escape_literal(&end),
@@ -650,28 +643,16 @@ async fn option_ticker_query(
         None => return invalid_argument("start/end out of range"),
     };
 
-    let dataset_dir = if resolution == "minute" {
-        state.storage_root.join("option_minute")
-    } else {
-        state.storage_root.join("option_day")
+    let store = if resolution == "minute" { "option_minute" } else { "option_day" };
+    let Some(src) = in_place::source(&state.storage_root, store, &start_date, &end_date) else {
+        return (StatusCode::OK, Json(json!([]))).into_response();
     };
 
-    if !has_any_parquet_file(&dataset_dir) {
-        return (StatusCode::OK, Json(json!([]))).into_response();
-    }
-
-    let path_pattern = dataset_dir
-        .join("trade_date=*")
-        .join("*.parquet")
-        .to_string_lossy()
-        .to_string();
-
     let sql = format!(
-        "SELECT {greeks_projection} FROM read_parquet('{path}') \
+        "SELECT {greeks_projection} FROM {src} \
          WHERE trade_date >= DATE '{start_date}' AND trade_date <= DATE '{end_date}' \
          AND ticker = {contract} AND window_start >= {start_ns} AND window_start <= {end_ns} \
          ORDER BY window_start",
-        path = sql_escape_literal(&path_pattern),
         start_date = sql_escape_literal(&start_date),
         end_date = sql_escape_literal(&end_date),
         contract = sql_quote(&params.contract),
@@ -963,20 +944,14 @@ async fn option_chain_query(
         projection.clone()
     };
 
-    let partition_dir = state
-        .storage_root
-        .join("option_day")
-        .join(format!("trade_date={}", params.date));
-    if !has_any_parquet_file(&partition_dir) {
+    let Some(path_pattern) = in_place::source(&state.storage_root, "option_day", &params.date, &params.date) else {
         return (StatusCode::OK, Json(json!([]))).into_response();
-    }
-
-    let path_pattern = partition_dir
-        .join("*.parquet")
-        .to_string_lossy()
-        .to_string();
+    };
 
     let mut base_filters = vec![format!("underlying = {}", sql_quote(&params.underlying))];
+    if in_place::enabled("option_day") {
+        base_filters.push(underlying_ticker_range(&params.underlying));
+    }
     if let Some(strike_min) = params.strike_min {
         base_filters.push(format!("strike >= {strike_min}"));
     }
@@ -1105,8 +1080,8 @@ fn exact_expiry_target<'a>(
 
 fn build_option_chain_sql(path_pattern: &str, projection: &str, filters: &[String]) -> String {
     format!(
-        "SELECT {projection} FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry, strike",
-        path = sql_escape_literal(path_pattern),
+        "SELECT {projection} FROM {path} WHERE {filters} ORDER BY expiry, strike",
+        path = path_pattern,
         filters = filters.join(" AND "),
     )
 }
@@ -1125,8 +1100,8 @@ async fn option_chain_base_has_rows(
     base_filters: &[String],
 ) -> Result<bool, ServiceError> {
     let sql = format!(
-        "SELECT 1 AS has_row FROM read_parquet('{path}') WHERE {filters} LIMIT 1",
-        path = sql_escape_literal(path_pattern),
+        "SELECT 1 AS has_row FROM {path} WHERE {filters} LIMIT 1",
+        path = path_pattern,
         filters = base_filters.join(" AND "),
     );
     let rows = run_sql_json_async(sql).await?;
@@ -1185,8 +1160,8 @@ async fn query_distinct_expiries_in_window(
     ));
 
     let sql = format!(
-        "SELECT DISTINCT expiry FROM read_parquet('{path}') WHERE {filters} ORDER BY expiry",
-        path = sql_escape_literal(path_pattern),
+        "SELECT DISTINCT expiry FROM {path} WHERE {filters} ORDER BY expiry",
+        path = path_pattern,
         filters = filters.join(" AND "),
     );
     let rows = run_sql_json_async(sql).await?;
@@ -1932,6 +1907,9 @@ async fn option_chain_snapshot(
         format!("underlying = {}", sql_quote(&params.underlying)),
         format!("window_start <= {visible}"),
     ];
+    if in_place::enabled("option_minute") {
+        filters.push(underlying_ticker_range(&params.underlying));
+    }
     if let Some(v) = params.expiry_min.as_deref() {
         filters.push(format!("expiry >= DATE {}", sql_quote(v)));
     }
@@ -1950,9 +1928,9 @@ async fn option_chain_snapshot(
     let where_sql = filters.join(" AND ");
 
     let part = |store: &str| state.storage_root.join(store).join(format!("trade_date={trade_date}"));
-    let bars_dir = part("option_minute");
+    let bars_src = in_place::source(&state.storage_root, "option_minute", &trade_date, &trade_date);
     let quotes_dir = part("option_quote_minute");
-    let has_bars = has_any_parquet_file(&bars_dir);
+    let has_bars = bars_src.is_some();
     let has_quotes = has_any_parquet_file(&quotes_dir);
     if !has_bars && !has_quotes {
         return (StatusCode::OK, Json(json!([]))).into_response();
@@ -1963,9 +1941,9 @@ async fn option_chain_snapshot(
             "bars AS (SELECT ticker, underlying, expiry, strike, \"right\", close AS last, \
                  window_start AS last_trade_ws, \
                  CAST(sum(volume) OVER (PARTITION BY ticker) AS BIGINT) AS volume \
-             FROM read_parquet('{}') WHERE {where_sql} \
+             FROM {} WHERE {where_sql} \
              QUALIFY row_number() OVER (PARTITION BY ticker ORDER BY window_start DESC) = 1)",
-            glob(&bars_dir)
+            bars_src.as_deref().unwrap_or_default()
         )
     } else {
         "bars AS (SELECT NULL::VARCHAR AS ticker, NULL::VARCHAR AS underlying, NULL::DATE AS expiry, \
@@ -2777,18 +2755,9 @@ fn spot_at(series: &[(i64, f64)], ts_ns: i64) -> Option<f64> {
 
 /// Fetch the spot (close) price for a given ticker on a given date from stock_daily.
 fn fetch_spot_daily(storage_root: &Path, ticker: &str, date: &str) -> Option<f64> {
-    let dataset_dir = storage_root.join("stock_daily");
-    let partition_dir = dataset_dir.join(format!("trade_date={date}"));
-    if !has_any_parquet_file(&partition_dir) {
-        return None;
-    }
-    let path_pattern = partition_dir
-        .join("*.parquet")
-        .to_string_lossy()
-        .to_string();
+    let src = in_place::source(storage_root, "stock_daily", date, date)?;
     let sql = format!(
-        "SELECT close FROM read_parquet('{path}') WHERE ticker = {ticker} LIMIT 1",
-        path = sql_escape_literal(&path_pattern),
+        "SELECT close FROM {src} WHERE ticker = {ticker} LIMIT 1",
         ticker = sql_quote(ticker),
     );
     let rows = run_sql_json(&sql).ok()?;
@@ -3525,6 +3494,18 @@ fn sql_escape_literal(value: &str) -> String {
 
 fn sql_quote(value: &str) -> String {
     format!("'{}'", sql_escape_literal(value))
+}
+
+/// `ticker` bounds that hold exactly the OPRA contracts of `underlying`
+/// (`O:<root><digit>...`). Raw files read in place parse `underlying` out of the
+/// ticker, so the bounds are implied there and, unlike the parsed column, prune
+/// row groups by their statistics.
+fn underlying_ticker_range(underlying: &str) -> String {
+    format!(
+        "ticker >= {} AND ticker < {}",
+        sql_quote(&format!("O:{underlying}0")),
+        sql_quote(&format!("O:{underlying}:"))
+    )
 }
 
 fn invalid_argument(message: &str) -> axum::response::Response {

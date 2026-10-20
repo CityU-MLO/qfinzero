@@ -25,7 +25,7 @@ from ..engine import _lit
 _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\.(?:parquet|csv\.gz)$")
 
 # OPRA contract: O:{ROOT}{YYMMDD}{C|P}{strike*1000, 8 digits}
-# (same parse as upq-ingest; ROOT may carry up to 2 trailing digits we ignore).
+# (ROOT may carry up to 2 trailing digits we ignore).
 # Single-brace quantifiers: this is interpolated via f-strings into DuckDB SQL.
 _OPRA_RE = r"^O:([A-Z]+)[0-9]{0,2}([0-9]{6})([CP])([0-9]{8})$"
 

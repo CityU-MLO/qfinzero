@@ -1,8 +1,9 @@
 """UPQ on-disk target schemas — the single source of truth for the converter.
 
-These mirror exactly what the UPQ Rust service reads (verified against
-``infra/upq/crates/upq-ingest``). The converter casts every source into these
-column names and DuckDB types before writing ZSTD parquet.
+These mirror exactly what the UPQ Rust service reads, and they are the standard
+fields of the raw-data index (``docs/plans/2026-10-20-raw-index-design.md``):
+the converter casts every source into these column names and DuckDB types, and
+in-place readers project raw files onto them.
 
 Time conventions:
   * ``window_start`` — BIGINT nanoseconds since the Unix epoch, UTC (minute bars).

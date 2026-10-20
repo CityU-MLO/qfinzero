@@ -128,9 +128,10 @@ def test_acquire_unknown_and_missing_binary(store):
 
 def test_acquire_missing_config(store):
     from qfinzero.admin import acquire
-    # us_prices needs S3 creds; with none set it should refuse before launching.
-    res = acquire.acquire("us_prices", dry_run=True)
+    # databento needs an API key; with none set it should refuse before launching.
+    res = acquire.acquire("databento", dry_run=True)
     assert res["ok"] is False and "missing config" in res["error"]
+    assert "us_prices" not in {t["id"] for t in acquire.targets()}
 
 
 # ── setup-state ─────────────────────────────────────────────────────────────

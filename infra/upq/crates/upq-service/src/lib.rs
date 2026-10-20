@@ -7,4 +7,5 @@ pub mod app;
 pub mod as_of;
 pub mod db;
 pub mod greeks;
+pub mod in_place;
 pub mod rates_curve;

@@ -21,6 +21,11 @@ Added:
 - Benzinga monthly news archives (`YYYY-MM.jsonl.gz`) load into ESP with the
   teaser, image and full article text; `/esp/news/{id}/body` returns `body` and
   accepts the `news_…` event id of a search result. Titles are HTML-unescaped.
+- In-place reads (behind `UPQ_IN_PLACE`, off by default): UPQ reads
+  `option_minute`, `option_day` and `stock_daily` straight from the massive raw
+  files through views the index writes from the converter's own projection;
+  other vendors' parts still join. 520 compared requests matched the converted
+  store row for row.
 - Raw-data index: *Data setup* → *Scan & index* and `qfz-data index` recognise
   massive, Databento, Tiingo and custom parquet (`qfz.dataset.yaml`) files in
   place and catalogue them under `_state/index/` (files, row groups, symbols,
@@ -44,6 +49,10 @@ Added:
 
 Changed:
 
+- Removed the Rust `upq-ingest` crate, `scripts/upq_flatfiles.sh`, the
+  `us_prices` acquire target and the store-conversion design documents: the
+  data pipeline (`qfz-data`) builds every store, and the raw-data index design
+  (`docs/plans/2026-10-20-raw-index-design.md`) replaces them.
 - QFinZero stops at consolidated BBO: Databento `cmbp-1` and market-by-order
   data outside Blue Ocean are indexed but no longer converted, and the
   download form refuses them (they only duplicated consolidated trades and

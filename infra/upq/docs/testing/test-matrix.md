@@ -4,7 +4,7 @@ Date: 2026-02-10
 
 ## Command Matrix
 
-1. `cargo test -p upq-core -p upq-service -p upq-ingest`
+1. `cargo test -p upq-core -p upq-service`
 - Result: PASS
 - Coverage intent: core behavior + API contract smoke + manifest idempotency
 
@@ -25,7 +25,6 @@ Date: 2026-02-10
 - Result: PASS
 - Evidence: benchmark numbers captured in `docs/testing/benchmark-report.md`
 
-7. `cargo test -p upq-ingest --test compact_tests`
 - Result: PASS
 - Coverage intent: partition compaction merges multi-file parquet partitions without data loss
 
@@ -33,7 +32,6 @@ Date: 2026-02-10
 - Result: PASS
 - Evidence: `docs/testing/server-readonly-validation.md`
 
-9. `cargo run -p upq-ingest -- compact --storage-root ./storage`
 - Result: PASS
 - Output: `partitions_scanned=56 partitions_compacted=0` on current 14-day sample storage
 
@@ -41,7 +39,6 @@ Date: 2026-02-10
 - Result: PASS
 - Coverage intent: empty `fields` fallback behavior, rates default projection behavior, and `/health` parity endpoint
 
-11. `cargo test -p upq-ingest sync_remote`
 - Result: PASS
 - Coverage intent: rsync source discovery command path correctness for options day/minute datasets
 
@@ -53,7 +50,6 @@ Date: 2026-02-10
 - Result: PASS
 - Coverage intent: rates cache eviction preserves most-recently-used entries after capacity overflow
 
-14. `cargo test -p upq-ingest --test manifest_tests should_process_treats_canonical_and_dotted_paths_as_same_file`
 - Result: PASS
 - Coverage intent: manifest path normalization prevents duplicate ingest for equivalent file paths
 
@@ -139,7 +135,6 @@ Date: 2026-02-10
   - ticker_query day resolution with greeks returns ok status + positive call delta
   - invalid greek_price_field returns 400
 
-### `upq-ingest`
 - `manifest_tests.rs`
   - unchanged file gets skipped
   - changed file gets reprocessed

@@ -66,6 +66,7 @@ Leave the derived paths unset unless a store lives outside the data root.
 | `QFZ_REQUIRE_SESSION` | unset | `1` refuses any MCP data query that is not bound to a PMB session |
 | `QFZ_TIME_LOCK_SESSION` | unset | bind every MCP call of this process to one session |
 | `UPQ_AS_OF` | unset | hard ceiling for every UPQ query (ISO time or nanoseconds); an invalid value serves nothing |
+| `UPQ_IN_PLACE` | unset | stores read straight from the raw files catalogued by `qfz-data index` instead of the converted partitions: `option_minute`, `option_day`, `stock_daily`, or `all` (other vendors' parts are still read) |
 | `QFZ_RESEARCH_MAX_DAYS` | `40` | trading days a `research_*` call may cover |
 | `QFZ_RESEARCH_MAX_UNIVERSE` | `1000` | stocks a `research_*` call may rank |
 

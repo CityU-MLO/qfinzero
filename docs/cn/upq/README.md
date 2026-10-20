@@ -13,8 +13,7 @@
 ```bash
 cd infra/upq
 cargo build --release
-cargo run -p upq-ingest -- ingest --raw-root ~/upq_data --storage-root ~/upq_storage
-STORAGE_ROOT=~/upq_storage cargo run -p upq-service
+STORAGE_ROOT=/data/qfinzero/upq cargo run -p upq-service   # stores written by qfz-data
 # http://127.0.0.1:19350
 ```
 
@@ -65,7 +64,6 @@ STORAGE_ROOT=~/upq_storage cargo run -p upq-service
 |-------|---------|
 | `upq-core` | Schema、校验、OPRA 解析器、SQL 构造器 |
 | `upq-service` | Axum API 路由与请求校验 |
-| `upq-ingest` | 数据摄取、清单跟踪、幂等性 |
 | `upq-bench` | 延迟/吞吐量基准测试 |
 
 ## 快速示例

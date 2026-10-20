@@ -204,6 +204,8 @@ def scan(roots: Iterable[str | Path], storage: str | Path, *, symbols: bool = Tr
     report = summarize([e["row"] for e in kept], time.time() - t0, len(todo), reused)
     all_roots = sorted({str(r) for r in roots} | {e["row"].get("root") for e in others if e["row"].get("root")})
     report.update(ok=True, roots=all_roots, scanned=[str(r) for r in roots], missing_roots=missing, index=str(idx))
+    from . import views
+    report["views"] = views.build(Path(storage), [e["row"] for e in kept])
     (idx / "scan.json").write_text(json.dumps(report, indent=1, default=str))
     say(f"[scan] {len(kept):,} files catalogued in {report['elapsed_s']} s -> {idx}")
     return report

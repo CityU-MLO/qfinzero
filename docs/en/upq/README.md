@@ -14,8 +14,7 @@ A high-performance Rust-based price query service providing REST API access to s
 ```bash
 cd infra/upq
 cargo build --release
-cargo run -p upq-ingest -- ingest --raw-root ~/upq_data --storage-root ~/upq_storage
-STORAGE_ROOT=~/upq_storage cargo run -p upq-service
+STORAGE_ROOT=/data/qfinzero/upq cargo run -p upq-service   # stores written by qfz-data
 # http://127.0.0.1:19350
 ```
 
@@ -69,7 +68,6 @@ with `UPQ_AS_OF`. See the [platform guide](../platform-guide.md#1-the-time-lock)
 |-------|---------|
 | `upq-core` | Schema, validation, OPRA parser, SQL builders |
 | `upq-service` | Axum API routes and request validation |
-| `upq-ingest` | Data ingestion, manifest tracking, idempotency |
 | `upq-bench` | Latency/throughput benchmarks |
 
 ## Quick Example

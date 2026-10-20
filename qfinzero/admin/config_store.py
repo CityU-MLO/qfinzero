@@ -7,7 +7,7 @@ API key, the ESP/Mongo
 connection, and the auto-update schedule. Persisted as JSON at
 ``$QFZ_DATA_ROOT/_state/qfz.config.json`` (gitignored — it holds secrets, ``data/``
 is already ignored) and **applied to ``os.environ``** so the pipeline, the download
-scripts (``upq_flatfiles.sh`` reads ``POLYGON_S3_*``) and the services keep working
+scripts (``POLYGON_S3_*``) and the services keep working
 unchanged.
 
 Secrets never leave the box in the clear: :func:`masked` renders them as
@@ -70,7 +70,7 @@ def _defaults() -> dict[str, Any]:
             "storage_root": os.environ.get("STORAGE_ROOT", f"{root}/upq"),
         },
         # MASSIVE / Polygon flat-files (US stocks, options, rates, corp actions).
-        # S3 is the download transport (upq_flatfiles.sh); REST is the reference/
+        # S3 is the download transport (massive_dl); REST is the reference/
         # permissions endpoint. In practice the REST key == the S3 secret.
         "massive": {
             "s3_access_key_id": os.environ.get("POLYGON_S3_ACCESS_KEY_ID", ""),
@@ -210,7 +210,7 @@ def apply_to_env(cfg: dict[str, Any] | None = None) -> None:
         "RAW_DATABENTO_DIR": d.get("raw_databento", ""),
         "RAW_TIINGO_DIR": d.get("raw_tiingo", ""),
         "STORAGE_ROOT": d.get("storage_root", ""),
-        # MASSIVE flat-files S3 — the names upq_flatfiles.sh reads.
+        # MASSIVE flat-files S3 (the names the massive downloads read).
         "POLYGON_S3_ACCESS_KEY_ID": m.get("s3_access_key_id", ""),
         "POLYGON_S3_SECRET_ACCESS_KEY": m.get("s3_secret_access_key", ""),
         "MASSIVE_S3_ENDPOINT": m.get("s3_endpoint", ""),

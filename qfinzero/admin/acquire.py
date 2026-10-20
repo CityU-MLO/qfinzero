@@ -1,11 +1,11 @@
 """Raw acquisition — trigger the external download scripts with streamed logs.
 
 "Own it end to end": the Console can kick off the vendor downloads that populate
-the shared RAW roots, not just the convert step. Acquisition itself still lives in
-the battle-tested shell scripts (``scripts/upq_flatfiles.sh`` for MASSIVE flat-files,
-``scripts/news_data.sh`` for news/econ/earnings); this module is the thin, safe,
-streamable bridge the job runner and CLI call. The ``databento`` target is pure
-Python (:mod:`~qfinzero.admin.databento_dl`) and is cost-gated.
+the shared RAW roots, not just the convert step. News/econ/earnings still come
+from ``scripts/news_data.sh``; this module is the thin, safe, streamable bridge
+the job runner and CLI call. The ``databento`` and ``tiingo`` targets are pure
+Python (:mod:`~qfinzero.admin.databento_dl`, :mod:`~qfinzero.admin.tiingo_dl`);
+massive flat files are fetched by the data utility (:mod:`~qfinzero.admin.massive_dl`).
 
 Design choices that keep this honest:
 
@@ -48,12 +48,6 @@ class AcquireTarget:
 
 
 TARGETS: dict[str, AcquireTarget] = {
-    "us_prices": AcquireTarget(
-        id="us_prices", label="MASSIVE flat-files (US stocks/options/rates)",
-        script="upq_flatfiles.sh", base_args=["update"],
-        writes_to="test: /tmp/upq_flatfiles_test · prod: /home/qlib/upq_* (host-specific)",
-        needs=("massive.s3_access_key_id", "massive.s3_secret_access_key"),
-    ),
     "news": AcquireTarget(
         id="news", label="News / econ / earnings (ESP sources)",
         script="news_data.sh", base_args=["update"],

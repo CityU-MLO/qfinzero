@@ -170,7 +170,6 @@ qfz-data config --set tushare.token=…      # masked, stored at $QFZ_DATA_ROOT/
 qfz-data scan massive                       # list flat-files datasets your S3 key can read
 qfz-data scan tushare                       # validate the CN token
 qfz-data scan databento                     # validate the Databento key
-qfz-data acquire us_prices                  # trigger the MASSIVE download script (dry-run by default; --run)
 qfz-data schedule apply                     # install the cron cadence from the config
 qfz-data explore --symbols stock_daily      # per-symbol coverage in a store
 qfz-data setup-state                         # first-run wizard vs. status

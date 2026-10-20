@@ -64,6 +64,7 @@ QFinZero 通过环境变量配置。每个进程按以下优先级读取：
 | `QFZ_REQUIRE_SESSION` | 未设置 | 设为 `1` 时拒绝任何未绑定 PMB 会话的 MCP 数据查询 |
 | `QFZ_TIME_LOCK_SESSION` | 未设置 | 把本进程的所有 MCP 调用绑定到同一个会话 |
 | `UPQ_AS_OF` | 未设置 | 所有 UPQ 查询的硬上限（ISO 时间或纳秒）；无法解析时不返回任何数据 |
+| `UPQ_IN_PLACE` | 未设置 | 直接读取 `qfz-data index` 登记的原始文件、而不读转换后分区的存储：`option_minute`、`option_day`、`stock_daily` 或 `all`（其他供应商的 part 仍会读取） |
 | `QFZ_RESEARCH_MAX_DAYS` | `40` | 一次 `research_*` 调用最多覆盖的交易日数 |
 | `QFZ_RESEARCH_MAX_UNIVERSE` | `1000` | 一次 `research_*` 调用最多排序的股票数 |
 

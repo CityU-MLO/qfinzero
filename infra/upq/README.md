@@ -3,32 +3,25 @@
 
 # UPQ (Rust Price Query Service)
 
-UPQ is a Rust implementation of the price query service with API compatibility goals against the Python `price_query_service`.
+UPQ serves prices, quotes and option analytics over HTTP from the parquet
+stores under `STORAGE_ROOT`. It does not ingest anything itself: the data
+pipeline (`qfz-data`) catalogues the vendors' raw files in place and writes the
+stores UPQ reads (see `docs/plans/2026-10-20-raw-index-design.md` and the data
+setup guide). The QFinZero hub starts UPQ with the right `STORAGE_ROOT`.
 
 ## Quick Start
 
 ```bash
-# 1. Sync data from qlib server
-scp scripts/sync_from_qlib.sh qlib:~/
-ssh qlib "./sync_from_qlib.sh"
+# 1. Catalogue and convert the raw data (from the repo root)
+qfz-data index /data/massive_data /data/databento
+qfz-data convert --market us --all
 
-# 2. Build
-cargo build --release
+# 2. Build and run
+cd infra/upq
+cargo build --release -p upq-service
+STORAGE_ROOT=/data/qfinzero/upq cargo run --release -p upq-service
 
-# 3. Ingest data
-cargo run -p upq-ingest -- ingest \
-  --raw-root ~/upq_data \
-  --storage-root ~/upq_storage \
-  --manifest ~/upq_state/manifest.sqlite
-
-# 4. Configure environment
-cp .env.example .env
-# Edit .env to set your STORAGE_ROOT and PORT
-
-# 5. Run service
-cargo run -p upq-service
-
-# 6. Test
+# 3. Test
 curl http://127.0.0.1:19350/health
 ```
 
@@ -44,7 +37,7 @@ cp .env.example .env
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `STORAGE_ROOT` | Yes | - | Path to ingested parquet data directory |
+| `STORAGE_ROOT` | Yes | - | The parquet stores written by `qfz-data` |
 | `PORT` | No | 19350 | Server port to bind |
 | `RUST_LOG` | No | info | Log level (trace, debug, info, warn, error) |
 
@@ -58,13 +51,10 @@ RUST_LOG=info
 ## Workspace
 - `crates/upq-core`: schema/validation/OPRA parser/SQL builders
 - `crates/upq-service`: Axum API routes and request validation
-- `crates/upq-ingest`: ingest metadata manifest and idempotency utilities
 - `crates/upq-bench`: latency/throughput benchmark for CSV.GZ baseline vs DuckDB Parquet
 
 ## Docs
 - **API usage (human & agent):** `docs/api-usage.md`
-- Design: `docs/plans/2026-02-09-upq-design.md`
-- Implementation plan: `docs/plans/2026-02-09-upq-implementation-plan.md`
 - Schemas: `docs/schemas.md`
 - Test strategy: `docs/testing/test-strategy.md`
 - Test matrix: `docs/testing/test-matrix.md`
@@ -77,29 +67,6 @@ cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 ```
-
-## Sync Data from qlib Server
-
-The service requires data from the qlib server. Run the sync script to copy data to the expected directory structure:
-
-```bash
-# Copy sync script to qlib server
-scp scripts/sync_from_qlib.sh qlib:~/
-
-# Run sync (creates ~/upq_data with ~30GB of data)
-ssh qlib "./sync_from_qlib.sh"
-
-# Or test with dry-run first
-ssh qlib "./sync_from_qlib.sh --dry-run"
-```
-
-Expected output:
-- Stock day files: 1003
-- Stock minute files: 1003
-- Option day files: 543
-- Option minute files: 543
-- Treasury yields: 1
-- Dividends SQLite: 1
 
 ## Run Service
 ```bash
@@ -119,21 +86,19 @@ API routes:
 ## Production Deployment (Concise)
 1. Build release binaries:
 ```bash
-cargo build --release -p upq-ingest -p upq-service
+cargo build --release -p upq-service
 ```
 
 2. Prepare runtime directories:
 ```bash
 sudo mkdir -p /opt/upq/bin /var/lib/upq/storage /var/lib/upq/state
-sudo cp target/release/upq-ingest target/release/upq-service /opt/upq/bin/
+sudo cp target/release/upq-service /opt/upq/bin/
 ```
 
-3. Run one-time ingest (using synced data from ~/upq_data):
+3. Build the stores with `qfz-data` (from the repo root):
 ```bash
-/opt/upq/bin/upq-ingest ingest \
-  --raw-root /home/qlib/upq_data \
-  --storage-root /var/lib/upq/storage \
-  --manifest /var/lib/upq/state/manifest.sqlite
+qfz-data index /data/massive_data /data/databento
+qfz-data convert --market us --all
 ```
 
 4. Run service with storage path:
@@ -173,28 +138,6 @@ curl -sS http://127.0.0.1:19350/health
 Notes:
 - Service currently binds `127.0.0.1:19350`; expose externally via reverse proxy if needed.
 - Rollback: keep previous binary under `/opt/upq/bin` and restart `upq` service.
-
-## Ingest Sample Data
-In this workspace, sample data is expected under `./raw_sample`:
-- `raw_sample/stock/day/*.csv.gz`
-- `raw_sample/stock/minute/*.csv.gz`
-- `raw_sample/options/day/*.csv.gz`
-- `raw_sample/options/minute/*.csv.gz`
-- `raw_sample/assets/treasury_yields.csv`
-- `raw_sample/dividends/massive_dividends.sqlite`
-
-Run ingest:
-```bash
-cargo run -p upq-ingest -- ingest \
-  --raw-root ./raw_sample \
-  --storage-root ./storage \
-  --manifest ./state/manifest.sqlite
-```
-
-Compact partition files (merge multiple parquet files in each `trade_date=` partition):
-```bash
-cargo run -p upq-ingest -- compact --storage-root ./storage
-```
 
 ## Benchmark
 Run stock-minute benchmark against gzip CSV baseline and DuckDB Parquet:

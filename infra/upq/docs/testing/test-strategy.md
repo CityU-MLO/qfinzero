@@ -16,7 +16,6 @@
 - status code behavior
 - error payload shape
 
-3. Ingest tests (`upq-ingest`)
 - manifest transitions (`pending/done/error`)
 - idempotent skip/rebuild logic
 
@@ -33,6 +32,5 @@
 ## Target Commands
 - `cargo test -p upq-core`
 - `cargo test -p upq-service`
-- `cargo test -p upq-ingest`
 - `cargo test --workspace`
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`

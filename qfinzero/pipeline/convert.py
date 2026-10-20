@@ -1,8 +1,8 @@
 """Converter: raw vendor data -> UPQ storage (partitioned ZSTD parquet).
 
 Writes exactly the layout the UPQ service reads (one file per ``trade_date=X/``
-partition, ``trade_date`` carried in-file), so the output is byte-compatible with
-the Rust ``upq-ingest``.
+partition, ``trade_date`` carried in-file). Files the raw-data index can read in
+place need no conversion (``docs/plans/2026-10-20-raw-index-design.md``).
 
 Order for a full build:  stocks -> options -> databento -> rates -> corporate_actions
 (corporate_actions derives dividend price ratios from the converted stock_daily;
