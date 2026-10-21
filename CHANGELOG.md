@@ -3,7 +3,7 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
-## Unreleased
+## 1.0.1 (2026-10-21)
 
 Fixes:
 
