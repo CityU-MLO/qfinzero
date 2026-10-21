@@ -10,7 +10,8 @@ export type ApiKey = { id: number; name: string; prefix: string; created_at: num
   last_used_at: number | null; revoked: boolean; username?: string; user_id?: number;
   scopes: string[] | null; read_only: boolean; expires_at: number | null; expired: boolean;
   rate_per_min: number | null; note: string; created_by: string | null;
-  usage?: KeyUsage[]; requests_total?: number };
+  /** False for keys made before tokens were kept (they cannot be shown again). */
+  revealable?: boolean; usage?: KeyUsage[]; requests_total?: number };
 export type Scope = { id: string; paths: string[]; min_role: Role; description: string; available: boolean };
 /** What a key may do; ``scopes: null`` is every scope its owner's role allows. */
 export type KeySettings = { name?: string; scopes?: string[] | null; read_only?: boolean;
@@ -62,6 +63,7 @@ export const auth = {
   updateKey: (id: number, body: KeySettings) =>
     call<{ key: ApiKey }>(`/auth/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   scopes: () => call<{ scopes: Scope[] }>("/auth/scopes"),
+  revealKey: (id: number) => call<{ id: number; token: string }>(`/auth/keys/${id}/token`),
   revokeKey: (id: number) => call(`/auth/keys/${id}`, { method: "DELETE" }),
   users: () => call<{ users: UserRow[]; roles: Role[]; keys: ApiKey[] }>("/auth/users"),
   createUser: (body: { username: string; password: string; role: Role; display_name?: string }) =>

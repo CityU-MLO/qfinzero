@@ -5,7 +5,8 @@
     qfz-auth set-role alice researcher
     qfz-auth reset-password alice
     qfz-auth disable alice | enable alice
-    qfz-auth create-key alice --name "eval runner"    # prints the key once
+    qfz-auth create-key alice --name "eval runner"    # prints the token
+    qfz-auth show-key 3                               # prints it again
     qfz-auth create-key bob --scopes market-data,events --read-only --expires-days 30 --rate 600
     qfz-auth revoke-key 3
     qfz-auth setup-token                              # token for the web /setup page
@@ -57,6 +58,7 @@ def main(argv=None) -> int:
     ck.add_argument("--expires-days", type=float)
     ck.add_argument("--rate", type=int, help="requests per minute")
     ck.add_argument("--note", default="")
+    sub.add_parser("show-key").add_argument("key_id", type=int)
     sub.add_parser("revoke-key").add_argument("key_id", type=int)
     sub.add_parser("setup-token")
     args = ap.parse_args(argv)
@@ -91,7 +93,10 @@ def main(argv=None) -> int:
                 scopes=[x.strip() for x in args.scopes.split(",") if x.strip()] if args.scopes else None,
                 read_only=args.read_only, rate_per_min=args.rate, note=args.note, created_by="cli",
                 expires_at=time.time() + args.expires_days * 86400 if args.expires_days else None)
-            out = {"key": meta, "token": token, "note": "shown once; store it now"}
+            out = {"key": meta, "token": token}
+        elif args.cmd == "show-key":
+            out = {"key": store.get_api_key(args.key_id), "token": store.reveal_api_key(args.key_id)}
+            store.audit("cli", "key_revealed", str(args.key_id))
         elif args.cmd == "revoke-key":
             store.revoke_api_key(args.key_id)
             out = {"ok": True}

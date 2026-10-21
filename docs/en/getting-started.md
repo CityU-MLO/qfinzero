@@ -73,7 +73,7 @@ The sample is a fictional market: 20 tickers on the real NYSE calendar for
 
 ## 3. Connect an agent
 
-1. Open **Account** and create an API key. Copy the `qfz_…` token; it is shown once.
+1. Open **Account** and create an API key. Copy the `qfz_…` token (**Show** in the key list brings it back later).
 2. Point any MCP client at the hub:
 
 ```json

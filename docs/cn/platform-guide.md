@@ -229,7 +229,7 @@ key 的权限可以比所有者更窄。在账号页创建 key，或由管理员
 | `chat` | 对话助手 | researcher |
 | `admin` | 数据管理、用户和 key | admin |
 
-key 的权限永远不超过所有者的角色：viewer 不能持有 `trading`，所有者被降级后，他名下所有 key 的权限也随之收窄。预设覆盖常见情况（*只读数据*：行情和事件，只读；*MCP agent*：MCP、数据、事件和交易；*完整权限*：所有者拥有的全部 scope，即 scope 出现之前创建的 key 的行为）。token 只显示一次，并附带环境变量、curl、Python 和 MCP 客户端配置的代码片段。
+key 的权限永远不超过所有者的角色：viewer 不能持有 `trading`，所有者被降级后，他名下所有 key 的权限也随之收窄。预设覆盖常见情况（*只读数据*：行情和事件，只读；*MCP agent*：MCP、数据、事件和交易；*完整权限*：所有者拥有的全部 scope，即 scope 出现之前创建的 key 的行为）。所有者和 admin 可以随时再次显示并复制 token（key 列表里的 **显示**，或 `qfz-auth show-key <id>`），并附带环境变量、curl、Python 和 MCP 客户端配置的代码片段。每次显示都会记入审计日志。token 用 `_state/api_key_seal` 加密保存；在这项功能之前创建的 key 无法再次显示，需要重新生成。
 
 key 列表显示最近 14 天每天的请求数（以及被拒绝的次数）、最近一次使用时间和发放人。scopes、只读、到期和速率限制之后都可以修改，不需要换 token；吊销在下一个请求时生效。
 
@@ -249,7 +249,8 @@ HTTP 接口：`GET /auth/scopes`、`POST /auth/keys`（自己的）、`POST /aut
 ```bash
 qfz-auth list
 qfz-auth create-user alice --role researcher
-qfz-auth create-key alice --name eval-runner      # key 只打印一次
+qfz-auth create-key alice --name eval-runner      # 打印 token
+qfz-auth show-key 3                               # 再次打印
 qfz-auth set-role alice viewer
 qfz-auth disable alice
 ```

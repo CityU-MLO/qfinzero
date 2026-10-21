@@ -2,12 +2,12 @@
 
 // API key manager shared by the account page (your own keys) and the users
 // admin page (keys issued to anyone). A key is narrowed from its owner's role
-// by scopes, read-only, an expiry and a rate limit; the token is shown once,
-// with ready-to-paste snippets.
+// by scopes, read-only, an expiry and a rate limit. Its owner and admins can
+// show and copy the token again at any time, with ready-to-paste snippets.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, KeyRound, Loader2, Pencil, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Segmented } from "@/components/ui/segmented";
@@ -58,13 +58,41 @@ function ago(ts: number | null, t: (en: string, zh: string) => string) {
   return t(`${Math.round(s / 86400)} d ago`, `${Math.round(s / 86400)} 天前`);
 }
 
+/** Copy to the clipboard; falls back to a hidden textarea where the async
+ *  clipboard API is missing (plain-http hosts that are not localhost). */
+export async function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through
+    }
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(ta);
+  return ok;
+}
+
 export function CopyButton({ text, className = "" }: { text: string; className?: string }) {
   const t = useT();
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<"" | "done" | "failed">("");
+  const copy = async () => {
+    setState((await copyText(text)) ? "done" : "failed");
+    setTimeout(() => setState(""), 1500);
+  };
   return (
-    <button type="button" className={`inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs hover:bg-accent ${className}`}
-            onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); })}>
-      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />} {done ? t("Copied", "已复制") : t("Copy", "复制")}
+    <button type="button" onClick={copy}
+            className={`inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs hover:bg-accent ${className}`}>
+      {state === "done" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{" "}
+      {state === "done" ? t("Copied", "已复制") : state === "failed" ? t("Select and copy", "请手动选中复制") : t("Copy", "复制")}
     </button>
   );
 }
@@ -270,23 +298,34 @@ export function CreateKey({ ownerRole, users, onCreated }: {
   );
 }
 
-export function FreshToken({ fresh, onDismiss }: { fresh: { key: ApiKey; token: string }; onDismiss: () => void }) {
-  const t = useT();
+function TokenBox({ token, scopes }: { token: string; scopes: string[] | null }) {
   const origin = useOrigin();
   return (
-    <div className="space-y-3 rounded-lg border border-success/30 bg-success/5 p-4">
+    <>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 select-all overflow-x-auto rounded-md bg-card px-2 py-1.5 font-mono text-xs text-foreground">{token}</code>
+        <CopyButton text={token} />
+      </div>
+      <SnippetBlock origin={origin} token={token} scopes={scopes} />
+    </>
+  );
+}
+
+export function FreshToken({ fresh, onDismiss }: { fresh: { key: ApiKey; token: string }; onDismiss: () => void }) {
+  const t = useT();
+  const box = useRef<HTMLDivElement>(null);
+  // the form sits below the key list: bring the new token into view
+  useEffect(() => box.current?.scrollIntoView({ behavior: "smooth", block: "center" }), [fresh.token]);
+  return (
+    <div ref={box} className="space-y-3 rounded-lg border border-success/30 bg-success/5 p-4">
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold text-success">
           {t("New key", "新密钥")} “{fresh.key.name}”{fresh.key.username ? ` · ${fresh.key.username}` : ""}
-          {t(": copy it now, it will not be shown again.", "：请立即复制，之后将不再显示。")}
+          {t(" created. You can show and copy it again from the list at any time.", " 已创建，之后也可以随时在列表里显示和复制。")}
         </p>
         <button type="button" onClick={onDismiss} className="text-xs text-muted-foreground hover:text-foreground">{t("Done", "完成")}</button>
       </div>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded-md bg-card px-2 py-1.5 font-mono text-xs">{fresh.token}</code>
-        <CopyButton text={fresh.token} />
-      </div>
-      <SnippetBlock origin={origin} token={fresh.token} scopes={fresh.key.scopes} />
+      <TokenBox token={fresh.token} scopes={fresh.key.scopes} />
     </div>
   );
 }
@@ -367,12 +406,34 @@ export function KeyTable({ keys, showOwner, roleOf, onChanged }: {
   const [open, setOpen] = useState<number | null>(null);
   const [edit, setEdit] = useState<number | null>(null);
   const [showOld, setShowOld] = useState(false);
+  const [shown, setShown] = useState<Record<number, { token?: string; error?: string; busy?: boolean }>>({});
   const live = keys.filter((k) => !k.revoked);
   const rows = showOld ? keys : live;
   const revoke = async (k: ApiKey) => {
     if (!window.confirm(t(`Revoke ${k.name} (${k.prefix})? Anything using it stops working.`, `吊销 ${k.name}（${k.prefix}）？使用它的程序将立即失效。`))) return;
     await auth.revokeKey(k.id);
     onChanged();
+  };
+  const reveal = async (k: ApiKey) => {
+    if (shown[k.id]) {
+      setShown((s) => {
+        const next = { ...s };
+        delete next[k.id];
+        return next;
+      });
+      return;
+    }
+    if (k.revealable === false) {
+      setShown((s) => ({ ...s, [k.id]: { error: t("This key was created before tokens were kept, so it cannot be shown. Create a new key and revoke this one.", "这个密钥创建于该功能上线之前，无法再次显示。请新建一个密钥并吊销它。") } }));
+      return;
+    }
+    setShown((s) => ({ ...s, [k.id]: { busy: true } }));
+    try {
+      const r = await auth.revealKey(k.id);
+      setShown((s) => ({ ...s, [k.id]: { token: r.token } }));
+    } catch (x) {
+      setShown((s) => ({ ...s, [k.id]: { error: (x as Error).message } }));
+    }
   };
   const cols = showOwner ? 6 : 5;
   return (
@@ -417,6 +478,10 @@ export function KeyTable({ keys, showOwner, roleOf, onChanged }: {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right">
                     {!k.revoked && <>
+                      <button onClick={() => reveal(k)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-accent">
+                        {shown[k.id]?.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : shown[k.id] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        {shown[k.id] ? t("Hide", "隐藏") : t("Show", "显示")}
+                      </button>
                       <button onClick={() => setEdit(edit === k.id ? null : k.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-accent"><Pencil className="h-3.5 w-3.5" />{t("Edit", "编辑")}</button>
                       <button onClick={() => revoke(k)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" />{t("Revoke", "吊销")}</button>
                     </>}
@@ -431,6 +496,14 @@ export function KeyTable({ keys, showOwner, roleOf, onChanged }: {
                         <span>{t("Denied (14 d)", "被拒（14 天）")}: {(k.usage ?? []).reduce((a, u) => a + u.denied, 0)}</span>
                         {k.note && <span className="sm:col-span-3">{t("Note", "备注")}: {k.note}</span>}
                       </div>
+                    </td>
+                  </tr>
+                ),
+                shown[k.id] && !shown[k.id].busy && (
+                  <tr key={`${k.id}-t`} className="border-t">
+                    <td colSpan={cols} className="space-y-3 bg-secondary/20 px-3 py-3">
+                      {shown[k.id].token ? <TokenBox token={shown[k.id].token!} scopes={k.scopes} />
+                        : <p className="text-xs text-destructive">{shown[k.id].error}</p>}
                     </td>
                   </tr>
                 ),

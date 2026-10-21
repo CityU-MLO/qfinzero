@@ -197,7 +197,7 @@ def build_router(store_factory, secret_factory) -> APIRouter:
             raise HTTPException(400, str(e)) from e
         store().audit(actor.username, "key_created", f"{meta['prefix']} for {meta['username']}")
         return {"key": meta, "token": token,
-                "note": "copy the token now; it is not shown again"}
+                "note": "the owner and admins can show the token again from the key list"}
 
     @r.get("/scopes")
     def scopes(request: Request):
@@ -229,6 +229,18 @@ def build_router(store_factory, secret_factory) -> APIRouter:
             raise HTTPException(404 if "not found" in str(e) else 400, str(e)) from e
         store().audit(user.username, "key_updated", f"{k['prefix']}:{sorted(body)}")
         return {"key": k}
+
+    @r.get("/keys/{key_id}/token")
+    def reveal_key(request: Request, key_id: int):
+        """Show a key's token again: your own keys, or any key for an admin."""
+        user = me(request)
+        no_key_admin(request)
+        try:
+            token = store().reveal_api_key(key_id, None if user.role == "admin" else user.id)
+        except AuthError as e:
+            raise HTTPException(404 if "not found" in str(e) else 409, str(e)) from e
+        store().audit(user.username, "key_revealed", str(key_id))
+        return JSONResponse({"id": key_id, "token": token}, headers={"cache-control": "no-store"})
 
     @r.delete("/keys/{key_id}")
     def revoke_key(request: Request, key_id: int):

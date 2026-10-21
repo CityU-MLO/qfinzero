@@ -145,6 +145,55 @@ def test_roles_cookies_keys_and_header_spoofing(hub):
     assert client.get("/admin/users", headers={**bearer, "accept": "text/html"}).status_code == 403
 
 
+
+def test_seal_round_trip_and_tamper():
+    from qfinzero.auth.store import seal, unseal
+    k = b"k" * 32
+    box = seal(k, "qfz_abc_" + "x" * 43)
+    assert unseal(k, box) == "qfz_abc_" + "x" * 43
+    assert seal(k, "same") != seal(k, "same")                  # fresh nonce
+    assert unseal(b"other", box) is None
+    flipped = box[:-2] + ("A" if box[-2] != "A" else "B") + box[-1]
+    assert unseal(k, flipped) is None and unseal(k, "garbage") is None
+
+
+def test_keys_can_be_shown_again(hub, env):
+    client, store = hub
+    store.create_user("root", PW, "admin")
+    bob = store.create_user("bob", PW, "researcher")
+    eve = store.create_user("eve", PW, "researcher")
+    _login(client, "root")
+    issued = client.post(f"/auth/users/{bob.id}/keys", json={"name": "bot"}).json()
+    kid, token = issued["key"]["id"], issued["token"]
+    assert issued["key"]["revealable"] is True
+    assert "token_enc" not in str(client.get("/auth/users").json())
+    r = client.get(f"/auth/keys/{kid}/token")                      # admin: any key
+    assert r.json()["token"] == token and r.headers["cache-control"] == "no-store"
+    client.post("/auth/logout")
+    client.cookies.clear()
+    _login(client, "bob")                                          # owner: own keys
+    assert client.get(f"/auth/keys/{kid}/token").json()["token"] == token
+    client.post("/auth/logout")
+    client.cookies.clear()
+    _login(client, "eve")                                          # others: not found
+    assert client.get(f"/auth/keys/{kid}/token").status_code == 404
+    # a scoped key cannot read tokens, its own included
+    _, narrow = store.create_api_key(eve.id, "n", scopes=["market-data"])
+    client.cookies.clear()
+    assert client.get(f"/auth/keys/{kid}/token", headers={"authorization": f"Bearer {narrow}"}).status_code == 403
+    # keys from before sealing, and revoked keys, cannot be shown
+    with store._conn() as c:
+        c.execute("UPDATE api_keys SET token_enc = NULL WHERE id = ?", (kid,))
+    assert store.get_api_key(kid)["revealable"] is False
+    with pytest.raises(AuthError, match="issue a new one"):
+        store.reveal_api_key(kid)
+    meta, _ = store.create_api_key(bob.id, "old")
+    store.revoke_api_key(meta["id"])
+    with pytest.raises(AuthError, match="revoked"):
+        store.reveal_api_key(meta["id"])
+    assert (env / "state" / "api_key_seal").stat().st_mode & 0o777 == 0o600
+    assert any(a == "key_revealed" for (a,) in store._conn().execute("SELECT action FROM audit"))
+
 def test_docs_root_is_the_web_hub_not_swagger(hub):
     client, _ = hub
     paths = {getattr(r, "path", "") for r in client.app.routes}

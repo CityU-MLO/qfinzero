@@ -3,6 +3,19 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
+## 1.0.1 (2026-10-21)
+
+Fixes:
+
+- API keys can be shown and copied again at any time by their owner and by
+  admins (**Show** in the key list, `GET /auth/keys/{id}/token`,
+  `qfz-auth show-key`). Tokens are stored sealed with `_state/api_key_seal`;
+  every reveal is audited. Keys created earlier cannot be shown again.
+- After creating a key, the new token scrolls into view; it used to appear
+  above the key list, out of sight of the form.
+- The copy buttons work on plain-http hosts, where the browser has no
+  clipboard API.
+
 ## 1.0.0 (2026-10-21)
 
 The first stable release. On top of 0.1.0: an intraday platform (time lock,
