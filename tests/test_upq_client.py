@@ -301,3 +301,17 @@ class TestFutures:
         assert q[0] == {"tickers": "ZN", "start": "2025-01-02T14:00:00", "end": "2025-01-02T15:00:00", "limit": "5"}
         assert q[1] == {"roots": "ZN,CL", "start": "2025-01-01", "end": "2025-01-31"}
         assert q[2]["as_of"] == "2025-01-02T14:31:00Z" and q[2]["tickers"] == "ZNH5"
+
+
+def test_clients_sign_requests_for_the_hub(monkeypatch):
+    """api_key= or QFZ_API_KEY adds the Bearer header the hub's /svc/* routes need."""
+    from qfinzero.clients.esp import ESPClient
+    from qfinzero.clients.pmb import PMBClient
+    from qfinzero.clients.upq import UPQClient
+    monkeypatch.delenv("QFZ_API_KEY", raising=False)
+    assert "Authorization" not in UPQClient("http://h/svc/upq")._session.headers
+    assert UPQClient("http://h/svc/upq", api_key="qfz_a")._session.headers["Authorization"] == "Bearer qfz_a"
+    monkeypatch.setenv("QFZ_API_KEY", "qfz_env")
+    assert ESPClient("http://h/svc/esp")._session.headers["Authorization"] == "Bearer qfz_env"
+    pmb = PMBClient("http://h/svc/pmb", headers={"x-qfz-user": "u"})
+    assert pmb._session.headers["Authorization"] == "Bearer qfz_env" and pmb._session.headers["x-qfz-user"] == "u"

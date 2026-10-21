@@ -42,6 +42,31 @@ systemctl --user status qfinzero-hub
 首次启动前，先以 release 模式构建 UPQ（在 `infra/upq` 中运行 `cargo build --release -p upq-service`），
 并构建网页界面（在 `infra/dashboard-web` 中运行 `pnpm build`）。
 
+## 逐个运行各服务
+
+开发时各服务也可以不经过 hub，各自用自己的端口运行（默认 `19300` 到 `19390`，见[配置](configuration.md)）。这时没有登录校验。
+
+```bash
+./scripts/run_all.sh           # 全部启动
+./scripts/run_all.sh pmb esp   # 只启动部分
+./scripts/status.sh            # 查看在运行的服务
+./scripts/stop_all.sh          # 全部停止
+```
+
+或者手动启动：
+
+```bash
+(cd infra/upq && cargo build --release && STORAGE_ROOT=~/upq_storage cargo run -p upq-service)   # :19350
+(cd infra/esp && pip install -r requirements.txt && python main.py)                             # :19330
+(cd infra/pmb && pip install -r requirements.txt && python main.py)                             # :19380，依赖 UPQ
+(cd infra/playground && pip install -r requirements.txt && \
+  QFINZERO_PMB_URL=http://127.0.0.1:19380 QFINZERO_ESP_URL=http://127.0.0.1:19330 \
+  QFINZERO_UPQ_URL=http://127.0.0.1:19350 python main.py)                                       # :19390
+(cd infra/dashboard-web && pnpm install && pnpm dev)                                            # :19400，开发模式
+```
+
+这时 Python 客户端直接连各服务（`UPQClient()`、`ESPClient()`、`PMBClient()` 默认就用这些端口）。
+
 ## HTTPS 与反向代理
 
 在代理上终止 TLS，并转发 `X-Forwarded-Proto` 和 `X-Forwarded-For`。请求经 HTTPS 时，

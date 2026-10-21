@@ -14,6 +14,14 @@ chains, the broker's overnight trading, and MCP tools for all of it (69).
 
 ### QFZView, the broker, news and the data platform
 
+Documentation:
+
+- A five-minute [Quick start](docs/en/quickstart.md) (API key, REST, Python
+  clients, MCP, time lock on the sample), a shorter README with the citation,
+  and the standalone service commands moved to the operations guide.
+- The UPQ, ESP and PMB Python clients take `api_key=` (or `QFZ_API_KEY`) to
+  call the services through the hub (`http://host:19777/svc/<service>`).
+
 Added:
 
 - QFZView (`/view`): a TradingView-style viewer over the store for stocks,

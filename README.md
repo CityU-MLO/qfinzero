@@ -2,7 +2,6 @@
 
 # QFinZero
 
-
 **A Unified Trading Environment for LLM Agents**
 
 QFinZero unifies price data, event/news retrieval, and brokerage simulation behind consistent, time-aligned APIs so LLM agents can query, reason, and trade in a coherent environment.
@@ -13,452 +12,143 @@ QFinZero unifies price data, event/news retrieval, and brokerage simulation behi
 >
 > Correspondence: chester.hc.luo@my.cityu.edu.hk, zhang.yuan@sufe.edu.cn, chen.liu@cityu.edu.hk
 
+> [!NOTE]
+> **v1.0.0 is archived.** This release is frozen as the version described in
+> our ACL 2026 System Demonstrations paper. We are building the next version
+> of QFinZero with more powerful functions; this branch receives fixes only.
+
 ## Abstract
 
 Large language model (LLM) agents are increasingly applied to financial decision-making tasks that require interaction with external tools such as market data, news, and trade execution. Existing systems are fragmented across task-specific APIs, which introduces inconsistent schemas, brittle integration, and weak reproducibility. QFinZero addresses this gap with a unified trading environment that standardizes three core capabilities: multi-frequency market and derivatives data access (UPQ), structured news and event retrieval (ESP), and a stateful brokerage simulator with explicit order lifecycle management (PMB). All tools expose consistent JSON schemas and time-aligned interfaces, enabling agents to autonomously retrieve information, manage portfolio state, and execute trades within a coherent framework. By abstracting financial interaction into composable, agent-invokable primitives, QFinZero reduces engineering overhead and supports reproducible evaluation with deterministic replay and comprehensive logging.
 
+## What is in v1.0
+
+- **Market data (UPQ, Rust).** Daily and minute bars and minute BBO for US
+  stocks (regular, pre-market, after-hours and the Blue Ocean overnight
+  session), China A-shares, OPRA options with intraday chains and Greeks,
+  futures on CME session dates, crypto, FX and Treasury yields. Prices are
+  stored as traded; splits and dividends are applied on read.
+- **News and events (ESP).** Benzinga and Tushare news (each article says
+  whether it has the full text, a summary or only a headline), earnings and
+  macro calendars, all point-in-time.
+- **Paper broker (PMB).** A step-driven simulator: market, limit and stop
+  orders with regular, extended and overnight hours, margin, options filled
+  against the quote, futures with daily settlement, checkpoints and
+  deterministic replay.
+- **Time lock.** Bind a connection to a trading session or a fixed time and
+  every data tool answers as of that moment, enforced by the server.
+- **For agents.** 69 MCP tools on one endpoint, API keys with scopes, a chat
+  console that works with any OpenAI- or Anthropic-compatible model, a factor
+  research DSL and a benchmark of 104 tasks (`qfz-bench`).
+- **Console.** QFZView charts with session shading and option chains, a broker
+  terminal, news, calendars, a data-availability map and data setup.
+- **Data platform.** `qfz-data` downloads and converts massive, Databento and
+  Tushare data, indexes raw files in place, and ships a synthetic sample so
+  everything runs without a vendor account.
+
 ## Quick start
 
 ```bash
+git clone https://github.com/CityU-MLO/qfinzero && cd qfinzero
 export QFZ_ADMIN_PASSWORD='choose-a-long-password'
-docker compose up -d          # hub, all services, web UI and a synthetic sample dataset
+docker compose up -d          # hub, all services, web UI and the synthetic sample
 # open http://localhost:19777 and sign in as admin
 ```
 
-From source, with the sample data: see [Getting started](docs/en/getting-started.md).
+Then create an API key and query it from curl, Python or an MCP client:
 
-## The unified server
+```python
+from qfinzero.clients.upq import UPQClient       # export QFZ_API_KEY=qfz_…
 
-QFinZero runs as **one server on a single public port** (`19777`). It fronts
-everything:
-
-| Path | Serves |
-|------|--------|
-| `/` | Website: landing page, `/login`, and the signed-in console (`/chat`, `/broker`, `/data`, `/account`, …) — **incl. its own `/api/*` backend** |
-| `/auth/*` | Sign-in, API keys and user management |
-| `/svc/upq/*` | Market data (UPQ) — raw REST |
-| `/svc/esp/*` | News & events (ESP) — raw REST |
-| `/svc/pmb/*` | Paper broker (PMB) — raw REST |
-| `/svc/playground/*` | Chat agent backend — raw REST |
-| `/svc/data-admin/*` | Data protocol control plane — raw REST |
-| `/mcp` | MCP server (streamable-HTTP) — LLM tools |
-| `/health` | Hub + all children status |
-
-`/api/*` is reserved for the web UI's backend-for-frontend (it maps to the
-services with the UI's own path conventions); direct/raw service REST lives under
-`/svc/*` so the two never collide.
-
-```bash
-./scripts/serve.sh                 # start everything on http://127.0.0.1:19777
-# open http://127.0.0.1:19777           (web UI)
-# curl http://127.0.0.1:19777/health    (hub + children)
-# curl http://127.0.0.1:19777/svc/upq/health
+with UPQClient("http://localhost:19777/svc/upq") as upq:
+    print(upq.stock_daily(["ACME"], "2025-03-17", "2025-03-28"))
 ```
 
-You launch one command and hit one port. Under the hood the hub **supervises**
-the individual services on localhost (they're no longer exposed directly), and
-mounts the **MCP** server in-process. Override the port with `QFZ_SERVER_PORT`.
+- [Quick start](docs/en/quickstart.md): API key, REST, Python clients, MCP and time lock in five minutes.
+- [Getting started](docs/en/getting-started.md): installing from source and a tour of the console.
 
-### Architecture
+## Architecture
+
+QFinZero runs as one server on one port (`19777`). The hub supervises the
+services on localhost and serves the web UI, the raw service APIs and the MCP
+endpoint:
 
 ```
-        LLM Agent / User / MCP client
+        LLM agent / user / MCP client
                      │
                      v
    ┌──────────────────────────────────────────┐
-   │        qfinzero-server  :19777           │   one public port
-   │  /  → Web UI      /mcp → MCP (in-proc)     │
-   │  /api/* → reverse proxy ↓                 │
-   └───┬─────┬─────┬─────┬─────┬───────────────┘
-       │     │     │     │     │  (localhost children, supervised by the hub)
-       v     v     v     v     v
-     UPQ   ESP   PMB  playgr. data-admin      + Next.js dashboard
-    (Rust)                                     (Node)
-       ▲     │
-       │     v
-       │  MongoDB + SQLite
-       └── PMB reads market data from UPQ
+   │       qfinzero-server  :19777            │
+   │  /  web UI     /mcp  MCP tools            │
+   │  /auth  sign-in, keys    /svc/*  REST     │
+   └───┬─────┬─────┬──────┬──────────┬────────┘
+       v     v     v      v          v       (localhost, supervised)
+     UPQ   ESP   PMB   playground  data-admin
+    (Rust)   │     │
+       ▲     v     │
+       │  MongoDB  │
+       │  + SQLite │
+       └───────────┘  PMB reads market data from UPQ
 ```
 
-**Modes:** `QFZ_SUPERVISE=0` runs the hub as a pure gateway to services managed
-elsewhere; `QFZ_SERVE_UI=0` skips the Next.js UI. The internal service ports
-(193xx) still exist for standalone/debug use via `scripts/run_all.sh`.
-
-### Core Components
-
-**Unified Price Query (UPQ)** provides multi-resolution price data (minute and daily bars) for equities (US + CN A-shares), options (OPRA), and treasury yields through a single API. Agents query structured market states without handling vendor-specific formatting. Stock prices are stored raw/as-traded; pass `adjust=split` or `adjust=total` to apply split / split+dividend adjustment on read (default `none`).
-
-**News Pushing Pipeline (ESP)** aggregates news articles (MongoDB), earnings calendars (Benzinga), and US economic events (NASDAQ) into a canonical event schema. Supports three query modes: upcoming events, recently occurred events, and arbitrary time windows. All times normalized to UTC.
-
-**Paper Money Broker (PMB)** is a step-driven brokerage simulator supporting market/limit/stop orders, margin accounts, and explicit order lifecycle (pending, filled, canceled). Time advances only when the agent calls `step`, enabling deterministic replay.
-
-PMB checkpoints let experiments branch from an identical account, clock,
-portfolio, order book, random-generator and history state. Export with
-`GET /svc/pmb/v1/sessions/{session_id}/checkpoint`, then create an independent
-branch with `POST /svc/pmb/v1/sessions/restore` using the returned JSON body.
-
-### Service Dependencies
-
-- **PMB -> UPQ**: PMB fetches market data from UPQ at session creation.
-- **ESP -> MongoDB + SQLite**: ESP reads from three local data sources.
-- **UPQ** is fully independent.
-
-## Agents: time lock, trading sessions and research
-
-- **Time lock.** Every UPQ query takes `as_of`; bind an agent to a PMB session
-  (`X-QFZ-Session` header, `QFZ_TIME_LOCK_SESSION`, or `session_id`) and every
-  data tool answers as of the session's current bar, enforced server-side.
-- **Trading sessions.** Orders carry `REGULAR`, `EXTENDED` or `OVERNIGHT`
-  trading hours (20:00–04:00 ET overnight belongs to the next trading day);
-  DAY/GTD expiry and volume-capped partial fills are enforced;
-  `pmb_step_until` wakes the agent on a fill, a price, a time or the open.
-- **Quotes.** Minute NBBO stores for stocks and options, an intraday option
-  chain snapshot with Greeks off the mid, and options that fill against the
-  book in minute sessions.
-- **Research.** `qfz-research eval|backtest "cs_rank(-pct(close, 15))" …` (and
-  the MCP tools `research_eval_factor` / `research_backtest`) evaluate a factor
-  expression with IC, quantile spreads, turnover and cost-aware backtests.
-
-Details: [docs/en/platform-guide.md](docs/en/platform-guide.md).
-
-## Accounts and sign-in
-
-The hub requires sign-in for the console, `/svc/*` and `/mcp`. Roles are
-viewer (read), researcher (trade, research, MCP) and admin (also data and
-users). Agents use API keys (`Authorization: Bearer qfz_…`) from the account
-page or `qfz-auth create-key`. PMB accounts and sessions are private to the
-user who created them.
-
-```bash
-qfz-auth create-user you --role admin    # or set QFZ_ADMIN_PASSWORD before the first start
-qfz-server                                # then open http://127.0.0.1:19777/login
-```
-
-`QFZ_AUTH_MODE=off` disables sign-in for local development. All settings:
-[platform guide §5](docs/en/platform-guide.md#6-accounts-roles-and-api-keys).
-
-## Data Pipeline
-
-UPQ is fed by a built-in, out-of-the-box pipeline (`qfz-data`) that manages three
-raw market-data sources **in place** (never copied) and converts them into UPQ's
-storage format:
-
-| Vendor | Markets | Raw location (default) |
-|--------|---------|------------------------|
-| massive | US stocks, options (OPRA), treasury yields, corporate actions | `/data/massive_data` |
-| tushare | CN A-shares (+ dividends) | `/data/tushare_data` |
-| databento | US stocks + options (OPRA), DBN or parquet | `/data/databento` |
-
-Both sources are normalized into one storage root with a single unified
-**corporate-actions** table. Splits use fractional ratios (e.g. CN 送转 "10转15"
-→ 1.5; reverse splits supported), and each dividend carries a precomputed price
-ratio so UPQ applies split / dividend adjustment on read without re-deriving it.
-
-```bash
-pip install -e ".[pipeline]"          # adds duckdb + pyarrow + polars
-
-# Defaults live under the data root (QFZ_DATA_ROOT=/data/qfinzero); override if needed:
-export QFZ_DATA_ROOT=/data/qfinzero    # STORAGE_ROOT defaults to $QFZ_DATA_ROOT/upq
-export RAW_MASSIVE_DIR=/data/massive_data
-export RAW_TUSHARE_DIR=/data/tushare_data
-export RAW_DATABENTO_DIR=/data/databento
-
-qfz-data status                       # what raw data exists + conversion state
-qfz-data convert --market us --all    # US stocks + options + rates + corp actions
-qfz-data convert --market cn --all    # CN A-shares + corp actions
-qfz-data convert --all                # everything (incremental + idempotent)
-qfz-data convert --vendor databento   # only Databento files (--jobs N to parallelize)
-qfz-data validate                     # row-count / schema checks on storage
-```
-
-The converter writes byte-compatible parquet (`stock_daily/`, `stock_minute/`,
-`option_day/`, `option_minute/` partitioned by `trade_date=`; plus `rates/` and
-`corporate_actions/`) that the UPQ service reads directly. Point the UPQ service
-at the same `STORAGE_ROOT`.
-
-### Databento
-
-Full reference: [docs/en/data-adapters.md](docs/en/data-adapters.md).
-`pip install -e ".[databento]"` adds the DBN reader and the historical API
-client. Point `RAW_DATABENTO_DIR` at any folder of Databento files: each
-`*.dbn`, `*.dbn.zst` or Databento-exported `*.parquet` is identified from its own
-header, so batch downloads, per-symbol folders and mixed layouts all work.
-
-| Databento schema | UPQ stores |
-|------------------|------------|
-| `ohlcv-1m`, `ohlcv-1s` | minute + daily |
-| `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily |
-| `trades`, `tbbo`, `tcbbo`, `mbp-1`, `mbp-10` | minute + daily, built from trade records |
-| `cbbo-*`, `bbo-*` (and a futures venue's `mbp-1`) | `option_quote_minute` / `stock_quote_minute` / `future_quote_minute` (last book per minute) |
-| definition, statistics, status | indexed, not converted (futures `statistics` give the settlement) |
-| `cmbp-1`, `mbo` | indexed, out of scope: QFinZero stops at minute bars and BBO |
-
-`OCEA.MEMOIR` (Blue Ocean) `ohlcv-1m` and `bbo-1m` add the 20:00–04:00 ET
-overnight session: night minute bars, night quotes and one
-`stock_overnight_daily` bar per session.
-
-`OPRA.*` datasets become `option_minute` / `option_day` with OSI symbols rewritten
-to the UPQ form (`SPY   250117C00500000` → `O:SPY250117C00500000`). US equity
-datasets (`XNAS.ITCH`, `EQUS.*`, `DBEQ.*`, …) become `stock_minute` /
-`stock_daily`; futures venues (`GLBX.MDP3`, ICE, Nodal) become `future_minute` /
-`future_daily` / `future_quote_minute` on CME session dates. Minute bars use `ts_event`; trade
-dates and daily bars follow US/Eastern, with daily open/high/low/close taken
-from the 09:30–16:00 session and volume from the whole day.
-
-Databento writes `part-databento-0000.parquet` next to the massive part in each
-`trade_date=` partition and only **fills** tickers massive did not write for
-that date, so the two vendors never double count. A single-venue feed such as
-`XNAS.ITCH` reports that venue's volume only; a consolidated feed (`EQUS.*`,
-`OPRA.*`) wins when several sources cover the same ticker. Extracted bars are
-cached per raw file under `$STORAGE_ROOT/_staging/databento`, so re-runs only
-read new or changed files.
-
-```bash
-qfz-data config --set databento.api_key=db-…
-qfz-data scan databento                      # datasets the key can query
-# dry-run by default: quotes the cost and lists the files it would write
-qfz-data acquire databento --dataset OPRA.PILLAR --schema tcbbo \
-    --symbols SPY.OPT --stype-in parent --start 2026-09-01 --end 2026-09-05
-# paid data needs an explicit ceiling in USD
-qfz-data acquire databento --dataset EQUS.MINI --schema ohlcv-1m \
-    --symbols SPY,QQQ --start 2026-01-02 --end 2026-01-31 --max-cost 5 --run
-qfz-data convert --vendor databento --jobs 8
-```
-
-### Data-admin — the operator control plane (CLI + Web)
-
-Beyond convert, `qfz-data` manages vendor credentials, permission scans,
-downloads, the update schedule, and data exploration — the "Integrated Data
-Protocol" surface:
-
-```bash
-qfz-data config --set tushare.token=…      # masked, stored at $QFZ_DATA_ROOT/_state/qfz.config.json
-qfz-data scan massive                       # list flat-files datasets your S3 key can read
-qfz-data scan tushare                       # validate the CN token
-qfz-data scan databento                     # validate the Databento key
-qfz-data schedule apply                     # install the cron cadence from the config
-qfz-data explore --symbols stock_daily      # per-symbol coverage in a store
-qfz-data setup-state                         # first-run wizard vs. status
-```
-
-The same surface is served by the **data-admin service** (`infra/data-admin`,
-`:19340`) — config/scan, freshness sources, update/download **jobs with SSE log
-streaming**, schedule, and explorer — and driven from the dashboard-web **Data**
-tab (setup wizard, credentials + scan, pipeline manager, schedule, explorer).
-Start it with the rest: `./scripts/run_all.sh` (or `./scripts/run_all.sh data-admin`).
-
-### Data root
-
-All QFinZero-owned data lives under a single root, `QFZ_DATA_ROOT` (default
-`/data/qfinzero`):
-
-```
-/data/qfinzero/
-├── upq/    UPQ price storage (STORAGE_ROOT) — built by `qfz-data convert`
-├── esp/    ESP event databases (benzinga_earnings.sqlite3, nasdaq_econ_events.sqlite3)
-└── raw/    symlinks to shared raw vendor data (massive, tushare, databento) — read in place
-```
-
-## Installation
-
-```bash
-pip install -e .
-```
-
-This installs the `qfinzero` package with all client libraries:
-
-```python
-from qfinzero.clients.upq import UPQClient
-from qfinzero.clients.esp import ESPClient
-from qfinzero.clients.pmb import PMBClient
-```
-
-## Quick Start
-
-Ports default to `19300` to `19390`. Override them with environment variables, or create a root `.env` from `.env.example` for local development overrides.
-
-### Start All Services
-
-```bash
-./scripts/run_all.sh           # start all
-./scripts/run_all.sh pmb esp   # start specific services
-./scripts/status.sh            # check what's running
-./scripts/stop_all.sh          # stop all
-```
-
-### Start Individually
-
-```bash
-# Dashboard Web (Next.js frontend)
-cd infra/dashboard-web
-pnpm install --no-frozen-lockfile
-pnpm build
-PORT=19300 \
-PMB_BASE_URL=http://127.0.0.1:19380 \
-ESP_BASE_URL=http://127.0.0.1:19330 \
-UPQ_BASE_URL=http://127.0.0.1:19350 \
-PLAYGROUND_SERVICE_URL=http://127.0.0.1:19390 \
-pnpm start
-# open http://127.0.0.1:19300
-
-# UPQ (Rust — build first)
-cd infra/upq
-cargo build --release
-STORAGE_ROOT=~/upq_storage cargo run -p upq-service
-# curl http://127.0.0.1:19350/health
-
-# ESP (Python)
-cd infra/esp
-pip install -r requirements.txt
-python main.py
-# curl http://127.0.0.1:19330/esp/health
-
-# PMB (Python — requires UPQ running)
-cd infra/pmb
-pip install -r requirements.txt
-python main.py
-# curl http://127.0.0.1:19380/v1/health
-
-# Playground (Python — expects PMB/ESP/UPQ running)
-cd infra/playground
-pip install -r requirements.txt
-PLAYGROUND_PORT=19390 \
-QFINZERO_PMB_URL=http://127.0.0.1:19380 \
-QFINZERO_ESP_URL=http://127.0.0.1:19330 \
-QFINZERO_UPQ_URL=http://127.0.0.1:19350 \
-python main.py
-# curl http://127.0.0.1:19390/health
-```
-
-### Start Monitoring Frontend (Dev Mode)
-
-```bash
-cd infra/dashboard-web
-pnpm install --no-frozen-lockfile
-pnpm dev
-# open http://127.0.0.1:19400
-```
-
-### Use the Clients
-
-```python
-from qfinzero.clients.upq import UPQClient
-from qfinzero.clients.esp import ESPClient
-from qfinzero.clients.pmb import PMBClient
-
-# Price data
-with UPQClient() as upq:
-    bars = upq.stock_daily(["AAPL", "NVDA"], "2025-01-06", "2025-01-31")
-
-# News and events
-with ESPClient() as esp:
-    events = esp.query_events(mode="upcoming", horizon_minutes=120)
-    earnings = esp.earnings_calendar(tickers=["AAPL"], start_date="2025-01-01", end_date="2025-03-31")
-    triggers = esp.next_triggers(tickers=["SPY", "QQQ"], min_importance="high")
-
-# Paper trading
-with PMBClient() as pmb:
-    acct = pmb.create_account(initial_cash=100000.0, start_date="2025-01-06")
-    sess = pmb.create_session(
-        account_id=acct["account_id"],
-        frequency="1d", start_ts="2025-01-06", end_ts="2025-01-31",
-        universe={"stocks": ["AAPL"]},
-    )
-    result = pmb.step(sess["session_id"])
-    pmb.buy(sess["session_id"], acct["account_id"], "AAPL", 100)
-```
-
-## Project Structure
-
-```
-qfinzero/
-├── qfinzero/                   # Python package
-│   ├── __init__.py
-│   └── config.py               # Global port/path configuration
-├── clients/                    # Client libraries
-│   ├── upq/                    #   UPQ Python client
-│   ├── esp/                    #   ESP Python client
-│   └── pmb/                    #   PMB Python client
-├── infra/                      # Service implementations
-│   ├── upq/                    #   UPQ server (Rust workspace)
-│   ├── esp/                    #   ESP server (FastAPI)
-│   ├── pmb/                    #   PMB server (FastAPI)
-│   ├── playground/             #   Playground backend (FastAPI / LangGraph)
-│   └── dashboard-web/          #   Next.js frontend
-├── demos/                      # Usage examples
-│   ├── upq/                    #   Price query demos
-│   ├── esp/                    #   Event query demos
-│   └── pmb/                    #   Paper trading demos
-├── docs/                       # Service documentation
-│   ├── upq/                    #   UPQ API docs + OpenAPI
-│   ├── esp/                    #   ESP API docs + OpenAPI
-│   └── pmb/                    #   PMB API docs + OpenAPI
-├── qfinzero/pipeline/          # qfz-data pipeline (raw-source mgmt + UPQ conversion)
-├── .env.example                # Example local overrides
-├── scripts/                    # Service management
-│   ├── run_all.sh
-│   ├── stop_all.sh
-│   └── status.sh
-└── pyproject.toml
-
-# Data lives OUTSIDE the repo under QFZ_DATA_ROOT (default /data/qfinzero):
-/data/qfinzero/
-├── upq/                        # UPQ price storage (parquet)
-├── esp/                        # ESP databases (benzinga_earnings, nasdaq_econ_events)
-└── raw/                        # symlinks to shared raw vendor data (massive, tushare, databento)
-```
-
-## Configuration
-
-Configuration follows a simple layered model:
-
-1. Environment variables take highest priority.
-2. Root `.env` is an optional local development override.
-3. Code defaults fall back to the standard `19300` to `19390` port range.
-
-Start by copying `.env.example` if you want local overrides:
-
-```bash
-cp .env.example .env
-```
-
-`qfinzero/config.py` reads the same environment variables so clients and services stay consistent.
-
-| Service | Port | Env Override |
-|---------|------|-------------|
-| Dashboard Web | 19300 | `DASHBOARD_PORT` |
-| PMB | 19380 | `PMB_PORT` |
-| ESP | 19330 | `ESP_PORT` |
-| UPQ | 19350 | `UPQ_PORT` (service reads `PORT`) |
-| Playground | 19390 | `PLAYGROUND_PORT` |
-
-Related service URL overrides:
-
-- `PMB_BASE_URL`, `ESP_BASE_URL`, `UPQ_BASE_URL` for `dashboard-web`
-- `PLAYGROUND_SERVICE_URL` for the web playground proxy
-- `QFINZERO_PMB_URL`, `QFINZERO_ESP_URL`, `QFINZERO_UPQ_URL` for `playground`
-
-Data paths (all default under `QFZ_DATA_ROOT`, default `/data/qfinzero`):
-
-| Data | Default | Env Override |
-|------|---------|-------------|
-| Data root | `/data/qfinzero` | `QFZ_DATA_ROOT` |
-| UPQ price storage | `$QFZ_DATA_ROOT/upq` | `STORAGE_ROOT` |
-| ESP earnings DB | `$QFZ_DATA_ROOT/esp/benzinga_earnings.sqlite3` | `EARNINGS_DB` |
-| ESP econ-events DB | `$QFZ_DATA_ROOT/esp/nasdaq_econ_events.sqlite3` | `ECON_EVENTS_DB` |
-| Raw massive (shared) | `/data/massive_data` | `RAW_MASSIVE_DIR` |
-| Raw tushare (shared) | `/data/tushare_data` | `RAW_TUSHARE_DIR` |
-| Raw Databento (shared) | `/data/databento` | `RAW_DATABENTO_DIR` |
+| Path | Serves |
+|------|--------|
+| `/` | landing page, `/login`, the console and `/docs` |
+| `/auth/*` | sign-in, API keys, users |
+| `/svc/upq/*`, `/svc/esp/*`, `/svc/pmb/*` | market data, news and events, paper broker (REST) |
+| `/svc/playground/*`, `/svc/data-admin/*` | chat backend, data administration |
+| `/mcp` | MCP server (streamable HTTP) |
+| `/health` | hub and every child |
+
+The console, `/svc/*` and `/mcp` need a signed-in user or an API key; roles
+are viewer, researcher and admin. See the
+[platform guide](docs/en/platform-guide.md) for the time lock, trading
+sessions, quotes, research and accounts.
 
 ## Documentation
 
 The web UI serves all of it as a searchable, bilingual doc hub at `/docs`.
 
-- Start: [Getting started](docs/en/getting-started.md) · [Platform guide](docs/en/platform-guide.md) (time lock, sessions, quotes, research, accounts)
-- Guides: [Market data for agents](docs/en/upq/agent-guide.md) · [Trading for agents](docs/en/pmb/agent-guide.md) · [Broker terminal](docs/en/pmb/broker-terminal.md) · [Agent benchmark](docs/en/bench.md) · [Sample dataset](docs/en/sample-data.md) · [Data adapters](docs/en/data-adapters.md)
-- Reference: [MCP tools](docs/en/mcp-tools.md) · [UPQ](docs/en/upq/README.md) ([OpenAPI](docs/upq/openapi.yaml)) · [ESP](docs/en/esp/README.md) ([OpenAPI](docs/esp/openapi.yaml)) · [PMB](docs/en/pmb/README.md) ([OpenAPI](docs/pmb/openapi.yaml)) · [Configuration](docs/en/configuration.md) · [Time zones](docs/en/conventions/timezone.md)
-- Operations: [Deployment and operations](docs/en/operations.md) · [Changelog](CHANGELOG.md)
-- 中文文档: [docs/cn/README.md](docs/cn/README.md)
+- **Start:** [Quick start](docs/en/quickstart.md) · [Getting started](docs/en/getting-started.md) · [Platform guide](docs/en/platform-guide.md)
+- **Guides:** [Chat](docs/en/chat.md) · [Market data for agents](docs/en/upq/agent-guide.md) · [Trading for agents](docs/en/pmb/agent-guide.md) · [QFZView](docs/en/qfzview.md) · [Broker terminal](docs/en/pmb/broker-terminal.md) · [Agent benchmark](docs/en/bench.md) · [Sample dataset](docs/en/sample-data.md)
+- **Data:** [Data setup](docs/en/data-setup.md) · [Data adapters](docs/en/data-adapters.md) (massive, Databento, Tushare)
+- **Reference:** [MCP tools](docs/en/mcp-tools.md) · [UPQ](docs/en/upq/README.md) ([OpenAPI](docs/upq/openapi.yaml)) · [ESP](docs/en/esp/README.md) ([OpenAPI](docs/esp/openapi.yaml)) · [PMB](docs/en/pmb/README.md) ([OpenAPI](docs/pmb/openapi.yaml)) · [Configuration](docs/en/configuration.md) · [Time zones](docs/en/conventions/timezone.md)
+- **Operations:** [Deployment and operations](docs/en/operations.md) · [Changelog](CHANGELOG.md)
+
+## Project structure
+
+```
+qfinzero/          Python package: hub (server/), auth, data pipeline (pipeline/, index/, admin/),
+                   research, benchmark (bench/), sample data (sample/), clients
+clients/           UPQ, ESP and PMB Python clients (qfinzero.clients.*)
+mcp/               the MCP server
+infra/upq/         UPQ, the market-data service (Rust workspace)
+infra/esp/         ESP, news and events (FastAPI)
+infra/pmb/         PMB, the paper broker (FastAPI)
+infra/playground/  chat backend (FastAPI, LangGraph)
+infra/data-admin/  data administration service
+infra/dashboard-web/  web UI (Next.js)
+docs/              documentation (en, cn) and OpenAPI documents
+scripts/, docker/  service scripts, container entry point
+```
+
+Data lives outside the repository under `QFZ_DATA_ROOT` (default
+`/data/qfinzero`): UPQ storage in `upq/`, ESP databases in `esp/`, state in
+`_state/`.
+
+## Citation
+
+If you use QFinZero, please cite:
+
+```bibtex
+@inproceedings{luo2026qfinzero,
+  title={QFinZero: A Unified Financial Toolchain for LLM-Based Trading Agents},
+  author={Luo, Haochen and Yifan, LI and Ko, Ho Tin and Minh, An Binh and Xu, Junjie and Hin, Tang Pok and Wong, Wang Chak and Yuan, Gao and Lai, Zhengzhao and Zhang, Yuan and others},
+  booktitle={Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations)},
+  pages={68--77},
+  year={2026}
+}
+```
 
 ## License
 

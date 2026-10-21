@@ -47,6 +47,34 @@ systemctl --user status qfinzero-hub
 Build UPQ in release mode (`cargo build --release -p upq-service` in
 `infra/upq`) and the UI (`pnpm build` in `infra/dashboard-web`) before the first start.
 
+## Running the services one by one
+
+For development the services also run without the hub, each on its own port
+(`19300` to `19390` by default; see [Configuration](configuration.md#hub-and-ports)).
+Sign-in does not apply then.
+
+```bash
+./scripts/run_all.sh           # start all
+./scripts/run_all.sh pmb esp   # start some
+./scripts/status.sh            # what is running
+./scripts/stop_all.sh          # stop all
+```
+
+or by hand:
+
+```bash
+(cd infra/upq && cargo build --release && STORAGE_ROOT=~/upq_storage cargo run -p upq-service)   # :19350
+(cd infra/esp && pip install -r requirements.txt && python main.py)                             # :19330
+(cd infra/pmb && pip install -r requirements.txt && python main.py)                             # :19380, needs UPQ
+(cd infra/playground && pip install -r requirements.txt && \
+  QFINZERO_PMB_URL=http://127.0.0.1:19380 QFINZERO_ESP_URL=http://127.0.0.1:19330 \
+  QFINZERO_UPQ_URL=http://127.0.0.1:19350 python main.py)                                       # :19390
+(cd infra/dashboard-web && pnpm install && pnpm dev)                                            # :19400, dev mode
+```
+
+The Python clients then talk to the services directly
+(`UPQClient()`, `ESPClient()`, `PMBClient()` use these ports by default).
+
 ## HTTPS and the reverse proxy
 
 Terminate TLS at the proxy and forward `X-Forwarded-Proto` and

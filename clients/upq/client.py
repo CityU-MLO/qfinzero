@@ -13,6 +13,8 @@ Usage:
                                   strike_min=130, strike_max=150)
 """
 
+import os
+
 import requests
 from datetime import datetime, timezone
 from typing import Optional
@@ -34,10 +36,16 @@ class UPQClient:
 
     DEFAULT_URL = UPQ_URL
 
-    def __init__(self, base_url: str = None, timeout: int = 30):
+    def __init__(self, base_url: str = None, timeout: int = 30, api_key: str = None):
+        """``base_url``: the service (default) or the hub's ``/svc/upq`` path, e.g.
+        ``http://localhost:19777/svc/upq``; ``api_key`` (or ``QFZ_API_KEY``) signs the
+        requests for the hub (``Authorization: Bearer qfz_…``)."""
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+        key = api_key or os.environ.get("QFZ_API_KEY")
+        if key:
+            self._session.headers["Authorization"] = f"Bearer {key}"
 
     def __enter__(self):
         return self

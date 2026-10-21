@@ -21,6 +21,8 @@ Usage:
             pmb.buy(sess["session_id"], acct["account_id"], "AAPL", 10)
 """
 
+import os
+
 import requests
 from typing import Optional
 
@@ -99,10 +101,16 @@ class PMBClient:
 
     DEFAULT_URL = PMB_URL
 
-    def __init__(self, base_url: str = None, timeout: int = 30, headers: dict = None):
+    def __init__(self, base_url: str = None, timeout: int = 30, headers: dict = None, api_key: str = None):
+        """``base_url``: the service (default) or the hub's ``/svc/pmb`` path, e.g.
+        ``http://localhost:19777/svc/pmb``; ``api_key`` (or ``QFZ_API_KEY``) signs the
+        requests for the hub (``Authorization: Bearer qfz_…``)."""
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+        key = api_key or os.environ.get("QFZ_API_KEY")
+        if key:
+            self._session.headers["Authorization"] = f"Bearer {key}"
         if headers:   # e.g. the hub identity (x-qfz-user / x-qfz-role) to scope accounts
             self._session.headers.update(headers)
 

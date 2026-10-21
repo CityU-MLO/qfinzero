@@ -10,6 +10,8 @@ Usage:
         body = esp.news_body("some_article_id")
 """
 
+import os
+
 import requests
 from typing import Optional
 
@@ -30,10 +32,16 @@ class ESPClient:
 
     DEFAULT_URL = ESP_URL
 
-    def __init__(self, base_url: str = None, timeout: int = 30):
+    def __init__(self, base_url: str = None, timeout: int = 30, api_key: str = None):
+        """``base_url``: the service (default) or the hub's ``/svc/esp`` path, e.g.
+        ``http://localhost:19777/svc/esp``; ``api_key`` (or ``QFZ_API_KEY``) signs the
+        requests for the hub (``Authorization: Bearer qfz_…``)."""
         self.base_url = (base_url or self.DEFAULT_URL).rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+        key = api_key or os.environ.get("QFZ_API_KEY")
+        if key:
+            self._session.headers["Authorization"] = f"Bearer {key}"
 
     def __enter__(self):
         return self
