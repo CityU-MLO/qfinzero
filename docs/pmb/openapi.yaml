@@ -8,7 +8,7 @@ info:
 
     PMB requires UPQ service for market data. Sessions prefetch all needed
     bars at creation time for zero I/O during stepping.
-  version: 0.1.0
+  version: 1.0.0
   contact:
     name: QFinZero
 

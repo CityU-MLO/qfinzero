@@ -26,7 +26,7 @@ from fastapi.responses import StreamingResponse  # noqa: E402
 from qfinzero.admin import acquire, config_store, explore, scan, scheduler, setup  # noqa: E402
 from jobs import registry, sse_logs  # noqa: E402
 
-app = FastAPI(title="QFinZero data-admin", version="0.1.0")
+app = FastAPI(title="QFinZero data-admin", version="1.0.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -44,7 +44,7 @@ def _orchestrator():
 # ── health ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "data-admin", "version": "0.1.0"}
+    return {"status": "ok", "service": "data-admin", "version": "1.0.0"}
 
 
 # ── setup / config ──────────────────────────────────────────────────────────

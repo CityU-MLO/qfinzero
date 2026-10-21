@@ -16,7 +16,7 @@ info:
       "message": "start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS"
     }
     ```
-  version: 0.1.0
+  version: 1.0.0
   contact:
     name: UPQ Team
 

@@ -3,7 +3,16 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
-## Unreleased: QFZView and the broker
+## 1.0.0 (2026-10-21)
+
+The first stable release. On top of 0.1.0: an intraday platform (time lock,
+trading sessions incl. Blue Ocean overnight, intraday option chains, futures,
+research DSL, accounts and API keys), a data utility (raw-data layouts, keys
+and budgets, downloads, coverage map), crypto and FX, a raw-data index that
+reads massive and Databento in place, QFZView with session shading and option
+chains, the broker's overnight trading, and MCP tools for all of it (69).
+
+### QFZView, the broker, news and the data platform
 
 Added:
 
@@ -116,7 +125,7 @@ Fixed:
   loader takes Benzinga `.zip` archives (`--files`) and backfills content
   levels (`--backfill-content`).
 
-## Unreleased: data utility
+### Data utility
 
 Added:
 
@@ -155,7 +164,7 @@ Changed:
   page moved from `/docs` to `/svc/openapi`.
 - `docs/upq/openapi.yaml` documents `/dividends/query`.
 
-## Unreleased: intraday platform
+### Intraday platform
 
 Upgrade notes:
 

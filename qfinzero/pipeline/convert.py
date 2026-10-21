@@ -247,7 +247,7 @@ class Converter:
             if f.error:
                 why = "unreadable"
             elif f.out_of_scope:
-                why = "out of scope"   # cmbp-1, MBO outside Blue Ocean
+                why = "out of scope"   # cmbp-1, mbo
             elif f.role in ("trades", "ohlcv"):
                 why = "unsupported dataset"
             else:

@@ -13,7 +13,7 @@
    },
    "base": "/svc/upq",
    "scope": "market-data",
-   "version": "0.1.0",
+   "version": "1.0.0",
    "intro": "UPQ (Rust Price Query Service) - Price query service with API compatibility against the Python price_query_service.\n\n## Date/Time Formats\n- **ISO Datetime**: `YYYY-MM-DDTHH:MM:SS` (required for minute-level endpoints)\n- **Date**: `YYYY-MM-DD` (for daily endpoints)\n\n## Error Responses\nAll errors return JSON with `code` and `message` fields:\n```json\n{\n  \"code\": \"invalid_argument\",\n  \"message\": \"start/end must be ISO datetime: YYYY-MM-DDTHH:MM:SS\"\n}\n```",
    "endpoints": [
     {

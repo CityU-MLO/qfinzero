@@ -188,11 +188,14 @@ header, so batch downloads, per-symbol folders and mixed layouts all work.
 |------------------|------------|
 | `ohlcv-1m`, `ohlcv-1s` | minute + daily |
 | `ohlcv-1h`, `ohlcv-1d`, `ohlcv-eod` | daily |
-| `trades`, `tbbo`, `tcbbo`, `mbp-1`, `mbp-10`, `cmbp-1`, `mbo` | minute + daily, built from trade records |
-| `cmbp-1`, `cbbo-*`, `bbo-*` | `option_quote_minute` / `stock_quote_minute` (last book per minute) |
-| definition, statistics, status | indexed, not converted |
+| `trades`, `tbbo`, `tcbbo`, `mbp-1`, `mbp-10` | minute + daily, built from trade records |
+| `cbbo-*`, `bbo-*` (and a futures venue's `mbp-1`) | `option_quote_minute` / `stock_quote_minute` / `future_quote_minute` (last book per minute) |
+| definition, statistics, status | indexed, not converted (futures `statistics` give the settlement) |
+| `cmbp-1`, `mbo` | indexed, out of scope: QFinZero stops at minute bars and BBO |
 
-`OCEA.MEMOIR` (Blue Ocean) adds 20:00–04:00 ET overnight minute bars.
+`OCEA.MEMOIR` (Blue Ocean) `ohlcv-1m` and `bbo-1m` add the 20:00–04:00 ET
+overnight session: night minute bars, night quotes and one
+`stock_overnight_daily` bar per session.
 
 `OPRA.*` datasets become `option_minute` / `option_day` with OSI symbols rewritten
 to the UPQ form (`SPY   250117C00500000` → `O:SPY250117C00500000`). US equity
@@ -200,8 +203,7 @@ datasets (`XNAS.ITCH`, `EQUS.*`, `DBEQ.*`, …) become `stock_minute` /
 `stock_daily`; futures venues (`GLBX.MDP3`, ICE, Nodal) become `future_minute` /
 `future_daily` / `future_quote_minute` on CME session dates. Minute bars use `ts_event`; trade
 dates and daily bars follow US/Eastern, with daily open/high/low/close taken
-from the 09:30–16:00 session and volume from the whole day. Only `T` records
-count as trades in MBO (`F` fills are the passive side of the same print).
+from the 09:30–16:00 session and volume from the whole day.
 
 Databento writes `part-databento-0000.parquet` next to the massive part in each
 `trade_date=` partition and only **fills** tickers massive did not write for

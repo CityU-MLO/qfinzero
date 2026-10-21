@@ -16,7 +16,7 @@ info:
     ## Pagination
     POST endpoints use cursor-based pagination. Pass `next_cursor` from a response
     as `cursor` in the next request to fetch the next page.
-  version: 0.1.0
+  version: 1.0.0
   contact:
     name: QFinZero
 
