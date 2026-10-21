@@ -1,8 +1,11 @@
 """Users, roles, API keys and signed browser sessions (stdlib only).
 
 * Users and API keys live in SQLite at ``$QFZ_DATA_ROOT/_state/auth.sqlite3``
-  (``QFZ_AUTH_DB`` overrides). Passwords are hashed with scrypt; API keys are
-  stored as SHA-256 digests and shown in the clear exactly once.
+  (``QFZ_AUTH_DB`` overrides). Passwords are hashed with scrypt. API keys are
+  looked up by their SHA-256 digest; a sealed copy of each token (see
+  :func:`seal`) lets its owner and admins show and copy it again later. The
+  sealing key is ``api_key_seal`` next to the database (mode 0600); without it
+  the tokens can no longer be shown, but they keep working.
 * Browser sessions are HMAC-signed cookies carrying the user id, role and a
   per-user *session version*; changing a password or disabling a user bumps
   the version, which invalidates every outstanding cookie.
@@ -195,13 +198,14 @@ class AuthStore:
             have = {r[1] for r in c.execute("PRAGMA table_info(api_keys)")}
             for col, ddl in (("scopes", "TEXT"), ("read_only", "INTEGER NOT NULL DEFAULT 0"),
                              ("expires_at", "REAL"), ("rate_per_min", "INTEGER"), ("note", "TEXT"),
-                             ("created_by", "TEXT")):
+                             ("created_by", "TEXT"), ("token_enc", "TEXT")):
                 if col not in have:
                     c.execute(f"ALTER TABLE api_keys ADD COLUMN {col} {ddl}")
         try:
             os.chmod(self.path, 0o600)
         except OSError:
             pass
+        self._seal_key: Optional[bytes] = None
 
     def _conn(self) -> sqlite3.Connection:
         c = sqlite3.connect(self.path, timeout=10)
@@ -319,6 +323,11 @@ class AuthStore:
     def _digest(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
+    def _sealing_key(self) -> bytes:
+        if self._seal_key is None:
+            self._seal_key = _secret_file(self.path.parent / "api_key_seal")
+        return self._seal_key
+
     def _check_scopes(self, user_id: int, scopes: Optional[list[str]]) -> Optional[list[str]]:
         if scopes is None:
             return None
@@ -346,10 +355,11 @@ class AuthStore:
         with self._lock, self._conn() as c:
             cur = c.execute(
                 "INSERT INTO api_keys (user_id, name, prefix, key_hash, created_at, scopes, read_only, expires_at, "
-                "rate_per_min, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "rate_per_min, note, created_by, token_enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (user_id, name, prefix, self._digest(token), time.time(),
                  json.dumps(scopes) if scopes is not None else None, int(bool(read_only)), expires_at,
-                 int(rate_per_min) if rate_per_min else None, (note or "")[:300], created_by))
+                 int(rate_per_min) if rate_per_min else None, (note or "")[:300], created_by,
+                 seal(self._sealing_key(), token)))
             key_id = cur.lastrowid
         return self.get_api_key(key_id), token
 
@@ -388,7 +398,7 @@ class AuthStore:
                 "scopes": json.loads(r["scopes"]) if r["scopes"] else None,
                 "read_only": bool(r["read_only"]), "expires_at": exp,
                 "expired": bool(exp and exp < time.time()), "rate_per_min": r["rate_per_min"],
-                "note": r["note"] or "", "created_by": r["created_by"]}
+                "note": r["note"] or "", "created_by": r["created_by"], "revealable": bool(r["token_enc"])}
 
     _KEY_SQL = ("SELECT k.*, u.username FROM api_keys k JOIN users u ON u.id = k.user_id")
 
@@ -423,6 +433,20 @@ class AuthStore:
                 c.execute("INSERT INTO api_key_usage (key_id, day, requests, denied) VALUES (?, ?, ?, ?) "
                           "ON CONFLICT(key_id, day) DO UPDATE SET requests = requests + excluded.requests, "
                           "denied = denied + excluded.denied", (kid, day, n, d))
+
+    def reveal_api_key(self, key_id: int, user_id: Optional[int] = None) -> str:
+        """The token of a live key (``user_id`` restricts to that owner)."""
+        with self._conn() as c:
+            r = c.execute("SELECT user_id, revoked, token_enc FROM api_keys WHERE id = ?", (key_id,)).fetchone()
+        if r is None or (user_id is not None and r["user_id"] != user_id):
+            raise AuthError("key not found")
+        if r["revoked"]:
+            raise AuthError("the key is revoked")
+        token = unseal(self._sealing_key(), r["token_enc"]) if r["token_enc"] else None
+        if token is None:
+            raise AuthError("this key was created before tokens could be shown again "
+                            "(or the sealing key changed); issue a new one")
+        return token
 
     def revoke_api_key(self, key_id: int, user_id: Optional[int] = None) -> None:
         sql, args = "UPDATE api_keys SET revoked = 1 WHERE id = ?", [key_id]
@@ -461,20 +485,68 @@ class AuthStore:
 
 # ── signed session cookies ──────────────────────────────────────────────
 
-def load_secret() -> bytes:
-    env = os.environ.get("QFZ_SECRET_KEY", "").strip()
-    if env:
-        return env.encode()
-    path = _state_dir() / "auth_secret"
+def _secret_file(path: Path) -> bytes:
+    """Read a secret, creating it (mode 0600) the first time."""
     try:
         return path.read_bytes().strip()
     except FileNotFoundError:
         path.parent.mkdir(parents=True, exist_ok=True)
         secret = secrets.token_urlsafe(48).encode()
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:            # another process won the race
+            return path.read_bytes().strip()
         with os.fdopen(fd, "wb") as f:
             f.write(secret)
         return secret
+
+
+def load_secret() -> bytes:
+    env = os.environ.get("QFZ_SECRET_KEY", "").strip()
+    if env:
+        return env.encode()
+    return _secret_file(_state_dir() / "auth_secret")
+
+
+# ── sealed tokens ───────────────────────────────────────────────────────
+# Encrypt-then-MAC with HMAC-SHA256 only: the keystream is HMAC(k_enc,
+# nonce || counter), the tag HMAC(k_mac, nonce || ciphertext).
+
+def _seal_keys(key: bytes) -> tuple[bytes, bytes]:
+    return (hmac.new(key, b"qfz-seal-enc", hashlib.sha256).digest(),
+            hmac.new(key, b"qfz-seal-mac", hashlib.sha256).digest())
+
+
+def _stream(k_enc: bytes, nonce: bytes, n: int) -> bytes:
+    out = b"".join(hmac.new(k_enc, nonce + i.to_bytes(4, "big"), hashlib.sha256).digest()
+                   for i in range((n + 31) // 32))
+    return out[:n]
+
+
+def seal(key: bytes, text: str) -> str:
+    k_enc, k_mac = _seal_keys(key)
+    nonce = secrets.token_bytes(16)
+    data = text.encode()
+    ct = bytes(a ^ b for a, b in zip(data, _stream(k_enc, nonce, len(data))))
+    tag = hmac.new(k_mac, nonce + ct, hashlib.sha256).digest()
+    return "v1." + _b64(nonce + ct + tag)
+
+
+def unseal(key: bytes, sealed: str) -> Optional[str]:
+    """The text, or None when ``sealed`` is malformed or was sealed with another key."""
+    if not sealed.startswith("v1."):
+        return None
+    try:
+        raw = _unb64(sealed[3:])
+    except (ValueError, TypeError):
+        return None
+    if len(raw) < 48:
+        return None
+    nonce, ct, tag = raw[:16], raw[16:-32], raw[-32:]
+    k_enc, k_mac = _seal_keys(key)
+    if not hmac.compare_digest(tag, hmac.new(k_mac, nonce + ct, hashlib.sha256).digest()):
+        return None
+    return bytes(a ^ b for a, b in zip(ct, _stream(k_enc, nonce, len(ct)))).decode()
 
 
 def _b64(b: bytes) -> str:

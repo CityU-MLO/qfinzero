@@ -58,7 +58,7 @@ QFZ_DATA_ROOT=./qfz-sample QFZ_ADMIN_PASSWORD='设置一个足够长的密码' q
 
 ## 3. 接入 agent
 
-1. 打开 **账户** 页创建一个 API 密钥，复制 `qfz_…` 令牌（只显示一次）。
+1. 打开 **账户** 页创建一个 API 密钥，复制 `qfz_…` 令牌（之后可以在列表里点 **显示** 再看）。
 2. 把任意 MCP 客户端指向 hub：
 
 ```json

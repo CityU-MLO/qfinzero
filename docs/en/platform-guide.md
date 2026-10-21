@@ -298,8 +298,12 @@ A key never exceeds its owner's role: a viewer cannot hold `trading`, and
 demoting the owner narrows every key they have. Presets cover the usual cases
 (*Data reader*: market data and events, read-only; *MCP agent*: MCP, data,
 events and trading; *Full access*: every scope the owner has, the behaviour of
-keys made before scopes existed). The token is shown once, with snippets for
-the environment, curl, Python and an MCP client configuration.
+keys made before scopes existed). The owner and admins can show and copy the
+token again at any time (**Show** in the key list, or `qfz-auth show-key <id>`),
+with snippets for the environment, curl, Python and an MCP client
+configuration. Each reveal is written to the audit log. The token is kept
+encrypted with `_state/api_key_seal`; keys created before this feature cannot
+be shown again and need to be reissued.
 
 The key list shows requests per day for the last 14 days (and how many were
 refused), when the key was last used, and who issued it. Scopes, read-only,
@@ -327,7 +331,8 @@ and `note`. A key can manage keys only with the `admin` scope.
 ```bash
 qfz-auth list
 qfz-auth create-user alice --role researcher
-qfz-auth create-key alice --name eval-runner      # prints the key once
+qfz-auth create-key alice --name eval-runner      # prints the token
+qfz-auth show-key 3                               # prints it again
 qfz-auth set-role alice viewer
 qfz-auth disable alice
 ```

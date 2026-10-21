@@ -17,7 +17,7 @@ curl http://localhost:19777/health   # 所有子服务都是 "up"
 
 ## 2. 拿一个 API key
 
-agent 和脚本用 key 签名请求。在 **账户** 页面创建，或者用命令行（token 只显示一次）：
+agent 和脚本用 key 签名请求。在 **账户** 页面创建，或者用命令行（之后可以用 `qfz-auth show-key <id>` 再次查看）：
 
 ```bash
 docker compose exec qfinzero qfz-auth create-key admin --name quickstart

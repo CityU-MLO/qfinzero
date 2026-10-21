@@ -22,7 +22,7 @@ Open <http://localhost:19777> and sign in as `admin`.
 ## 2. Get an API key
 
 Agents and scripts sign their requests with a key. Create one on the
-**Account** page, or from the command line (the token is printed once):
+**Account** page, or from the command line (`qfz-auth show-key <id>` prints it again later):
 
 ```bash
 docker compose exec qfinzero qfz-auth create-key admin --name quickstart

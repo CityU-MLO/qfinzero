@@ -88,7 +88,7 @@ export default function AccountPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> {t("API keys", "API 密钥")}</CardTitle>
-            <CardDescription>{t("For agents, scripts and MCP clients. A key never exceeds your role and can be narrowed to some services, read-only, an expiry date and a rate limit. The token is shown once.", "供 agent、脚本和 MCP 客户端使用。密钥权限不超过你的角色，并可限定服务范围、只读、到期日和速率。令牌只显示一次。")}</CardDescription>
+            <CardDescription>{t("For agents, scripts and MCP clients. A key never exceeds your role and can be narrowed to some services, read-only, an expiry date and a rate limit. You can show and copy a token again at any time.", "供 agent、脚本和 MCP 客户端使用。密钥权限不超过你的角色，并可限定服务范围、只读、到期日和速率。令牌可以随时显示和复制。")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {fresh && <FreshToken fresh={fresh} onDismiss={() => setFresh(null)} />}
