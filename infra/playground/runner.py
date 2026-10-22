@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 
 import agent as agent_mod
 import context as ctx
+import retry as retry_mod
 from store import Store, new_id, title_from
 
 TERMINAL = ("done", "interrupted", "error")
@@ -93,6 +94,11 @@ def _apply(record: dict, ev: dict, run_ids: dict[str, str]) -> Optional[dict]:
     steps = record["steps"]
     kind = ev["type"]
     if kind == "step_start":
+        last = steps[-1] if steps else None
+        if last is not None and last["ended_at"] is None and not last["tool_calls"]:
+            # the last attempt of this step failed and the model call starts again
+            last.update(text="", started_at=ev["t"])
+            return {"type": "step_start", "step": len(steps) - 1, "t": ev["t"], "restart": True}
         steps.append({"text": "", "tool_calls": [], "started_at": ev["t"], "ended_at": None})
         return {"type": "step_start", "step": len(steps) - 1, "t": ev["t"]}
     if not steps:
@@ -102,7 +108,12 @@ def _apply(record: dict, ev: dict, run_ids: dict[str, str]) -> Optional[dict]:
     if kind == "llm_chunk":
         step["text"] += ev["content"]
         return {"type": "llm_chunk", "step": si, "content": ev["content"]}
+    if kind == "retry":
+        step["retry"] = {k: ev.get(k) for k in ("attempt", "of", "delay_s", "error")}
+        return {"type": "retry", "step": si, "t": ev["t"], **step["retry"]}
     if kind == "step_end":
+        if "retry" in step:
+            step["retries"] = step.pop("retry")["attempt"]
         if ev.get("text") and len(ev["text"]) >= len(step["text"]):
             step["text"] = ev["text"]
         step["ended_at"] = ev["t"]
@@ -177,8 +188,11 @@ async def _run(store: Store, run: Run, thread: dict, llm_cfg: LLMConfig, as_of: 
         def leaves(exc, depth=0):
             if hasattr(exc, "exceptions") and depth < 10:
                 return [m for sub in exc.exceptions for m in leaves(sub, depth + 1)]
-            return [f"{type(exc).__name__}: {exc}"]
-        status, error = "error", " | ".join(leaves(e))
+            return [exc]
+        errs = leaves(e)
+        status, error = "error", " | ".join(f"{type(x).__name__}: {x}" for x in errs)
+        if any(retry_mod.transient(x) for x in errs):
+            error = f"The model provider is unavailable (tried {retry_mod.MAX_RETRIES + 1} times). {error}"
     except BaseException:  # noqa: BLE001 — a cancel wrapped in an exception group by the MCP task group
         status = "interrupted"
     finally:

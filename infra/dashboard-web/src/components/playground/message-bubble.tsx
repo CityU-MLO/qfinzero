@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Network, OctagonX, TriangleAlert } from "lucide-react";
+import { Check, Copy, Loader2, Network, OctagonX, TriangleAlert } from "lucide-react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
@@ -44,6 +44,13 @@ export function MessageBubble({ message, onInspect }: { message: ChatMessage; on
         <div key={i} className="flex flex-col gap-1.5">
           {s.text && <div className="min-w-0"><Streamdown>{s.text}</Streamdown></div>}
           {s.tool_calls.length > 0 && <ToolGroup calls={s.tool_calls} onInspect={onInspect} />}
+          {running && s.retry && !s.ended_at && (
+            <div className="flex items-center gap-1.5 text-[12px] text-warning" title={s.retry.error}>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {t(`The model provider is busy; retrying in ${s.retry.delay_s} s (${s.retry.attempt}/${s.retry.of}).`,
+                `模型服务繁忙，${s.retry.delay_s} 秒后重试（第 ${s.retry.attempt}/${s.retry.of} 次）。`)}
+            </div>
+          )}
         </div>
       ))}
       {running && empty && (

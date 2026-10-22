@@ -19,6 +19,10 @@ export interface Step {
   started_at?: number;
   ended_at?: number | null;
   usage?: { input_tokens?: number | null; output_tokens?: number | null } | null;
+  /** The model call failed for a moment and is waiting to start again. */
+  retry?: { attempt: number; of: number; delay_s: number; error?: string } | null;
+  /** Retries this step needed before it went through. */
+  retries?: number;
 }
 
 export interface ChatMessage {
@@ -141,8 +145,14 @@ export function applyEvent(m: ChatMessage, e: StreamEvent): ChatMessage {
     return steps[idx];
   };
   switch (e.type) {
-    case "step_start":
-      at(e.step).started_at = e.t as number;
+    case "step_start": {
+      const s = at(e.step);
+      s.started_at = e.t as number;
+      if (e.restart) s.text = "";
+      break;
+    }
+    case "retry":
+      at(e.step).retry = { attempt: e.attempt as number, of: e.of as number, delay_s: e.delay_s as number, error: e.error as string };
       break;
     case "llm_chunk":
       at(e.step).text += e.content as string;
@@ -151,6 +161,10 @@ export function applyEvent(m: ChatMessage, e: StreamEvent): ChatMessage {
       const s = at(e.step);
       s.text = (e.text as string) || s.text;
       s.ended_at = e.t as number;
+      if (s.retry) {
+        s.retries = s.retry.attempt;
+        s.retry = null;
+      }
       s.tool_calls = (e.tool_calls as ToolCall[]) ?? s.tool_calls;
       break;
     }
