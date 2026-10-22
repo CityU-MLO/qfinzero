@@ -221,9 +221,18 @@ async def compact_thread(request: Request, tid: str, body: CompactRequest):
 async def export_thread(request: Request, tid: str, tools: bool = True):
     t = _thread_or_404(request, tid)
     md = thread_markdown(t, store().messages(tid), tools=tools)
-    safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in (t.get("title") or tid))[:60].strip("-")
     return PlainTextResponse(md, media_type="text/markdown; charset=utf-8",
-                             headers={"content-disposition": f'attachment; filename="{safe or tid}.md"'})
+                             headers={"content-disposition": _attachment(t.get("title") or tid, tid)})
+
+
+def _attachment(title: str, fallback: str) -> str:
+    """Content-Disposition for ``<title>.md``. Headers are latin-1, so a title in
+    Chinese goes in ``filename*`` (UTF-8, RFC 6266), next to an ASCII ``filename``."""
+    from urllib.parse import quote
+    name = "-".join("".join(ch if ch.isalnum() or ch in "-_" else " " for ch in title).split())[:60].strip("-")
+    ascii_name = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "-" for ch in name)
+    ascii_name = "-".join(x for x in ascii_name.split("-") if x) or fallback
+    return f"attachment; filename=\"{ascii_name}.md\"; filename*=UTF-8''{quote((name or fallback) + '.md')}"
 
 
 # ── chat ─────────────────────────────────────────────────────────────────
