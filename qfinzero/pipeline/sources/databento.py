@@ -561,9 +561,10 @@ def _write_staging(con, select_sql: str, out: Path) -> tuple[int, list[str], lis
 
 
 def _arrow_table(cur):
-    """Result as a ``pyarrow.Table`` (DuckDB >= 1.4 returns a reader from ``arrow()``)."""
-    out = cur.arrow()
-    return out.read_all() if hasattr(out, "read_all") else out
+    """Result as a ``pyarrow.Table`` on every DuckDB: ``to_arrow_table`` (1.4+,
+    the only one left in 2.0, which removed ``arrow()``), else ``fetch_arrow_table``."""
+    to_table = getattr(cur, "to_arrow_table", None)
+    return to_table() if to_table is not None else cur.fetch_arrow_table()
 
 
 def _register_symbols(con, table: str, md) -> int:
