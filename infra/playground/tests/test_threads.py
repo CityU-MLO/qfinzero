@@ -113,6 +113,11 @@ def test_threads_are_private_and_exportable(app):
     md = app.get(f"/threads/{tid}/export", headers={"x-qfz-user": "alice"})
     assert md.headers["content-type"].startswith("text/markdown")
     assert 'filename="SPY-check.md"' in md.headers["content-disposition"]
+    app.patch(f"/threads/{tid}", json={"title": "分析 QQQ 跌幅 > 2.5%"}, headers={"x-qfz-user": "alice"})
+    cd = app.get(f"/threads/{tid}/export", headers={"x-qfz-user": "alice"}).headers["content-disposition"]
+    assert 'filename="QQQ-2-5.md"' in cd                            # ASCII fallback
+    assert "filename*=UTF-8''%E5%88%86%E6%9E%90-QQQ-%E8%B7%8C%E5%B9%85-2-5.md" in cd   # 分析-QQQ-跌幅-2-5.md
+    app.patch(f"/threads/{tid}", json={"title": "SPY check"}, headers={"x-qfz-user": "alice"})
     text = md.text
     assert text.startswith("# SPY check") and "## You" in text and "<code>upq_stock_daily</code>" in text
     assert "SPY closed at 500." in text

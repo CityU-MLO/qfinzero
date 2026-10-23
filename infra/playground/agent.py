@@ -10,12 +10,13 @@ import json
 import time
 
 import httpx
+from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import BaseMessage
-from langgraph.prebuilt import create_react_agent
 
 from mcp_tools import get_tools
 from providers import chat_model_kwargs, protocol
+from retry import RETRY_EVENT, ModelRetry
 
 
 def chunk_text(content: Any) -> str:
@@ -117,17 +118,21 @@ async def run_agent_stream(llm, messages: list[BaseMessage], as_of: str | None =
         {"type": "step_end", "t", "text", "tool_calls": [{id, name, args}], "usage"}
         {"type": "tool_start", "id", "tool", "input", "t"}
         {"type": "tool_end", "id", "tool", "output", "status", "t"}
+        {"type": "retry", "attempt", "of", "delay_s", "error", "t"}   the model call failed for a
+                                                        moment and starts again after delay_s
 
-    Errors propagate to the caller.
+    Errors propagate to the caller (transient model errors after the retries).
     """
     async with get_tools(as_of) as tools:
-        agent = create_react_agent(llm, tools)
+        agent = create_agent(llm, tools, middleware=[ModelRetry()])
         pending: dict[str, list[str]] = {}       # tool name -> ids of the step's calls, FIFO
         async for event in agent.astream_events({"messages": messages}, version="v2"):
             kind = event.get("event")
             data = event.get("data", {})
             if kind == "on_chat_model_start":
                 yield {"type": "step_start", "t": _ms()}
+            elif kind == "on_custom_event" and event.get("name") == RETRY_EVENT:
+                yield {"type": "retry", **data, "t": _ms()}
             elif kind == "on_chat_model_stream":
                 chunk = data.get("chunk")
                 text = chunk_text(getattr(chunk, "content", None)) if chunk else ""

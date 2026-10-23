@@ -3,6 +3,18 @@
 All notable changes to QFinZero. Dates are release dates; versions follow
 [Semantic Versioning](https://semver.org/) once 1.0 is reached.
 
+## 1.0.2 (2026-10-23)
+
+Fixes:
+
+- Chat: a model call that fails for a moment (provider overloaded, rate
+  limited, 5xx, dropped connection) is retried up to 4 times, honouring the
+  provider's retry-after; the chat shows the wait. Gateways send "overloaded"
+  inside a 200 stream, where the SDK's own retries never saw it, so the whole
+  turn used to fail. `PLAYGROUND_MODEL_RETRIES`, `PLAYGROUND_MODEL_RETRY_MAX_S`.
+- Chat: exporting a thread with a non-ASCII (e.g. Chinese) title returned 500;
+  the download name is now sent as an ASCII fallback plus `filename*=UTF-8''`.
+
 ## 1.0.1 (2026-10-21)
 
 Fixes:
